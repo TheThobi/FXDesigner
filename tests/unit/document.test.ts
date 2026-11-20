@@ -9,6 +9,7 @@ import {
   parseDocument,
 } from '../../src/app/document';
 import type { EditorState } from '../../src/app/state';
+import { DEFAULT_RAMP } from '../../src/engine/post/schema';
 import { getGenerator } from '../../src/generators/registry';
 
 const state: EditorState = {
@@ -27,6 +28,9 @@ const state: EditorState = {
   post: {},
   resolution: 1024,
   seed: 42,
+  ramp: DEFAULT_RAMP,
+  postScope: 'local',
+  sharedPost: {},
 };
 
 describe('document round trip', () => {
@@ -95,5 +99,41 @@ describe('parseDocument validation', () => {
 
   it('rejects corrupted share links', () => {
     expect(() => decodeDocumentFromUrl('%%%')).toThrow(DocumentError);
+  });
+});
+
+describe('v1 -> v2 migration', () => {
+  it('turns legacy post values into enabled modules and keeps the ramp as override', () => {
+    const v1 = {
+      format: DOCUMENT_FORMAT,
+      version: 1,
+      generator: 'flame',
+      params: {},
+      post: {
+        posterize: 4,
+        outline: 0,
+        pixelate: 32,
+        contrast: 1.5,
+        strokes: 0.4,
+        gradient: {
+          stops: [
+            { pos: 0, color: '#000000', alpha: 1 },
+            { pos: 1, color: '#ff0000', alpha: 1 },
+          ],
+        },
+      },
+      resolution: 512,
+      seed: 1,
+    };
+    const doc = parseDocument(v1, getGenerator);
+    expect(doc.version).toBe(2);
+    expect(doc.post.posterizeOn).toBe(true);
+    expect(doc.post.posterize).toBe(4);
+    expect(doc.post.outlineOn).toBe(false);
+    expect(doc.post.pixelateOn).toBe(true);
+    expect(doc.post.levelsOn).toBe(true);
+    expect(doc.post.overrideRamp).toBe(true);
+    expect('strokes' in doc.post).toBe(false);
+    expect(doc.ramp).toEqual(DEFAULT_RAMP);
   });
 });

@@ -18,5 +18,16 @@ export const caustics: ShaderGenerator = {
     param.float('sharpness', 'Sharpness', 8, 1, 16),
     param.speed(0.5, 3),
   ],
-  defaultPost: { gradient: GRADIENTS.ocean },
+
+  presets: [
+    {
+      name: 'Toon caustics',
+      values: { sharpness: 4 },
+      post: { posterize: 3, gradient: GRADIENTS.azure },
+    },
+    { name: 'Pool floor', values: { scale: 2, iterations: 6, intensity: 0.006, sharpness: 10 } },
+    { name: 'Soft light', values: { scale: 1, iterations: 4, intensity: 0.01, sharpness: 3 } },
+    { name: 'Fine net', values: { scale: 4, iterations: 8, intensity: 0.004, sharpness: 14 } },
+  ],
+  featuredPreset: 'Pool floor',
 };

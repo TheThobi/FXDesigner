@@ -21,5 +21,30 @@ export const flame: ShaderGenerator = {
     param.float('turbulence', 'Turbulence', 0.6, 0, 2, { group: 'Noise' }),
     param.speed(1, 4),
   ],
-  defaultPost: { gradient: GRADIENTS.fire, alphaMode: 1 },
+  defaultPost: { alphaMode: 1 },
+  presets: [
+    {
+      name: 'Toon flame',
+      values: { turbulence: 0.8, octaves: 3, intensity: 0.9 },
+      post: { posterize: 4, gradient: GRADIENTS.saffron, outline: 0 },
+    },
+    {
+      name: 'Inked toon flame',
+      values: { turbulence: 0.7, octaves: 3, intensity: 0.9 },
+      post: { posterize: 4, gradient: GRADIENTS.saffron, outline: 1, outlineWidth: 2 },
+    },
+    {
+      name: 'Torch',
+      values: { width: 0.35, height: 1, taper: 1.4, intensity: 1.5, turbulence: 0.4, speed: 1.4 },
+    },
+    {
+      name: 'Wall of fire',
+      values: { width: 1.4, height: 0.8, taper: 0.3, turbulence: 1, scale: 7 },
+    },
+    {
+      name: 'Spirit flame',
+      values: { width: 0.5, height: 1.2, taper: 2.2, intensity: 0.9, turbulence: 1.6, speed: 0.6 },
+    },
+  ],
+  featuredPreset: 'Torch',
 };

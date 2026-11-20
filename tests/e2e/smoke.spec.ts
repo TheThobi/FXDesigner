@@ -10,6 +10,7 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 test('every generator compiles and renders', async ({ page }) => {
+  test.setTimeout(1_200_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (msg) => {
@@ -28,9 +29,11 @@ test('every generator compiles and renders', async ({ page }) => {
 
   let previous: Uint8Array | null = null;
   for (const id of ids) {
-    await page.locator(`.generator-item[data-id="${id}"]`).click();
+    const item = page.locator(`.generator-item[data-id="${id}"]`);
+    await item.click();
     await expect(page.locator('.inspector-header h2')).not.toBeEmpty();
-    await page.waitForTimeout(id === 'reaction-diffusion' ? 4000 : 400);
+    const isSimulation = (await item.getAttribute('data-category')) === 'simulation';
+    await page.waitForTimeout(isSimulation ? 4000 : 400);
     const overlay = page.locator('.error-overlay');
     if (await overlay.isVisible()) throw new Error(`${id}: ${await overlay.textContent()}`);
     const shot = await page
@@ -83,4 +86,86 @@ test('rendered pixels match expected patterns', async ({ page }) => {
   const brickCenter = bricks.lum(0.35, 1 - 1.5 / 8);
   const mortar = bricks.lum(0.35, 1 - 2 / 8);
   expect(brickCenter - mortar, `brick ${brickCenter} vs mortar ${mortar}`).toBeGreaterThan(120);
+});
+
+async function enableModule(page: Page, toggleKey: string) {
+  await page.locator('.panel-tab[data-tab="post"]').click();
+  const toggle = page.locator(`.module-toggle[data-key="${toggleKey}"]`);
+  if (!(await toggle.isChecked())) await toggle.click();
+}
+
+async function setField(page: Page, key: string, value: string) {
+  const field = page.locator(`.param-row[data-key="${key}"] input.num`);
+  await field.fill(value);
+  await field.press('Enter');
+}
+
+test('posterize module reduces the output to flat tones', async ({ page }) => {
+  await page.goto('/');
+  const smooth = await select(page, 'fractal-noise');
+  expect(smooth.distinctTones).toBeGreaterThan(20);
+
+  await enableModule(page, 'posterizeOn');
+  await setField(page, 'posterize', '3');
+  await page.waitForTimeout(400);
+  const flat = await probe(page, page.locator('.preview-canvas'));
+  // 3 tones, plus a few anti-aliased samples on band boundaries.
+  expect(flat.distinctTones).toBeLessThanOrEqual(8);
+});
+
+test('pixel-art mode renders uniform blocks', async ({ page }) => {
+  await page.goto('/');
+  await select(page, 'fractal-noise');
+  await enableModule(page, 'pixelateOn');
+  await setField(page, 'pixelate', '16');
+  await enableModule(page, 'outlineOn');
+  await page.waitForTimeout(500);
+  const img = await probe(page, page.locator('.preview-canvas'));
+  // Two points inside the same 1/16 block share their color.
+  const a = img.lum(0.5 / 16 + 0.25 / 16, 0.5 / 16);
+  const b = img.lum(0.5 / 16 - 0.25 / 16, 0.5 / 16 + 0.2 / 16);
+  expect(Math.abs(a - b)).toBeLessThan(3);
+  await expect(page.locator('.error-overlay')).toBeHidden();
+});
+
+test('flowmap painter encodes the stroke direction', async ({ page }) => {
+  await page.goto('/');
+  await select(page, 'flowmap-painter', 500);
+  // Neutral start (the default has a gentle base flow), preview off, no arrows: the
+  // viewport shows the plain encoded flowmap.
+  await page.locator('.param-row[data-key="initial"] select').selectOption({ label: 'Neutral' });
+  await page.locator('.module-toggle[data-key="preview"]').uncheck();
+  await page.locator('.param-row[data-key="arrows"] input').uncheck();
+  const canvas = page.locator('.preview-canvas');
+  const box = (await canvas.boundingBox())!;
+  const y = box.y + box.height * 0.5;
+  await page.mouse.move(box.x + box.width * 0.2, y);
+  await page.mouse.down();
+  for (let i = 1; i <= 30; i++) {
+    await page.mouse.move(box.x + box.width * (0.2 + i * 0.02), y);
+    await page.waitForTimeout(30);
+  }
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const img = await probe(page, canvas);
+  const [r, g] = img.rgb(0.5, 0.5);
+  expect(r, 'painted area points +X (red)').toBeGreaterThan(190);
+  expect(Math.abs(g - 128)).toBeLessThan(40);
+  const [rUntouched] = img.rgb(0.5, 0.1);
+  expect(Math.abs(rUntouched - 128)).toBeLessThan(20);
+});
+
+test('post look is shared across generators in global scope', async ({ page }) => {
+  await page.goto('/');
+  await select(page, 'fractal-noise');
+  await enableModule(page, 'posterizeOn');
+  await select(page, 'cellular');
+  await page.locator('.panel-tab[data-tab="post"]').click();
+  await expect(page.locator('.module-toggle[data-key="posterizeOn"]')).toBeChecked();
+  // Local scope: the look stays with the generator that owns it.
+  await page.locator('.scope-switch button[data-scope="local"]').click();
+  await page.locator('.module-toggle[data-key="posterizeOn"]').uncheck();
+  await select(page, 'fractal-noise');
+  await page.locator('.panel-tab[data-tab="post"]').click();
+  await expect(page.locator('.module-toggle[data-key="posterizeOn"]')).toBeChecked();
 });

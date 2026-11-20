@@ -24,6 +24,8 @@ export interface FloatParam extends ParamBase {
   readonly max: number;
   readonly step?: number;
   readonly default: number;
+  /** Suffix shown in the field (e.g. "°", "px"). */
+  readonly unit?: string;
 }
 
 export interface IntParam extends ParamBase {
@@ -31,11 +33,17 @@ export interface IntParam extends ParamBase {
   readonly min: number;
   readonly max: number;
   readonly default: number;
+  readonly unit?: string;
 }
 
 export interface BoolParam extends ParamBase {
   readonly type: 'bool';
   readonly default: boolean;
+  /**
+   * Module switch: rendered as the checkbox in its group's header; when off, the rest of the
+   * group is collapsed and greyed out.
+   */
+  readonly toggle?: boolean;
 }
 
 /** `#rrggbb`, exposed to GLSL as `vec3`. */
@@ -89,8 +97,20 @@ export type ParamDef =
 
 export type ParamType = ParamDef['type'];
 
-/** A named set of parameter overrides (partial values). */
+/** UI metadata for a parameter group ("module"). */
+export interface ParamGroupInfo {
+  readonly name: string;
+  readonly description?: string;
+  /** Icon name (see ui/icons) shown in the module header and chip. */
+  readonly icon?: string;
+  /** One-line state shown in the module header (e.g. "SSAA 2×2"). */
+  readonly summary?: (values: ParamValues) => string;
+}
+
+/** A named set of parameter overrides (partial values), optionally with post overrides. */
 export interface Preset {
   readonly name: string;
   readonly values: ParamValues;
+  /** Overrides of the shared post-processing (e.g. posterize for a toon look). */
+  readonly post?: ParamValues;
 }

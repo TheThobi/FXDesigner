@@ -1,6 +1,5 @@
 import type { ShaderGenerator } from '../../engine/generator';
 import { param } from '../../params/define';
-import { GRADIENTS } from '../../params/gradientPresets';
 import fragment from './glow.glsl?raw';
 
 export const glow: ShaderGenerator = {
@@ -20,5 +19,11 @@ export const glow: ShaderGenerator = {
     param.float('distortion', 'Distortion', 0, 0, 1, { group: 'Animation' }),
     param.speed(0.5),
   ],
-  defaultPost: { alphaMode: 1, gradient: GRADIENTS.whiteFade, colorMode: 0 },
+  defaultPost: { alphaMode: 1 },
+  presets: [
+    { name: 'Hot core', values: { radius: 0.6, falloff: 4, intensity: 1.6, core: 0.25 } },
+    { name: 'Soft halo', values: { radius: 1.3, falloff: 1.2, intensity: 0.8, core: 0 } },
+    { name: 'Unstable orb', values: { radius: 0.8, falloff: 2, distortion: 0.7, speed: 2 } },
+  ],
+  featuredPreset: 'Unstable orb',
 };

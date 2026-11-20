@@ -1,6 +1,5 @@
 import type { ShaderGenerator } from '../../engine/generator';
 import { param } from '../../params/define';
-import { GRADIENTS } from '../../params/gradientPresets';
 import fragment from './magic-circle.glsl?raw';
 
 export const magicCircle: ShaderGenerator = {
@@ -20,5 +19,17 @@ export const magicCircle: ShaderGenerator = {
     param.float('glow', 'Glow', 0.2, 0, 1),
     param.speed(0.2, 2),
   ],
-  defaultPost: { alphaMode: 1, gradient: GRADIENTS.magic },
+  defaultPost: { alphaMode: 1 },
+  presets: [
+    { name: 'Summoning', values: { sides: 5, pointiness: 0.8, ticks: 120, glow: 0.4 } },
+    {
+      name: 'Hex seal',
+      values: { sides: 6, pointiness: 0, ticks: 36, innerRadius: 0.45, lineWidth: 0.02 },
+    },
+    {
+      name: 'Delicate',
+      values: { sides: 8, pointiness: 0.9, ticks: 180, lineWidth: 0.005, glow: 0.1 },
+    },
+  ],
+  featuredPreset: 'Summoning',
 };

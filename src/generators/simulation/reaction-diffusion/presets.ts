@@ -1,4 +1,4 @@
-import type { Preset } from '../../params/types';
+import type { Preset } from '../../../params/types';
 
 /**
  * Feed/kill pairs for classic Gray-Scott regimes (Pearson classification, values as used by

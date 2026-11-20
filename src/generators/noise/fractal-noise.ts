@@ -1,5 +1,6 @@
 import type { ShaderGenerator } from '../../engine/generator';
 import { param } from '../../params/define';
+import { GRADIENTS } from '../../params/gradientPresets';
 import fragment from './fractal-noise.glsl?raw';
 
 export const fractalNoise: ShaderGenerator = {
@@ -7,11 +8,21 @@ export const fractalNoise: ShaderGenerator = {
   id: 'fractal-noise',
   name: 'Fractal Noise',
   category: 'noise',
-  description: 'Perlin-style gradient noise summed over octaves (fBm, turbulence, ridged).',
+  description:
+    'Octave sums (fBm, turbulence, ridged) of Perlin, value, simplex, Worley or Perlin-Worley noise.',
   animated: true,
   fragment,
   params: [
-    param.select('noiseType', 'Type', ['fBm', 'Turbulence', 'Ridged']),
+    param.select('noiseType', 'Fractal', ['fBm', 'Turbulence', 'Ridged']),
+    param.select(
+      'basis',
+      'Basis',
+      ['Perlin', 'Value', 'Simplex (not seamless)', 'Worley', 'Perlin-Worley'],
+      0,
+      {
+        description: 'Noise summed at each octave.',
+      },
+    ),
     param.float('scale', 'Scale', 4, 1, 32),
     param.int('octaves', 'Octaves', 5, 1, 10),
     param.float('lacunarity', 'Lacunarity', 2, 1.5, 4, {
@@ -26,8 +37,19 @@ export const fractalNoise: ShaderGenerator = {
     param.speed(0),
   ],
   presets: [
+    {
+      name: 'Dithered clouds',
+      values: { noiseType: 0, octaves: 6 },
+      post: { posterize: 4, dither: true, pixelate: 128, gradient: GRADIENTS.glacier },
+    },
+
     { name: 'Clouds', values: { noiseType: 0, scale: 3, octaves: 7, gain: 0.5 } },
     { name: 'Marble veins', values: { noiseType: 1, scale: 2, octaves: 6, gain: 0.55 } },
     { name: 'Mountains', values: { noiseType: 2, scale: 3, octaves: 8, gain: 0.5 } },
+    { name: 'Billow clouds', values: { noiseType: 1, basis: 0, scale: 3, octaves: 6, gain: 0.55 } },
+    { name: 'Rocky ridges', values: { noiseType: 2, basis: 4, scale: 5, octaves: 7, gain: 0.55 } },
+    { name: 'Cell bubbles', values: { noiseType: 0, basis: 3, scale: 6, octaves: 3, gain: 0.4 } },
+    { name: 'Soft value', values: { basis: 1, scale: 8, octaves: 4 } },
   ],
+  featuredPreset: 'Rocky ridges',
 };

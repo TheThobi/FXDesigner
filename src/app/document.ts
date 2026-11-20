@@ -4,16 +4,26 @@
  * `migrate()` so older files and links keep working.
  */
 import type { GeneratorDefinition } from '../engine/generator';
-import { POST_PARAMS } from '../engine/post/schema';
+import { upgradeLegacyPost } from '../engine/post/legacy';
+import { DEFAULT_RAMP, POST_PARAMS } from '../engine/post/schema';
+import { sanitizeGradient, type GradientValue } from '../params/gradient';
 import type { ParamValues } from '../params/types';
 import { sanitizeValues } from '../params/values';
 import { decodeBase64Url, encodeBase64Url } from '../util/base64';
 import { MAX_SEED } from '../util/random';
 import { clamp } from '../util/math';
-import { nearestResolution, paramsOf, postDefaults, postOf, type EditorState } from './state';
+import {
+  nearestResolution,
+  paramsOf,
+  pickScoped,
+  postDefaults,
+  postOf,
+  type EditorState,
+  type PostScope,
+} from './state';
 
 export const DOCUMENT_FORMAT = 'procedural-texture-maker';
-export const DOCUMENT_VERSION = 1;
+export const DOCUMENT_VERSION = 2;
 
 export interface TextureDocument {
   readonly format: typeof DOCUMENT_FORMAT;
@@ -23,6 +33,10 @@ export interface TextureDocument {
   readonly post: ParamValues;
   readonly resolution: number;
   readonly seed: number;
+  /** Shared color ramp (v2+). */
+  readonly ramp: GradientValue;
+  /** Post Process scope (optional in v2 files; missing = global). `post` is always complete. */
+  readonly postScope: PostScope;
 }
 
 export class DocumentError extends Error {
@@ -41,10 +55,13 @@ export function documentFromState(state: EditorState, lookup: GeneratorLookup): 
     format: DOCUMENT_FORMAT,
     version: DOCUMENT_VERSION,
     generator: def.id,
-    params: paramsOf(state, def),
-    post: postOf(state, def),
+    // Re-validated so values saved before a schema change (new param) are completed.
+    params: sanitizeValues(def.params, paramsOf(state, def)),
+    post: sanitizeValues(POST_PARAMS, postOf(state, def), postDefaults(def)),
     resolution: state.resolution,
     seed: state.seed,
+    ramp: state.ramp,
+    postScope: state.postScope,
   };
 }
 
@@ -56,6 +73,10 @@ export function applyDocument(state: EditorState, doc: TextureDocument): EditorS
     post: { ...state.post, [doc.generator]: doc.post },
     resolution: doc.resolution,
     seed: doc.seed,
+    ramp: doc.ramp,
+    postScope: doc.postScope,
+    // The document's look becomes the shared one (global) or stays with its generator.
+    sharedPost: doc.postScope === 'global' ? pickScoped(doc.post) : state.sharedPost,
   };
 }
 
@@ -66,8 +87,20 @@ function migrate(raw: Record<string, unknown>): Record<string, unknown> {
   if (typeof version !== 'number' || version > DOCUMENT_VERSION) {
     throw new DocumentError(`Unsupported document version: ${String(version)}`);
   }
-  // Future: `if (version === 1) raw = migrateV1toV2(raw);` …
-  return raw;
+  let data = raw;
+  if (data.version === 1) data = migrateV1toV2(data);
+  // Future: `if (data.version === 2) data = migrateV2toV3(data);` …
+  return data;
+}
+
+/**
+ * v1 -> v2: post-processing became on/off modules and the color ramp became shared.
+ * A v1 per-generator gradient is kept as a ramp override so the look is preserved.
+ */
+function migrateV1toV2(raw: Record<string, unknown>): Record<string, unknown> {
+  const post =
+    typeof raw.post === 'object' && raw.post !== null ? (raw.post as Record<string, unknown>) : {};
+  return { ...raw, version: 2, post: upgradeLegacyPost(post) };
 }
 
 /** Validates untrusted input (file, URL, storage) into a complete, safe document. */
@@ -93,6 +126,8 @@ export function parseDocument(raw: unknown, lookup: GeneratorLookup): TextureDoc
     post: sanitizeValues(POST_PARAMS, data.post, postDefaults(def)),
     resolution,
     seed: clamp(seed, 0, MAX_SEED),
+    ramp: sanitizeGradient(data.ramp) ?? DEFAULT_RAMP,
+    postScope: data.postScope === 'local' ? 'local' : 'global',
   };
 }
 

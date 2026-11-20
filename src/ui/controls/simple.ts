@@ -12,7 +12,7 @@ import { numberControl } from './number';
 import type { ChangeHandler, Control } from './types';
 
 export function boolControl(def: BoolParam, initial: ParamValue, onChange: ChangeHandler): Control {
-  const input = h('input', { type: 'checkbox', class: 'toggle', 'aria-label': def.label });
+  const input = h('input', { type: 'checkbox', class: 'checkbox', 'aria-label': def.label });
   input.checked = initial === true;
   input.addEventListener('change', () => onChange(input.checked));
   return {
@@ -101,9 +101,9 @@ export function vec2Control(def: Vec2Param, initial: ParamValue, onChange: Chang
     element: h(
       'div',
       { class: 'control-vec2' },
-      h('span', { class: 'axis', text: 'X' }),
+      h('span', { class: 'axis axis-x', text: 'X' }),
       x.element,
-      h('span', { class: 'axis', text: 'Y' }),
+      h('span', { class: 'axis axis-y', text: 'Y' }),
       y.element,
     ),
     setValue: (v) => {

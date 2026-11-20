@@ -1,5 +1,5 @@
-import { defaultValues } from '../params/values';
 import type { ParamValues } from '../params/types';
+import { defaultValues, getNumber } from '../params/values';
 import type {
   GeneratorDefinition,
   ShaderGenerator,
@@ -10,7 +10,12 @@ import { GpuContext } from './gl/GpuContext';
 import { GradientTextureCache } from './gl/GradientTexture';
 import type { RenderTarget } from './gl/RenderTarget';
 import type { ShaderProgram } from './gl/ShaderProgram';
+import commonChunk from './glsl/common.glsl?raw';
+import noiseChunk from './glsl/noise.glsl?raw';
 import postFragment from './post/post.frag?raw';
+import slopeBlurFragment from './post/slope-blur.frag?raw';
+import slopeFragment from './post/slope.frag?raw';
+import kuwaharaFragment from './post/kuwahara.frag?raw';
 import { POST_PARAMS } from './post/schema';
 import {
   buildGeneratorShader,
@@ -47,24 +52,95 @@ export interface Capture {
 }
 
 const POST_DEFAULTS = defaultValues(POST_PARAMS);
+/** Supersampled source targets never exceed this size (memory / time guard). */
+const MAX_SOURCE_SIZE = 8192;
+const REF_SIZE = 512;
+
+/** Intermediate targets of the pipeline (source, optional slope-blur maps). */
+class PipelineTargets {
+  private source: RenderTarget | null = null;
+  private slope: RenderTarget | null = null;
+  private blurred: RenderTarget | null = null;
+  private painted: RenderTarget | null = null;
+
+  constructor(private readonly gpu: GpuContext) {}
+
+  sourceTarget(size: number): RenderTarget {
+    this.source = this.ensure(this.source, size);
+    return this.source;
+  }
+
+  slopeTarget(size: number): RenderTarget {
+    this.slope = this.ensure(this.slope, size);
+    return this.slope;
+  }
+
+  blurredTarget(size: number): RenderTarget {
+    this.blurred = this.ensure(this.blurred, size);
+    return this.blurred;
+  }
+
+  paintedTarget(size: number): RenderTarget {
+    this.painted = this.ensure(this.painted, size);
+    return this.painted;
+  }
+
+  dispose(): void {
+    this.painted?.dispose();
+    this.source?.dispose();
+    this.slope?.dispose();
+    this.blurred?.dispose();
+  }
+
+  private ensure(target: RenderTarget | null, size: number): RenderTarget {
+    if (target) {
+      target.resize(size, size);
+      return target;
+    }
+    return this.gpu.createTarget({
+      width: size,
+      height: size,
+      format: this.gpu.imageFormat,
+      filter: 'linear',
+      wrap: 'repeat',
+    });
+  }
+}
 
 /**
- * Runs the two-stage pipeline:  generator -> source target -> post pass -> canvas/capture.
- * Owns GPU resources (program cache, gradient textures, the live simulation instance).
+ * Runs the pipeline:  generator -> source -> [slope map -> slope blur] -> post -> canvas/capture.
+ * The source is rendered N times larger when supersampling is enabled. Owns GPU resources
+ * (program cache, gradient textures, the live simulation instance).
  */
 export class Renderer {
   readonly gpu: GpuContext;
   private readonly programs = new Map<string, ShaderProgram>();
   private readonly gradients: GradientTextureCache;
   private readonly postProgram: ShaderProgram;
-  private previewSource: RenderTarget | null = null;
+  private readonly slopeProgram: ShaderProgram;
+  private readonly slopeBlurProgram: ShaderProgram;
+  private readonly kuwaharaProgram: ShaderProgram;
+  private readonly preview: PipelineTargets;
   private live: { id: string; sim: Simulation } | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.gpu = new GpuContext(canvas);
     this.gradients = new GradientTextureCache(this.gpu.gl);
-    const postSource = `${SHADER_HEADER}\n${uniformDeclarations(POST_PARAMS)}\n${postFragment}`;
-    this.postProgram = this.gpu.createProgram(postSource, 'post');
+    this.preview = new PipelineTargets(this.gpu);
+    // Post passes share the post parameter uniforms and the common/noise chunks.
+    const postPass = (fragment: string) =>
+      [
+        SHADER_HEADER,
+        'uniform float u_seed;',
+        uniformDeclarations(POST_PARAMS),
+        commonChunk,
+        noiseChunk,
+        fragment,
+      ].join('\n');
+    this.postProgram = this.gpu.createProgram(postPass(postFragment), 'post');
+    this.slopeProgram = this.gpu.createProgram(postPass(slopeFragment), 'post/slope');
+    this.slopeBlurProgram = this.gpu.createProgram(postPass(slopeBlurFragment), 'post/slope-blur');
+    this.kuwaharaProgram = this.gpu.createProgram(postPass(kuwaharaFragment), 'post/kuwahara');
   }
 
   /** Compiles (once) the program of a shader generator. Throws ShaderCompileError. */
@@ -97,46 +173,28 @@ export class Renderer {
 
   /** Renders the request to the canvas, for display. */
   present(req: FrameRequest, opts: PresentOptions): void {
-    const { gpu } = this;
-    const canvas = gpu.canvas;
+    const canvas = this.gpu.canvas;
     if (canvas.width !== opts.size || canvas.height !== opts.size) {
       canvas.width = opts.size;
       canvas.height = opts.size;
     }
-    if (!this.previewSource) {
-      this.previewSource = gpu.createTarget({
-        width: opts.size,
-        height: opts.size,
-        format: gpu.imageFormat,
-        filter: 'linear',
-        wrap: 'repeat',
-      });
-    } else {
-      this.previewSource.resize(opts.size, opts.size);
-    }
-    this.renderSource(req, this.previewSource);
-    this.renderPost(req.post, this.previewSource, null, opts.viewTiles, true);
+    const input = this.renderInput(req, this.preview, opts.size);
+    this.renderPost(req, input, null, opts.size, opts.viewTiles, true);
   }
 
   createCapture(width: number, height: number): Capture {
     const { gpu } = this;
     const max = gpu.caps.maxTextureSize;
     if (width > max || height > max) throw new Error(`Size exceeds GPU limit (${max}px)`);
-    const source = gpu.createTarget({
-      width,
-      height,
-      format: gpu.imageFormat,
-      filter: 'linear',
-      wrap: 'repeat',
-    });
+    const targets = new PipelineTargets(gpu);
     const output = gpu.createTarget({ width, height, format: 'rgba8' });
     const rowBytes = width * 4;
     return {
       width,
       height,
       render: (req) => {
-        this.renderSource(req, source);
-        this.renderPost(req.post, source, output, 1, false);
+        const input = this.renderInput(req, targets, width);
+        this.renderPost(req, input, output, width, 1, false);
         const raw = gpu.readPixels(output);
         // GL rows are bottom-up; images are top-down.
         const flipped = new Uint8ClampedArray(raw.length);
@@ -146,10 +204,76 @@ export class Renderer {
         return flipped;
       },
       dispose: () => {
-        source.dispose();
+        targets.dispose();
         output.dispose();
       },
     };
+  }
+
+  /** Supersampling factor per axis for this request (pixelation disables it). */
+  private supersample(post: ParamValues): number {
+    const values = { ...POST_DEFAULTS, ...post };
+    if (values.pixelateOn === true || values.antialiasOn !== true) return 1;
+    return getNumber(values, 'antialias') + 1;
+  }
+
+  /** Renders the source (and the slope blur if enabled); returns the post input. */
+  private renderInput(
+    req: FrameRequest,
+    targets: PipelineTargets,
+    outputSize: number,
+  ): RenderTarget {
+    const limit = Math.min(this.gpu.caps.maxTextureSize, MAX_SOURCE_SIZE);
+    const sourceSize = Math.min(outputSize * this.supersample(req.post), limit);
+    const source = targets.sourceTarget(sourceSize);
+    this.renderSource(req, source);
+
+    const values = { ...POST_DEFAULTS, ...req.post };
+    let input = source;
+    if (values.slopeBlurOn === true) input = this.slopeBlur(req, values, source, targets);
+    if (values.kuwaharaOn === true) {
+      const painted = targets.paintedTarget(sourceSize);
+      this.kuwaharaProgram
+        .use()
+        .setAll(paramUniforms(POST_PARAMS, values))
+        .set('u_radius', getNumber(values, 'kuwaharaRadius') / REF_SIZE)
+        .texture('u_source', input.texture, 0);
+      this.gpu.bindTarget(painted);
+      this.gpu.drawFullscreen();
+      input = painted;
+    }
+    return input;
+  }
+
+  private slopeBlur(
+    req: FrameRequest,
+    values: ParamValues,
+    source: RenderTarget,
+    targets: PipelineTargets,
+  ): RenderTarget {
+    const sourceSize = source.width;
+    const uniforms = paramUniforms(POST_PARAMS, values);
+
+    const slope = targets.slopeTarget(sourceSize);
+    this.slopeProgram
+      .use()
+      .setAll(uniforms)
+      .set('u_seed', req.seed)
+      .texture('u_source', source.texture, 0);
+    this.gpu.bindTarget(slope);
+    this.gpu.drawFullscreen();
+
+    const blurred = targets.blurredTarget(sourceSize);
+    this.slopeBlurProgram
+      .use()
+      .setAll(uniforms)
+      .set('u_texel', 1.5 / REF_SIZE)
+      .set('u_distance', getNumber(values, 'slopeIntensity') / REF_SIZE)
+      .texture('u_source', source.texture, 0)
+      .texture('u_slope', slope.texture, 1);
+    this.gpu.bindTarget(blurred);
+    this.gpu.drawFullscreen();
+    return blurred;
   }
 
   private renderSource(req: FrameRequest, target: RenderTarget): void {
@@ -161,9 +285,15 @@ export class Renderer {
       return;
     }
     const program = this.programFor(generator).use();
+    const post = { ...POST_DEFAULTS, ...req.post };
     program
       .set('u_resolution', [target.width, target.height])
-      .set('u_time', req.time)
+      .set('u_clock', req.time)
+      .set('u_loop', [
+        post.seamlessLoop === true ? 1 : 0,
+        getNumber(post, 'loopDuration'),
+        getNumber(post, 'loopBlend'),
+      ])
       .set('u_seed', req.seed)
       .setAll(paramUniforms(generator.params, req.params));
     let unit = 0;
@@ -179,20 +309,22 @@ export class Renderer {
   }
 
   private renderPost(
-    post: ParamValues,
-    source: RenderTarget,
+    req: FrameRequest,
+    input: RenderTarget,
     target: RenderTarget | null,
+    outputSize: number,
     viewTiles: number,
     premultiply: boolean,
   ): void {
-    const values = { ...POST_DEFAULTS, ...post };
+    const values = { ...POST_DEFAULTS, ...req.post };
     const program = this.postProgram.use();
     program
       .setAll(paramUniforms(POST_PARAMS, values))
-      .set('u_texel', [1 / source.width, 1 / source.height])
+      .set('u_seed', req.seed)
+      .set('u_pixelSize', [viewTiles / outputSize, viewTiles / outputSize])
       .set('u_viewTiles', viewTiles)
       .set('u_premultiply', premultiply)
-      .texture('u_source', source.texture, 0);
+      .texture('u_source', input.texture, 0);
     let unit = 1;
     for (const { def, value } of gradientParams(POST_PARAMS, values)) {
       program.texture(uniformName(def.key), this.gradients.get(`post:${def.key}`, value), unit++);
@@ -206,7 +338,10 @@ export class Renderer {
     for (const p of this.programs.values()) p.dispose();
     this.programs.clear();
     this.postProgram.dispose();
-    this.previewSource?.dispose();
+    this.slopeProgram.dispose();
+    this.slopeBlurProgram.dispose();
+    this.kuwaharaProgram.dispose();
+    this.preview.dispose();
     this.gradients.dispose();
     this.gpu.dispose();
   }

@@ -19,4 +19,16 @@ export const bricks: ShaderGenerator = {
     param.float('variation', 'Color variation', 0.3, 0, 1),
     param.float('noise', 'Surface noise', 0.3, 0, 1),
   ],
+  presets: [
+    { name: 'Old wall', values: { columns: 4, rows: 8, bevel: 0.5, variation: 0.7, noise: 0.7 } },
+    {
+      name: 'Stack bond tiles',
+      values: { columns: 6, rows: 6, offset: 0, mortar: 0.1, bevel: 0.2 },
+    },
+    {
+      name: 'Long planks',
+      values: { columns: 2, rows: 12, offset: 0.33, mortar: 0.05, variation: 0.5, noise: 0.5 },
+    },
+  ],
+  featuredPreset: 'Old wall',
 };

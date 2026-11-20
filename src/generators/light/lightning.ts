@@ -1,6 +1,5 @@
 import type { ShaderGenerator } from '../../engine/generator';
 import { param } from '../../params/define';
-import { GRADIENTS } from '../../params/gradientPresets';
 import fragment from './lightning.glsl?raw';
 
 export const lightning: ShaderGenerator = {
@@ -20,5 +19,27 @@ export const lightning: ShaderGenerator = {
     param.float('glow', 'Glow', 0.15, 0, 0.6),
     param.float('strikeRate', 'Strikes / s', 4, 0, 30, { group: 'Animation' }),
   ],
-  defaultPost: { alphaMode: 1, gradient: GRADIENTS.electric },
+  defaultPost: { alphaMode: 1 },
+  presets: [
+    {
+      name: 'Single strike',
+      values: { bolts: 1, amplitude: 0.4, thickness: 0.02, glow: 0.3, strikeRate: 2 },
+    },
+    {
+      name: 'Storm web',
+      values: {
+        bolts: 5,
+        amplitude: 0.8,
+        frequency: 4,
+        thickness: 0.006,
+        glow: 0.1,
+        strikeRate: 12,
+      },
+    },
+    {
+      name: 'Arc',
+      values: { bolts: 2, amplitude: 0.2, frequency: 1, octaves: 8, thickness: 0.01, glow: 0.4 },
+    },
+  ],
+  featuredPreset: 'Single strike',
 };

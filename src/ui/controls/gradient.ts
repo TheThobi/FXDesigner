@@ -12,6 +12,7 @@ import type { GradientParam, ParamValue } from '../../params/types';
 import { rgbToHex } from '../../util/color';
 import { clamp01 } from '../../util/math';
 import { clear, h } from '../dom';
+import { gradientPresetMenu } from './gradientMenu';
 import type { ChangeHandler, Control } from './types';
 
 /**
@@ -55,12 +56,12 @@ export function gradientControl(
     'aria-label': 'Stop position',
   });
   const removeBtn = h('button', { class: 'icon-btn', text: '✕', title: 'Remove stop' });
-  const presetSelect = h(
-    'select',
-    { class: 'gradient-presets', 'aria-label': 'Gradient preset' },
-    h('option', { value: '', text: 'Presets…' }),
-    ...GRADIENT_PRESETS.map((p, i) => h('option', { value: String(i), text: p.name })),
-  );
+  const presetMenu = gradientPresetMenu(GRADIENT_PRESETS, (value) => {
+    stops = [...value.stops];
+    selected = 0;
+    render();
+    emit();
+  });
   const reverseBtn = h('button', { class: 'icon-btn', text: '⇄', title: 'Reverse' });
 
   const current = (): GradientValue => ({ stops: [...stops] });
@@ -154,15 +155,6 @@ export function gradientControl(
     render();
     emit();
   });
-  presetSelect.addEventListener('change', () => {
-    const preset = GRADIENT_PRESETS[Number(presetSelect.value)];
-    presetSelect.value = '';
-    if (!preset) return;
-    stops = [...preset.value.stops];
-    selected = 0;
-    render();
-    emit();
-  });
 
   render();
   return {
@@ -171,7 +163,7 @@ export function gradientControl(
       { class: 'control-gradient' },
       bar,
       h('div', { class: 'gradient-stop-editor' }, colorInput, alphaInput, posInput, removeBtn),
-      h('div', { class: 'gradient-actions' }, presetSelect, reverseBtn),
+      h('div', { class: 'gradient-actions' }, presetMenu, reverseBtn),
     ),
     setValue: (v) => {
       if (!isGradientValue(v)) return;

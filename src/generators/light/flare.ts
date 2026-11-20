@@ -1,6 +1,5 @@
 import type { ShaderGenerator } from '../../engine/generator';
 import { param } from '../../params/define';
-import { GRADIENTS } from '../../params/gradientPresets';
 import fragment from './flare.glsl?raw';
 
 export const flare: ShaderGenerator = {
@@ -23,7 +22,7 @@ export const flare: ShaderGenerator = {
     param.float('rotation', 'Rotation', 0, 0, 360),
     param.speed(0, 2),
   ],
-  defaultPost: { alphaMode: 1, gradient: GRADIENTS.whiteFade, colorMode: 0 },
+  defaultPost: { alphaMode: 1 },
   presets: [
     { name: 'Sparkle', values: { rays: 4, secondary: true, rayWidth: 0.04, glow: 0.6 } },
     {
@@ -35,4 +34,5 @@ export const flare: ShaderGenerator = {
       values: { rays: 2, secondary: false, rayWidth: 0.02, glow: 0.3, rotation: 90 },
     },
   ],
+  featuredPreset: 'Sun star',
 };

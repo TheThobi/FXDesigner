@@ -1,14 +1,4 @@
 // Initial state: A = 1 everywhere, B = 1 inside the seed shape. State layout: r = A, g = B.
-in vec2 v_uv;
-out vec4 outColor;
-
-uniform float u_seed;
-uniform int u_seedMode;
-uniform sampler2D u_seedTexture;
-
-#include <common>
-#include <noise>
-
 void main() {
   vec2 uv = v_uv;
   float b = 0.0;
@@ -18,8 +8,7 @@ void main() {
   } else if (u_seedMode == 1) {
     // Random spots on a jittered grid
     vec2 cell = floor(uv * 12.0);
-    vec2 h = hash22(cell);
-    vec2 center = (cell + 0.25 + 0.5 * h) / 12.0;
+    vec2 center = (cell + 0.25 + 0.5 * hash22(cell)) / 12.0;
     b = step(hash12(cell + 9.1), 0.2) * step(length(uv - center), 0.018);
   } else if (u_seedMode == 2) {
     // Thresholded seamless noise

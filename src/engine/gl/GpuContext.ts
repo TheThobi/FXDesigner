@@ -72,6 +72,11 @@ export class GpuContext {
     return new ShaderProgram(this.gl, vertexSource, fragmentSource, label);
   }
 
+  /** Program with a custom vertex shader (e.g. point sprites driven by a data texture). */
+  createProgramWithVertex(vertex: string, fragmentSource: string, label: string): ShaderProgram {
+    return new ShaderProgram(this.gl, vertex, fragmentSource, label);
+  }
+
   createTarget(options: TargetOptions): RenderTarget {
     return new RenderTarget(this.gl, options);
   }
@@ -93,6 +98,58 @@ export class GpuContext {
     gl.bindVertexArray(this.vao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
+  }
+
+  /** Draws `count` points (vertex shader uses gl_VertexID), optionally additively blended. */
+  drawPoints(count: number, additive = false): void {
+    const { gl } = this;
+    if (additive) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
+    }
+    gl.bindVertexArray(this.vao);
+    gl.drawArrays(gl.POINTS, 0, count);
+    gl.bindVertexArray(null);
+    if (additive) gl.disable(gl.BLEND);
+  }
+
+  /** Clears `target` to the given color. */
+  clearTarget(
+    target: RenderTarget,
+    color: readonly [number, number, number, number] = [0, 0, 0, 0],
+  ): void {
+    const { gl } = this;
+    this.bindTarget(target);
+    gl.clearColor(color[0], color[1], color[2], color[3]);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+
+  /** Copies `source` into `dest` (same size and format), e.g. to snapshot simulation state. */
+  copyTarget(source: RenderTarget, dest: RenderTarget): void {
+    const { gl } = this;
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, source.framebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, dest.framebuffer);
+    gl.blitFramebuffer(
+      0,
+      0,
+      source.width,
+      source.height,
+      0,
+      0,
+      dest.width,
+      dest.height,
+      gl.COLOR_BUFFER_BIT,
+      gl.NEAREST,
+    );
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+  }
+
+  /** New target with the same size/format as `source`, holding a copy of its pixels. */
+  cloneTarget(source: RenderTarget): RenderTarget {
+    const copy = this.createTarget(source.options);
+    this.copyTarget(source, copy);
+    return copy;
   }
 
   /** Reads RGBA8 pixels of `target` (bottom-up row order, as GL returns them). */

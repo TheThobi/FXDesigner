@@ -9,22 +9,50 @@ simulation de **réaction-diffusion** (modèle Gray-Scott, d'après
 
 ## Fonctionnalités
 
-- **19 générateurs** : bruit fractal (fBm / turbulence / ridged), cellulaire (Voronoi), domain
-  warp, caustiques, glow, étoile/flare, anneau, rayons, faisceau laser, éclairs, flamme, boule de
-  feu, fumée, dégradés, motifs (damier, rayures, points, grille), polygone/étoile, cercle magique,
-  briques.
-- **Réaction-diffusion** temps réel : presets (Mitosis, Coral, Maze, Worms…), cartes de variation
-  f/k (gradient ou radiale), diffusion anisotrope (angle fixe, tourbillon, radiale), graines
-  (carré, taches, bruit, anneau, **texte**, vide), **peinture à la souris**, rendu en relief.
-- **Post-traitement commun** : niveaux, inversion, **gradient map** avec éditeur de dégradé et
-  presets, modes d'alpha, **export en normal map** (OpenGL ou DirectX).
-- **Textures seamless** (option sur les bruits, RD toujours tuilable) et prévisualisation 2×2 / 3×3.
-- **Export PNG** jusqu'à 4096², **flipbook / sprite sheet** pour les effets animés.
-- **Documents** : sauvegarde/ouverture `.json`, **lien de partage** (état encodé dans l'URL),
-  autosauvegarde locale, **annuler/rétablir** (Ctrl+Z / Ctrl+Shift+Z).
+- **10 simulations GPU** interactives : réaction-diffusion (Karl Sims), Physarum, marbrure
+  d'encre, automate cyclique, spirales BZ, **Lenia**, **fluide d'encre** (stable fluids),
+  **croissance cristalline** (DLA / dielectric breakdown), **automates Life** (Conway, Brian's
+  Brain, Star Wars, Larger than Life…) et un **peintre de flowmap** (on peint des directions à
+  la souris ; aperçu d'une surface d'eau qui boucle, comparable via une barre déplaçable ;
+  export RG).
+- **Bruits variés** : fractal (bases Perlin / Value / Simplex / Worley / Perlin-Worley ; fBm,
+  turbulence, ridged), cellulaire (bordures d'épaisseur uniforme), domain warp, caustiques,
+  Gabor, flow strokes, veines (marbre, bois, agate), ripples, facettes, éclaboussures.
+- **Particles & VFX** : sprites (ripple, flamme, étincelle(s), éclats d'impact, traînée,
+  volute de fumée, éclaboussure, feuille, orbe magique), **Underworld FX** façon jeux d'action
+  mythologiques (flamme d'âme, fissures de lave, aura divine, impact au sol, braises),
+  smear frames, flammes à crochets, bulles, onde de choc, lumières (glow, flare, anneau, rayons, laser, éclairs), feu/fumée, slash, lignes
+  de vitesse, bouclier hexagonal, vortex, eau stylisée, scintillements…
+- **Motifs** : dégradés, damiers, polygones, cercle magique, briques, **runes**, **Truchet**,
+  **kaléidoscope**.
+- **Post-traitement en modules** activables, dans l'ordre du pipeline : niveaux, **slope blur**
+  (lissage pictural comme dans Substance Designer), **Kuwahara** (aplats façon peinture à
+  l'huile), **étalonnage** (saturation, teinte, température, ombres colorées), éclairage de
+  relief, **aquarelle** (bords mouillés, granulation), postérisation/tramage, halftone,
+  pixelisation (« pixel art » ou image finale, export à la résolution des blocs), **grain de
+  papier / toile**, contours, **anti-aliasing SSAA**. Icônes et résumé d'état par module,
+  **presets de look** (huile, aquarelle, gouache, pixel art…), look **global** (partagé par
+  tous les générateurs) ou **local** (par générateur).
+- **Presets** nombreux pour chaque générateur ; les vignettes montrent le preset le plus
+  représentatif et font défiler les presets au survol.
+- **Rampe de couleurs partagée** par tous les générateurs (0 → 1 par défaut), surchargeable par
+  générateur ; presets de rampes avec aperçu.
+- **Timeline** : lecture, défilement, image par image, vitesse, durée de boucle, pellicule
+  d'aperçus ; **boucle forcée** (fondu fin → début) pour obtenir des flipbooks qui bouclent ;
+  images-clés de retour en arrière pour les simulations.
+- **Viewport** : zoom (molette, 1:1, ajuster) et déplacement, layout personnalisable (panneaux
+  et timeline masquables).
+- **Sorties** : couleur, normal map (OpenGL/DirectX), height map ; alpha configurable ; PNG
+  jusqu'à 4096², flipbook pour les effets animés.
+- **Interface** inspirée d'Unreal Engine 5 : navigateur en tuiles, panneaux redimensionnables,
+  Details en 3 onglets (Generator / Post Process / Output) avec recherche et flèches de reset,
+  champs à glisser (Shift = fin), aperçu adaptatif pendant les réglages.
+- **Documents** versionnés : `.json`, lien de partage, autosauvegarde, annuler/rétablir.
 
-Raccourcis : `Espace` lecture/pause · `Ctrl+Z` / `Ctrl+Shift+Z` · double-clic sur un libellé =
-valeur par défaut.
+Raccourcis : `Espace` lecture/pause · `,` / `.` image précédente/suivante · `T` timeline ·
+`F` ajuster le zoom · `1` zoom 1:1 · `+` / `-` zoom · molette = zoom, clic molette ou
+`Alt`+glisser = déplacer · `Ctrl+Z` / `Ctrl+Shift+Z` · double-clic sur un libellé = valeur par
+défaut.
 
 ## Développement
 
@@ -45,6 +73,7 @@ Documentation technique :
 - [docs/ADDING_A_GENERATOR.md](docs/ADDING_A_GENERATOR.md) — ajouter un générateur en 3 fichiers
 - [docs/DEPLOY_OMV.md](docs/DEPLOY_OMV.md) — hébergement sur OpenMediaVault
 - [docs/ROADMAP.md](docs/ROADMAP.md) — idées et évolutions prévues
+- [docs/COMMUNITY.md](docs/COMMUNITY.md) — conception de la bibliothèque communautaire
 
 ## Licence
 

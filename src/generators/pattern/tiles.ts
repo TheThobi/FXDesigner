@@ -17,4 +17,10 @@ export const tiles: ShaderGenerator = {
     param.float('softness', 'Softness', 0.02, 0, 0.5),
     param.float('rotation', 'Rotation', 0, 0, 360),
   ],
+  presets: [
+    { name: 'Polka dots', values: { pattern: 2, tiles: 10, size: 0.5, softness: 0.05 } },
+    { name: 'Diagonal stripes', values: { pattern: 1, tiles: 12, rotation: 45 } },
+    { name: 'Fine grid', values: { pattern: 3, tiles: 16, size: 0.1 } },
+  ],
+  featuredPreset: 'Polka dots',
 };

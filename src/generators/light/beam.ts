@@ -1,6 +1,5 @@
 import type { ShaderGenerator } from '../../engine/generator';
 import { param } from '../../params/define';
-import { GRADIENTS } from '../../params/gradientPresets';
 import fragment from './beam.glsl?raw';
 
 export const beam: ShaderGenerator = {
@@ -21,5 +20,17 @@ export const beam: ShaderGenerator = {
     param.bool('vertical', 'Vertical', false),
     param.speed(0.5),
   ],
-  defaultPost: { alphaMode: 1, gradient: GRADIENTS.electric },
+  defaultPost: { alphaMode: 1 },
+  presets: [
+    { name: 'Laser', values: { width: 0.08, core: 0.6, falloff: 5, flicker: 0.2 } },
+    {
+      name: 'Energy stream',
+      values: { width: 0.5, core: 0.2, falloff: 1.5, flicker: 1, noiseScale: 8, speed: 1.5 },
+    },
+    {
+      name: 'Light pillar',
+      values: { width: 0.4, core: 0.3, falloff: 2, endFade: 0.8, vertical: true },
+    },
+  ],
+  featuredPreset: 'Energy stream',
 };

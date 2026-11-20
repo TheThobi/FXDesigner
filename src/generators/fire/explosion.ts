@@ -20,5 +20,23 @@ export const explosion: ShaderGenerator = {
     param.int('octaves', 'Octaves', 5, 1, 8, { group: 'Noise' }),
     param.speed(0.6, 3),
   ],
-  defaultPost: { gradient: GRADIENTS.fire, alphaMode: 1 },
+  defaultPost: { alphaMode: 1 },
+  presets: [
+    {
+      name: 'Cartoon blast',
+      values: { turbulence: 1.1, octaves: 3 },
+      post: { posterize: 4, gradient: GRADIENTS.saffron, outline: 1, outlineWidth: 2 },
+    },
+    {
+      name: 'Comic halftone blast',
+      values: { octaves: 4 },
+      post: { posterize: 0, halftone: 40, gradient: GRADIENTS.redHot },
+    },
+    { name: 'Fireball', values: { radius: 0.8, turbulence: 1.2, falloff: 1.2, coreHeat: 1 } },
+    {
+      name: 'Smoky blast',
+      values: { radius: 0.95, turbulence: 1.6, falloff: 0.5, coreHeat: 0.2, scale: 6 },
+    },
+  ],
+  featuredPreset: 'Fireball',
 };

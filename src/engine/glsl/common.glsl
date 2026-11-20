@@ -20,3 +20,8 @@ float luminance(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 float radialFalloff(float d, float radius, float power) {
   return pow(saturate(1.0 - d / max(radius, 1e-5)), power);
 }
+
+// Random variation of a color (r in [0,1]^3): value change plus a slight hue drift.
+vec3 jitterColor(vec3 c, vec3 r, float amount) {
+  return clamp(c * (1.0 + (r.x - 0.5) * amount) + (r - 0.5) * amount * 0.25, 0.0, 1.0);
+}

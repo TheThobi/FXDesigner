@@ -1,5 +1,6 @@
 import type { ShaderGenerator } from '../../engine/generator';
 import { param } from '../../params/define';
+import { GRADIENTS } from '../../params/gradientPresets';
 import fragment from './cellular.glsl?raw';
 
 export const cellular: ShaderGenerator = {
@@ -21,4 +22,26 @@ export const cellular: ShaderGenerator = {
     param.bool('tileable', 'Seamless', true),
     param.speed(0, 2),
   ],
+  presets: [
+    {
+      name: 'Comic halftone',
+      values: { mode: 0 },
+      post: { halftone: 48, gradient: GRADIENTS.linear },
+    },
+    {
+      name: 'Stained glass',
+      values: { mode: 4, edgeWidth: 0.12 },
+      post: { posterize: 6, gradient: GRADIENTS.spectrum },
+    },
+    {
+      name: 'Pixel cells',
+      values: { mode: 3 },
+      post: { pixelate: 48, posterize: 5, gradient: GRADIENTS.moss },
+    },
+    { name: 'Cracked earth', values: { mode: 2, scale: 5, jitter: 0.9, edgeWidth: 0.05 } },
+    { name: 'Pebbles', values: { mode: 4, scale: 7, jitter: 1 } },
+    { name: 'Chebyshev crystals', values: { mode: 1, metric: 2, scale: 6 } },
+    { name: 'Organic cells', values: { mode: 0, scale: 10, jitter: 0.8 } },
+  ],
+  featuredPreset: 'Pebbles',
 };

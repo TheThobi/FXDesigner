@@ -22,7 +22,9 @@ const DEFAULTS: FlipbookOptions = {
 export function askFlipbookOptions(
   isSimulation: boolean,
   maxSize: number,
+  defaults: Partial<FlipbookOptions> = {},
 ): Promise<FlipbookOptions | null> {
+  const initial = { ...DEFAULTS, ...defaults };
   return new Promise((resolve) => {
     const num = (name: string, value: number, min: number, max: number, step = 1) =>
       h('input', {
@@ -35,17 +37,17 @@ export function askFlipbookOptions(
         class: 'num',
         required: true,
       });
-    const columns = num('columns', DEFAULTS.columns, 1, 32);
-    const rows = num('rows', DEFAULTS.rows, 1, 32);
+    const columns = num('columns', initial.columns, 1, 32);
+    const rows = num('rows', initial.rows, 1, 32);
     const frameSize = h(
       'select',
       { name: 'frameSize' },
       ...[64, 128, 256, 512].map((s) =>
-        h('option', { value: String(s), text: `${s}px`, selected: s === DEFAULTS.frameSize }),
+        h('option', { value: String(s), text: `${s}px`, selected: s === initial.frameSize }),
       ),
     );
-    const duration = num('duration', DEFAULTS.duration, 0.1, 60, 0.1);
-    const steps = num('steps', DEFAULTS.stepsBetweenFrames, 1, 500);
+    const duration = num('duration', initial.duration, 0.1, 60, 0.1);
+    const steps = num('steps', initial.stepsBetweenFrames, 1, 500);
     const info = h('p', { class: 'dialog-info' });
 
     const field = (label: string, input: HTMLElement) =>
@@ -57,7 +59,9 @@ export function askFlipbookOptions(
       field('Columns', columns),
       field('Rows', rows),
       field('Frame size', frameSize),
-      isSimulation ? field('Sim frames between images', steps) : field('Duration (s)', duration),
+      isSimulation
+        ? field('Sim frames between images', steps)
+        : field('Duration (s) — loop length for a looping sheet', duration),
       info,
       h(
         'div',

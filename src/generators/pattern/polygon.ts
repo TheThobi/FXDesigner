@@ -23,5 +23,18 @@ export const polygon: ShaderGenerator = {
     param.float('rotation', 'Rotation', 0, 0, 360),
     param.speed(0, 2),
   ],
-  defaultPost: { alphaMode: 1, colorMode: 0 },
+  defaultPost: { alphaMode: 1 },
+  presets: [
+    { name: 'Star', values: { sides: 5, pointiness: 0.6 } },
+    {
+      name: 'Hexagon outline',
+      values: { sides: 6, pointiness: 0, outline: true, outlineWidth: 0.05, glow: 0.3 },
+    },
+    { name: 'Spiky gear', values: { sides: 14, pointiness: 0.4, rotation: 10 } },
+    {
+      name: 'Glowing triangle',
+      values: { sides: 3, pointiness: 0, outline: true, outlineWidth: 0.03, glow: 0.8 },
+    },
+  ],
+  featuredPreset: 'Hexagon outline',
 };

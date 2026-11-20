@@ -35,7 +35,7 @@ export class RenderTarget {
 
   constructor(
     private readonly gl: WebGL2RenderingContext,
-    private readonly options: TargetOptions,
+    readonly options: TargetOptions,
   ) {
     const texture = gl.createTexture();
     const framebuffer = gl.createFramebuffer();

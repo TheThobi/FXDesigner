@@ -22,6 +22,8 @@ type Extra = {
   resetOnChange?: boolean;
 };
 
+type NumberExtra = Extra & { unit?: string };
+
 export const param = {
   float: (
     key: string,
@@ -29,7 +31,7 @@ export const param = {
     def: number,
     min: number,
     max: number,
-    extra: Extra & { step?: number } = {},
+    extra: NumberExtra & { step?: number } = {},
   ): FloatParam => ({ type: 'float', key, label, default: def, min, max, ...extra }),
 
   int: (
@@ -38,7 +40,7 @@ export const param = {
     def: number,
     min: number,
     max: number,
-    extra: Extra = {},
+    extra: NumberExtra = {},
   ): IntParam => ({
     type: 'int',
     key,
@@ -54,6 +56,29 @@ export const param = {
     key,
     label,
     default: def,
+    ...extra,
+  }),
+
+  /** Module on/off switch shown in the header of `group`. */
+  toggle: (key: string, group: string, def = false, description?: string): BoolParam => ({
+    type: 'bool',
+    key,
+    label: `Enable ${group}`,
+    default: def,
+    group,
+    toggle: true,
+    ...(description ? { description } : {}),
+  }),
+
+  /** Angle in degrees. */
+  angle: (key: string, label: string, def: number, extra: Extra = {}): FloatParam => ({
+    type: 'float',
+    key,
+    label,
+    default: def,
+    min: 0,
+    max: 360,
+    unit: '°',
     ...extra,
   }),
 
@@ -109,6 +134,40 @@ export const param = {
     label,
     default: def,
     ...extra,
+  }),
+
+  /** Simulation grid size (read by GridSimulation; restarts the simulation). */
+  simResolution: (def = 256, sizes: readonly number[] = [128, 256, 512, 1024]): SelectParam => ({
+    type: 'select',
+    key: 'simResolution',
+    label: 'Grid size',
+    default: def,
+    options: sizes.map((s) => ({ label: String(s), value: s })),
+    group: 'Simulation',
+    resetOnChange: true,
+    description: 'Larger grids give finer detail (slower).',
+  }),
+
+  /** Simulation iterations per displayed frame. */
+  stepsPerFrame: (def = 1, max = 64): IntParam => ({
+    type: 'int',
+    key: 'stepsPerFrame',
+    label: 'Steps / frame',
+    default: def,
+    min: 1,
+    max,
+    group: 'Simulation',
+  }),
+
+  /** Radius of the interactive brush, in uv units. */
+  brushSize: (def = 0.03): FloatParam => ({
+    type: 'float',
+    key: 'brushSize',
+    label: 'Brush size',
+    default: def,
+    min: 0.005,
+    max: 0.2,
+    group: 'Simulation',
   }),
 
   /** Common "Animation speed" parameter. */

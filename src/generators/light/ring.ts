@@ -1,6 +1,5 @@
 import type { ShaderGenerator } from '../../engine/generator';
 import { param } from '../../params/define';
-import { GRADIENTS } from '../../params/gradientPresets';
 import fragment from './ring.glsl?raw';
 
 export const ring: ShaderGenerator = {
@@ -24,5 +23,15 @@ export const ring: ShaderGenerator = {
     param.float('distortion', 'Distortion', 0, 0, 1, { group: 'Animation' }),
     param.speed(0.5),
   ],
-  defaultPost: { alphaMode: 1, gradient: GRADIENTS.whiteFade, colorMode: 0 },
+  defaultPost: { alphaMode: 1 },
+  presets: [
+    { name: 'Halo', values: { radius: 0.7, thickness: 0.02, glow: 0.5 } },
+    {
+      name: 'Dashed rune ring',
+      values: { thickness: 0.05, segments: 24, gap: 0.4, rotationSpeed: 0.2 },
+    },
+    { name: 'Wobbly portal', values: { thickness: 0.08, glow: 0.3, distortion: 0.6, speed: 1.5 } },
+    { name: 'Shockwave band', values: { radius: 0.8, thickness: 0.25, glow: 0.6 } },
+  ],
+  featuredPreset: 'Dashed rune ring',
 };

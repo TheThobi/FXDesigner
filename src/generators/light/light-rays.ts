@@ -1,6 +1,5 @@
 import type { ShaderGenerator } from '../../engine/generator';
 import { param } from '../../params/define';
-import { GRADIENTS } from '../../params/gradientPresets';
 import fragment from './light-rays.glsl?raw';
 
 export const lightRays: ShaderGenerator = {
@@ -21,5 +20,22 @@ export const lightRays: ShaderGenerator = {
     param.vec2('center', 'Center', [0, 0], -1, 1),
     param.speed(0.3, 2),
   ],
-  defaultPost: { alphaMode: 1, gradient: GRADIENTS.whiteFade, colorMode: 0 },
+  defaultPost: { alphaMode: 1 },
+  presets: [
+    {
+      name: 'God rays',
+      values: {
+        count: 12,
+        detail: 4,
+        sharpness: 6,
+        length: 1.6,
+        falloff: 1,
+        core: 0.1,
+        center: [0, 1],
+      },
+    },
+    { name: 'Starburst', values: { count: 64, detail: 2, sharpness: 8, length: 1, core: 0.4 } },
+    { name: 'Soft fan', values: { count: 6, detail: 1, sharpness: 1.2, length: 1.4, falloff: 2 } },
+  ],
+  featuredPreset: 'Starburst',
 };

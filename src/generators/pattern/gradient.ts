@@ -18,4 +18,11 @@ export const gradientGenerator: ShaderGenerator = {
     param.select('repeat', 'Repeat', ['Clamp', 'Repeat', 'Mirror']),
     param.vec2('center', 'Center', [0, 0], -1, 1),
   ],
+  presets: [
+    { name: 'Radial', values: { shape: 1 } },
+    { name: 'Angular sweep', values: { shape: 2 } },
+    { name: 'Repeated stripes', values: { shape: 0, scale: 6, repeat: 2, angle: 45 } },
+    { name: 'Diamond', values: { shape: 3, scale: 1.5 } },
+  ],
+  featuredPreset: 'Angular sweep',
 };
