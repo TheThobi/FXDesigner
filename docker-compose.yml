@@ -1,0 +1,15 @@
+# Usable as-is with the OpenMediaVault "Compose" plugin (Services > Compose > Files) or with
+# `docker compose up -d --build` on any Docker host.
+services:
+  texture-maker:
+    build: .
+    image: procedural-texture-maker:latest
+    container_name: procedural-texture-maker
+    restart: unless-stopped
+    ports:
+      - '8080:8080'
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
