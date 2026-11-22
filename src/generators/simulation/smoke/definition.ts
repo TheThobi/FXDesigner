@@ -70,7 +70,10 @@ const PARAMS: readonly ParamDef[] = [
     group: 'Fluid',
     description: 'More = more incompressible (rounder swirls), slower.',
   }),
-  param.select('boundaries', 'Boundaries', ['Wrap (seamless)', 'Open'], 1, { group: 'Fluid' }),
+  param.select('boundaries', 'Boundaries', ['Wrap (seamless)', 'Open'], 1, {
+    group: 'Fluid',
+    description: 'Open lets smoke leave the frame. Use Edge Feather if you want a fade.',
+  }),
   param.select('view', 'Output', ['Density', 'Motion vectors', 'Vorticity'], 0, {
     group: 'Output',
     description:
@@ -109,6 +112,7 @@ export const smokeFire: SimulationGenerator = {
       ],
       render,
       inputs: INPUTS,
+      openBoundaries: true,
     }),
   defaultPost: { alphaMode: SOURCE_ALPHA },
   groups: [
@@ -120,7 +124,53 @@ export const smokeFire: SimulationGenerator = {
     },
   ],
   presets: [
-    { name: 'Rising smoke', values: {} },
+    { name: 'Rising smoke', values: { emitSpeed: 0.3 } },
+    {
+      name: 'Steady plume',
+      values: {
+        emitterSize: 0.045,
+        emission: 0.88,
+        emitSpeed: 0.22,
+        buoyancy: 0.95,
+        vorticity: 0.12,
+        turbulence: 0.025,
+        turbulenceScale: 2,
+        dissipation: 0.65,
+        drag: 0.2,
+      },
+    },
+    {
+      name: 'Gentle breeze',
+      values: {
+        emitterPos: [0.43, 0.13],
+        emitterSize: 0.055,
+        emission: 0.8,
+        emitSpeed: 0.16,
+        buoyancy: 0.75,
+        upAngle: 16,
+        vorticity: 0.18,
+        turbulence: 0.075,
+        turbulenceScale: 2,
+        dissipation: 0.85,
+        drag: 0.25,
+      },
+    },
+    {
+      name: 'Soft smoke curtain',
+      values: {
+        emitter: 1,
+        emitterSize: 0.065,
+        emission: 0.72,
+        emitSpeed: 0.12,
+        buoyancy: 0.7,
+        upAngle: 352,
+        vorticity: 0.08,
+        turbulence: 0.04,
+        turbulenceScale: 2,
+        dissipation: 0.9,
+        drag: 0.25,
+      },
+    },
     {
       name: 'Campfire',
       values: {

@@ -60,8 +60,10 @@ strength).
 **Multi-pass shader generators.** `ShaderGenerator.passes` are rendered before the main
 fragment, each built like it (same params, inputs, chunks) and reading the previous pass as
 `u_prev` (blank before the first), with `u_passIndex` / `u_passCount` when a pass repeats
-(`repeat(params, width, height)`, 0 skips it). `precise` passes use full-precision, nearest
-targets (coordinates, distances). The Renderer ping-pongs them in the node's `NodeTargets`.
+(`repeat(params, width, height, inputs)`, 0 skips it). `precise` passes use full-precision, nearest
+targets (coordinates, distances). The Renderer ping-pongs same-size passes in the node's
+`NodeTargets`. A pass can provide `size(width, height, iteration, inputs)` for a reduced target
+per iteration, as Auto Levels does to reduce the input luminance range to one texel.
 Used by Distance (seed + jump flood, log2 steps covering Max distance) and the Blur (H + V
 passes per level, each level doubling sigma; variances add up to the requested radius).
 
@@ -252,7 +254,8 @@ along the refracted rays (`gpu.drawTriangles`, 9 instances for seamless wrap) an
 adds (surface area / projected area) with additive blending (Evan Wallace's method); dispersion
 projects each channel with its own index. Smoke & Fire (`simulation/smoke/`) is a
 FluidNinja-style solver: forces (vorticity confinement, buoyancy, turbulence, emitters, Emitter
-/ Flow inputs, open boundaries) → advect → pressure → project; it outputs density with alpha,
+/ Flow inputs, open or wrapped boundaries) → advect → pressure → project. Open edges let smoke
+leave without applying a fade to the interior. It outputs density with alpha,
 motion vectors or vorticity; its emitter can orbit (trails). Paint Mask
 (`simulation/paint/`) is a canvas whose strokes persist (capsule brush between pointer
 positions); it is `seedless`: seed changes and the global restart keep its content.

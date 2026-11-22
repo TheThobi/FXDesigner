@@ -272,15 +272,15 @@ export class ParamPanel {
   }
 
   /**
-   * Greys out (and blocks) the rows of `keys`, e.g. settings of an unconnected input; `reason`
-   * becomes their tooltip.
+   * Greys out and blocks unavailable settings, with a tooltip explaining each reason.
    */
-  setDisabled(keys: ReadonlySet<string>, reason: string): void {
+  setDisabled(reasons: ReadonlyMap<string, string>): void {
     for (const [key, row] of this.rows) {
-      const off = keys.has(key);
+      const reason = reasons.get(key);
+      const off = reason !== undefined;
       row.element.classList.toggle('disabled', off);
       row.element.toggleAttribute('inert', off);
-      if (off) row.element.title = reason;
+      if (reason !== undefined) row.element.title = reason;
       else row.element.removeAttribute('title');
     }
   }

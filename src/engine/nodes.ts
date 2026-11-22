@@ -21,6 +21,8 @@ export interface NodeInputDef {
   readonly value?: NodeValueType;
   /** Parameters that only matter when this input is connected (greyed out otherwise). */
   readonly params?: readonly string[];
+  /** Fallback values used only when this input is disconnected. */
+  readonly fallbackParams?: readonly string[];
   /** Channel of the node's image shown in its preview while this pin is hovered (Pack RGBA). */
   readonly preview?: NodeChannel;
 }

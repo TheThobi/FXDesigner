@@ -113,11 +113,25 @@ interface GeneratorBase {
  * the main fragment read the previous pass as `u_prev` (blank before the first one), with
  * `u_passIndex` / `u_passCount` for repeated passes.
  */
+type PassInputs = Readonly<Partial<Record<string, Pick<RenderTarget, 'width' | 'height'>>>>;
+
 export interface ShaderPass {
   readonly label: string;
   readonly fragment: string;
   /** Iterations (u_passCount) for these values and target size (default 1; 0 skips the pass). */
-  readonly repeat?: (params: ParamValues, width: number, height: number) => number;
+  readonly repeat?: (
+    params: ParamValues,
+    width: number,
+    height: number,
+    inputs?: PassInputs,
+  ) => number;
+  /** Custom dimensions for each iteration, e.g. a shrinking reduction pyramid. */
+  readonly size?: (
+    width: number,
+    height: number,
+    iteration: number,
+    inputs?: PassInputs,
+  ) => readonly [number, number];
   /** Data pass (coordinates, distances): full-precision target, nearest filtering. */
   readonly precise?: boolean;
 }

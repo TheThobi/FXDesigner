@@ -1281,13 +1281,20 @@ export class App {
     this.renderer.retainSimulations(sims);
   }
 
-  /** Greys out the selected node's settings that belong to an unconnected input. */
+  /** Greys out settings based on whether their corresponding input is connected. */
   private updateInputParams(): void {
     const linked = inputLinks(this.state.links, this.node.id);
-    const off = new Set<string>();
-    for (const input of inputsOf(this.generator))
-      if (!linked[input.key]) for (const key of input.params ?? []) off.add(key);
-    this.paramPanel.setDisabled(off, 'Connect the matching input to use this setting');
+    const off = new Map<string, string>();
+    for (const input of inputsOf(this.generator)) {
+      if (linked[input.key]) {
+        for (const key of input.fallbackParams ?? [])
+          off.set(key, `Disconnect ${input.label} to use this value`);
+      } else {
+        for (const key of input.params ?? [])
+          off.set(key, `Connect ${input.label} to use this setting`);
+      }
+    }
+    this.paramPanel.setDisabled(off);
   }
 
   /** Selects node `id` ('' = none: the Details panel shows a hint). */

@@ -1,7 +1,7 @@
 // Smoke pass 1: forces on the velocity, and density sources (FluidNinja-style solver):
 //   vorticity confinement (re-injects the small swirls numerical diffusion kills), buoyancy
 //   along the up direction, curl-noise turbulence, emitters (shape, Emitter input, brush),
-//   Flow input (flowmap pushing the fluid), open boundaries.
+//   Flow input (flowmap pushing the fluid).
 float curlAt(ivec2 p) {
   return (stateAt(p + ivec2(1, 0)).g - stateAt(p - ivec2(1, 0)).g) -
          (stateAt(p + ivec2(0, 1)).r - stateAt(p - ivec2(0, 1)).r);
@@ -10,11 +10,13 @@ float curlAt(ivec2 p) {
 // Emitter position, orbiting around `emitterPos` when orbitRadius > 0 (trails).
 vec2 emitterCenter() {
   float a = u_frame / 60.0 * u_orbitSpeed * TAU;
-  return fract(u_emitterPos + u_orbitRadius * vec2(cos(a), sin(a)));
+  vec2 p = u_emitterPos + u_orbitRadius * vec2(cos(a), sin(a));
+  return openEdges() ? p : fract(p);
 }
 
 float emitterShape(vec2 uv) {
-  vec2 d = wrapDelta(uv, emitterCenter());
+  vec2 center = emitterCenter();
+  vec2 d = openEdges() ? uv - center : wrapDelta(uv, center);
   float r = max(u_emitterSize, 1e-3);
   if (u_emitter == 0) return exp(-dot(d, d) / (r * r));
   if (u_emitter == 1) return exp(-d.y * d.y / (r * r * 0.25)) * smoothstep(r * 4.0, r * 3.0, abs(d.x));
@@ -71,7 +73,7 @@ void main() {
 
   int brush = brushMode();
   if (brush != 0) {
-    vec2 d = wrapDelta(uv, u_brush.xy);
+    vec2 d = openEdges() ? uv - u_brush.xy : wrapDelta(uv, u_brush.xy);
     float f = exp(-dot(d, d) / (u_brush.z * u_brush.z));
     if (brush == 1) {
       vel += u_brushDir * u_gridSize * f * 0.4;
@@ -81,12 +83,5 @@ void main() {
     }
   }
 
-  // Open boundaries: fluid fades out near the edges instead of wrapping around.
-  if (u_boundaries == 1) {
-    vec2 edge = min(uv, 1.0 - uv);
-    float k = smoothstep(0.0, 0.04, min(edge.x, edge.y));
-    dens *= k;
-    vel *= mix(0.9, 1.0, k);
-  }
   outColor = vec4(vel, s.b, dens);
 }

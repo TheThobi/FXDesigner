@@ -110,6 +110,7 @@ export function buildSimulationShader(
   passSource: string,
   label: string,
   inputs: readonly NodeInputDef[] = [],
+  openBoundaries = false,
 ): string {
   return `${SHADER_HEADER}
 
@@ -129,6 +130,7 @@ ${uniformDeclarations(defs)}
 
 ${commonChunk}
 ${noiseChunk}
+${openBoundaries ? '#define SIM_OPEN_BOUNDARIES' : ''}
 ${simChunk}
 
 // ---- pass: ${label} ----

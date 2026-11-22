@@ -38,6 +38,8 @@ export interface GridSimulationSpec {
   readonly inputs?: readonly NodeInputDef[];
   /** Inputs read by the seed pass: connecting / disconnecting one restarts the simulation. */
   readonly reseedInputs?: readonly string[];
+  /** Supports the `boundaries` enum (0: wrap, 1: open) in the grid helpers. */
+  readonly openBoundaries?: boolean;
 }
 
 const BRUSH_MODES = { paint: 1, erase: 2 } as const;
@@ -79,7 +81,7 @@ export class GridSimulation implements Simulation {
   ) {
     const build = (src: string, pass: string) =>
       gpu.createProgram(
-        buildSimulationShader(defs, src, `${id}/${pass}`, spec.inputs ?? []),
+        buildSimulationShader(defs, src, `${id}/${pass}`, spec.inputs ?? [], spec.openBoundaries),
         `${id}/${pass}`,
       );
     this.seedProgram = build(spec.seed, 'seed');

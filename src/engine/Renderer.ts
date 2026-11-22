@@ -563,11 +563,15 @@ export class Renderer {
     let prev: RenderTarget | null = null;
     let flip = 0;
     for (const pass of passes) {
-      const repeat = pass.repeat?.(req.params, target.width, target.height) ?? 1;
+      const repeat = pass.repeat?.(req.params, target.width, target.height, req.inputs) ?? 1;
       const count = Math.max(0, Math.floor(repeat));
       for (let i = 0; i < count; i++) {
-        const name = `pass:${pass.precise === true ? 'data' : 'image'}:${flip++ % 2}`;
-        const dst = targets.get(name, target.width, target.height, pass.precise);
+        const size = pass.size?.(target.width, target.height, i, req.inputs);
+        const name = size
+          ? `pass:sized:${pass.label}:${i}`
+          : `pass:${pass.precise === true ? 'data' : 'image'}:${flip++ % 2}`;
+        const [width, height] = size ?? [target.width, target.height];
+        const dst = targets.get(name, width, height, pass.precise);
         this.drawShader(req, generator, dst, { pass, prev, index: i, count });
         prev = dst;
       }

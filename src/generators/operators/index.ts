@@ -11,6 +11,8 @@ import type { ParamDef, ParamValues, Preset } from '../../params/types';
 import { GRADIENTS } from '../../params/gradientPresets';
 import { getNumber } from '../../params/values';
 import blendFrag from './blend.glsl?raw';
+import autoLevelsFrag from './auto-levels.glsl?raw';
+import autoLevelsRangeFrag from './auto-levels-range.glsl?raw';
 import blurPassFrag from './blur-pass.glsl?raw';
 import blurFrag from './blur.glsl?raw';
 import customFrag from './custom.glsl?raw';
@@ -32,6 +34,7 @@ import flickerFrag from './flicker.glsl?raw';
 import hueShiftFrag from './hue-shift.glsl?raw';
 import scrollFrag from './scroll.glsl?raw';
 import warpFrag from './warp.glsl?raw';
+import { uniform } from './uniform';
 
 export const BLEND_MODES = [
   'Normal',
@@ -73,6 +76,7 @@ function operator(spec: {
   category?: 'operator' | 'animation';
   animated?: boolean;
   defaultPost?: ParamValues;
+  exportOverrides?: ParamValues;
   role?: 'output' | 'reroute';
   startCollapsed?: boolean;
 }): ShaderGenerator {
@@ -160,6 +164,44 @@ export const levelsOp = operator({
     { name: 'High contrast', values: { inLow: 0.3, inHigh: 0.7 } },
     { name: 'Ridges', values: { fold: true, power: 0.6 } },
     { name: 'Threshold', values: { threshold: 0.5, softness: 0.02 } },
+  ],
+});
+
+export const autoLevelsOp = operator({
+  id: 'op-auto-levels',
+  name: 'Auto Levels',
+  description: 'Adjusts contrast from the darkest and brightest pixels. Keeps hue and alpha.',
+  fragment: autoLevelsFrag,
+  inputs: [IMAGE],
+  passes: [
+    {
+      label: 'range',
+      fragment: autoLevelsRangeFrag,
+      precise: true,
+      repeat: (params, _width, _height, inputs) => {
+        const image = inputs?.image;
+        if (!image || params.strength === 0) return 0;
+        return Math.max(1, Math.ceil(Math.log2(Math.max(image.width, image.height)) / 2));
+      },
+      size: (width, height, iteration, inputs) => {
+        const divisor = 4 ** (iteration + 1);
+        return [
+          Math.ceil((inputs?.image?.width ?? width) / divisor),
+          Math.ceil((inputs?.image?.height ?? height) / divisor),
+        ];
+      },
+    },
+  ],
+  params: [
+    param.float('strength', 'Strength', 1, 0, 1, { limit: [0, 1] }),
+    param.float('outBlack', 'Output black', 0, 0, 1, { limit: [0, 1] }),
+    param.float('outWhite', 'Output white', 1, 0, 1, { limit: [0, 1] }),
+    param.bool('ignoreTransparent', 'Ignore transparent pixels', true),
+  ],
+  presets: [
+    { name: 'Full range', values: {} },
+    { name: 'Gentle stretch', values: { strength: 0.5 } },
+    { name: 'Soft blacks and whites', values: { outBlack: 0.08, outWhite: 0.92 } },
   ],
 });
 
@@ -363,23 +405,39 @@ export const unpackOp = operator({
 export const packOp = operator({
   id: 'op-pack',
   name: 'Pack RGBA',
-  description:
-    'Packs four grayscale masks into the R, G, B and A channels of one texture (export with ' +
-    'source colors).',
+  description: 'Packs masks into RGBA, using a constant for each empty input.',
   fragment: packFrag,
+  exportOverrides: { preview: false },
   inputs: [
-    { ...input('red', 'Red', 'Stored in R.', '#ff6b6b', 'float'), preview: 0 },
-    { ...input('green', 'Green', 'Stored in G.', '#6bff8a', 'float'), preview: 1 },
-    { ...input('blue', 'Blue', 'Stored in B.', '#6bb5ff', 'float'), preview: 2 },
     {
-      ...input('alpha', 'Alpha', 'Stored in A (opaque when unconnected).', '#e8e8e8', 'float'),
+      ...input('red', 'Red', 'Stored in R.', '#ff6b6b', 'float'),
+      preview: 0,
+      fallbackParams: ['redValue'],
+    },
+    {
+      ...input('green', 'Green', 'Stored in G.', '#6bff8a', 'float'),
+      preview: 1,
+      fallbackParams: ['greenValue'],
+    },
+    {
+      ...input('blue', 'Blue', 'Stored in B.', '#6bb5ff', 'float'),
+      preview: 2,
+      fallbackParams: ['blueValue'],
+    },
+    {
+      ...input('alpha', 'Alpha', 'Stored in A.', '#e8e8e8', 'float'),
       preview: 3,
+      fallbackParams: ['alphaValue'],
     },
   ],
   params: [
     param.bool('preview', 'Opaque preview', false, {
-      description: 'Ignore the alpha input in the preview (it can hide everything).',
+      description: 'Show the preview with full opacity. The export keeps the packed alpha.',
     }),
+    param.float('redValue', 'Red', 0, 0, 1, { group: 'Unconnected inputs', limit: [0, 1] }),
+    param.float('greenValue', 'Green', 0, 0, 1, { group: 'Unconnected inputs', limit: [0, 1] }),
+    param.float('blueValue', 'Blue', 0, 0, 1, { group: 'Unconnected inputs', limit: [0, 1] }),
+    param.float('alphaValue', 'Alpha', 1, 0, 1, { group: 'Unconnected inputs', limit: [0, 1] }),
   ],
   presets: [{ name: 'Packed', values: {} }],
 });
@@ -611,6 +669,7 @@ export const OPERATORS: readonly ShaderGenerator[] = [
   blendOp,
   maskOp,
   levelsOp,
+  autoLevelsOp,
   transformOp,
   warpOp,
   blurOp,
@@ -620,6 +679,7 @@ export const OPERATORS: readonly ShaderGenerator[] = [
   edgeFadeOp,
   unpackOp,
   packOp,
+  uniform,
   customOp,
   ...ANIMATION_OPERATORS,
 ];
