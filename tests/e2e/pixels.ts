@@ -1,6 +1,8 @@
 import type { Locator, Page } from '@playwright/test';
 
 export interface PixelProbe {
+  readonly width: number;
+  readonly height: number;
   /** Luminance (0-255) at fractional image coordinates (x right, y down). */
   lum(x: number, y: number): number;
   /** RGB (0-255) at fractional image coordinates. */
@@ -15,7 +17,10 @@ export interface PixelProbe {
 
 /** Screenshots `locator` and decodes it in the page to probe pixel values. */
 export async function probe(page: Page, locator: Locator): Promise<PixelProbe> {
-  const png = await locator.screenshot();
+  return probePng(page, await locator.screenshot());
+}
+
+export async function probePng(page: Page, png: Buffer): Promise<PixelProbe> {
   const { width, height, data } = await page.evaluate(async (b64) => {
     const blob = await (await fetch(`data:image/png;base64,${b64}`)).blob();
     const bmp = await createImageBitmap(blob);
@@ -24,7 +29,7 @@ export async function probe(page: Page, locator: Locator): Promise<PixelProbe> {
     ctx.drawImage(bmp, 0, 0);
     const img = ctx.getImageData(0, 0, bmp.width, bmp.height);
     return { width: bmp.width, height: bmp.height, data: Array.from(img.data) };
-  }, Buffer.from(png).toString('base64'));
+  }, png.toString('base64'));
 
   const rgb = (x: number, y: number): [number, number, number] => {
     const px = Math.min(width - 1, Math.max(0, Math.round(x * (width - 1))));
@@ -49,5 +54,5 @@ export async function probe(page: Page, locator: Locator): Promise<PixelProbe> {
   const sorted = [...counts.values()].sort((a, b) => b - a);
   const dominantShare = (n: number) =>
     sorted.slice(0, n).reduce((a, b) => a + b, 0) / Math.max(1, levels.length);
-  return { lum, rgb, stdDev, distinctTones, dominantShare };
+  return { width, height, lum, rgb, stdDev, distinctTones, dominantShare };
 }

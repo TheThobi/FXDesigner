@@ -184,6 +184,7 @@ export class PhysarumSimulation implements Simulation {
       .setAll(paramUniforms(this.defs, params))
       .set('u_seed', this.seed)
       .set('u_frame', this.frame)
+      .set('u_gridSize', [this.trail?.width ?? 1, this.trail?.height ?? 1])
       .set('u_brush', [
         brush?.uv[0] ?? 0,
         brush?.uv[1] ?? 0,

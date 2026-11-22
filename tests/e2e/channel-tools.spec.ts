@@ -1,9 +1,16 @@
+import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
-import { probe } from './pixels';
+import { probe, probePng } from './pixels';
 
-async function openGraph(page: Page, nodes: unknown[], selected: string, links: unknown[] = []) {
+async function openGraph(
+  page: Page,
+  nodes: unknown[],
+  selected: string,
+  links: unknown[] = [],
+  aspect = 1,
+) {
   await page.addInitScript(
-    ({ nodes, selected, links }) => {
+    ({ nodes, selected, links, aspect }) => {
       const document = {
         format: 'fx-designer',
         version: 7,
@@ -11,7 +18,7 @@ async function openGraph(page: Page, nodes: unknown[], selected: string, links: 
         links,
         selected,
         seed: 1,
-        aspect: 1,
+        aspect,
         resolution: 512,
       };
       const id = 'schanneltest';
@@ -22,11 +29,55 @@ async function openGraph(page: Page, nodes: unknown[], selected: string, links: 
       );
       localStorage.setItem(`ptm.library.doc.${id}`, JSON.stringify(document));
     },
-    { nodes, selected, links },
+    { nodes, selected, links, aspect },
   );
   await page.goto('/?e2e');
   await expect(page.locator('.preview-canvas')).toBeVisible();
 }
+
+test(
+  'portrait brush cursor matches the round painted footprint',
+  { tag: '@part2' },
+  async ({ page }) => {
+    await openGraph(
+      page,
+      [
+        {
+          id: 'paint',
+          generator: 'paint-mask',
+          x: 0,
+          y: 0,
+          params: { brushSize: 0.15, hardness: 0.95, strength: 1, simResolution: 256 },
+        },
+      ],
+      'paint',
+      [],
+      0.5,
+    );
+    const canvas = page.locator('.preview-canvas');
+    await page.keyboard.press('f');
+    const box = (await canvas.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    const cursor = page.locator('.brush-cursor');
+    await expect(cursor).toBeVisible();
+    const ring = (await cursor.boundingBox())!;
+    expect(Math.abs(ring.width - ring.height)).toBeLessThan(1);
+    await page.mouse.down();
+    try {
+      await expect
+        .poll(async () => (await probe(page, canvas)).lum(0.56, 0.5), { timeout: 20000 })
+        .toBeGreaterThan(190);
+    } finally {
+      await page.mouse.up();
+    }
+    await page.mouse.move(0, 0);
+    const painted = await probe(page, canvas);
+    expect(painted.lum(0.61, 0.5)).toBeGreaterThan(190);
+    expect(painted.lum(0.5, 0.555)).toBeGreaterThan(190);
+    expect(painted.lum(0.5, 0.61)).toBeLessThan(60);
+    await canvas.screenshot({ path: 'test-results/generators/portrait-brush.png' });
+  },
+);
 
 test(
   'Smoke & Fire keeps its edge density and only Wrap emits across the seam',
@@ -181,14 +232,23 @@ test(
       ],
       'embers',
     );
-    const image = page.locator('.preview-canvas');
-    const pixels = await probe(page, image);
-    await image.screenshot({ path: 'test-results/generators/ember-motes-stretched.png' });
+    // The preview card has an inset shadow over the outermost texels.
+    await page.getByRole('button', { name: 'Export', exact: true }).click();
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: /Image \(PNG\)/ }).click(),
+    ]);
+    const path = 'test-results/generators/ember-motes-stretched.png';
+    await download.saveAs(path);
+    const pixels = await probePng(page, await readFile(path));
     expect(pixels.stdDev).toBeGreaterThan(10);
-    const xs = Array.from({ length: 40 }, (_, i) => (i + 1) / 41);
+    const xs = Array.from({ length: pixels.width }, (_, i) => i / (pixels.width - 1));
     // A continuous spark can vary slightly between the pixel centers on either side.
-    const seam = Math.max(...xs.map((x) => Math.abs(pixels.lum(x, 0.002) - pixels.lum(x, 0.998))));
-    const cell = Math.max(...xs.map((x) => Math.abs(pixels.lum(x, 0.498) - pixels.lum(x, 0.502))));
+    const seam = Math.max(...xs.map((x) => Math.abs(pixels.lum(x, 0) - pixels.lum(x, 1))));
+    const middle = Math.floor(pixels.height / 2);
+    const before = (middle - 1) / (pixels.height - 1);
+    const after = middle / (pixels.height - 1);
+    const cell = Math.max(...xs.map((x) => Math.abs(pixels.lum(x, before) - pixels.lum(x, after))));
     expect(seam).toBeLessThan(25);
     expect(cell).toBeLessThan(16);
     expect(errors).toEqual([]);

@@ -5,8 +5,7 @@ void main() {
   if (u_relax > 0.0) f = mix(f, boxAverage().rg, u_relax * 0.25);
 
   if (u_brush.w > 0.5) {
-    vec2 d = abs(v_uv - u_brush.xy);
-    d = min(d, 1.0 - d);
+    vec2 d = brushDelta(v_uv, u_brush.xy);
     float r = u_brush.z;
     float falloff = 1.0 - smoothstep(r * (1.0 - u_brushSoftness), r, length(d));
     float amount = falloff * u_brushOpacity * 0.25;

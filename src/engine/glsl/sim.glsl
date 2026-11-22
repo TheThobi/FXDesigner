@@ -43,11 +43,19 @@ vec4 boxAverage() {
   return sum / 9.0;
 }
 
+// Brush radii are fractions of the short side.
+vec2 brushScale() {
+  return u_gridSize / min(u_gridSize.x, u_gridSize.y);
+}
+
+vec2 brushDelta(vec2 uv, vec2 center) {
+  return (openEdges() ? uv - center : wrapDelta(uv, center)) * brushScale();
+}
+
 // Brush: 0 = none, 1 = paint, 2 = erase. Wrap mode paints across edges.
 int brushMode() {
   if (u_brush.w < 0.5) return 0;
-  vec2 d = abs(v_uv - u_brush.xy);
-  if (!openEdges()) d = min(d, 1.0 - d);
+  vec2 d = brushDelta(v_uv, u_brush.xy);
   if (length(d) > u_brush.z) return 0;
   return u_brush.w < 1.5 ? 1 : 2;
 }

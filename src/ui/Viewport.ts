@@ -1743,12 +1743,11 @@ export class Viewport {
     const rect = image.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * NODE_IMAGE;
     const y = ((e.clientY - rect.top) / rect.height) * this.imageHeight;
-    const w = (2 * r * NODE_IMAGE) / this.viewTiles;
-    const h = (2 * r * this.imageHeight) / this.viewTiles;
+    const diameter = (2 * r * Math.min(NODE_IMAGE, this.imageHeight)) / this.viewTiles;
     this.brushCursor.hidden = false;
-    this.brushCursor.style.width = `${w}px`;
-    this.brushCursor.style.height = `${h}px`;
-    this.brushCursor.style.transform = `translate(${x - w / 2}px, ${y - h / 2}px)`;
+    this.brushCursor.style.width = `${diameter}px`;
+    this.brushCursor.style.height = `${diameter}px`;
+    this.brushCursor.style.transform = `translate(${x - diameter / 2}px, ${y - diameter / 2}px)`;
     this.brushCursor.classList.toggle('erase', e.shiftKey || (e.buttons & 2) !== 0);
   }
 

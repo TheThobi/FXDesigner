@@ -27,8 +27,7 @@ void main() {
   }
 
   if (u_brush.w > 0.5) {
-    vec2 d = abs(v_uv - u_brush.xy);
-    d = min(d, 1.0 - d);
+    vec2 d = brushDelta(v_uv, u_brush.xy);
     float f = exp(-dot(d, d) / (u_brush.z * u_brush.z));
     if (u_brush.w < 1.5) {
       vel += u_brushDir * size * f * 0.5;

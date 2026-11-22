@@ -34,7 +34,7 @@ void main() {
   h += dropsAt(uv) * 0.25;
   int brush = brushMode();
   if (brush == 1) {
-    vec2 d = wrapDelta(uv, u_brush.xy) / max(u_brush.z, 1e-4);
+    vec2 d = brushDelta(uv, u_brush.xy) / max(u_brush.z, 1e-4);
     h -= u_dropStrength * 0.3 * exp(-4.0 * dot(d, d));
   } else if (brush == 2) {
     h *= 0.8;

@@ -5,8 +5,8 @@ void main() {
   if (u_brush.w > 0.5) {
     vec2 a = u_brush.xy - u_brushDir;
     vec2 b = u_brush.xy;
-    vec2 pa = wrapDelta(v_uv, a);
-    vec2 ba = b - a;
+    vec2 pa = brushDelta(v_uv, a);
+    vec2 ba = (b - a) * brushScale();
     float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-8), 0.0, 1.0);
     float r = length(pa - ba * h) / max(u_brush.z, 1e-4);
     float k = (1.0 - smoothstep(u_hardness, 1.0, r)) * u_strength;

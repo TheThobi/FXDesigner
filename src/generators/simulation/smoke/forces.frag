@@ -73,7 +73,7 @@ void main() {
 
   int brush = brushMode();
   if (brush != 0) {
-    vec2 d = openEdges() ? uv - u_brush.xy : wrapDelta(uv, u_brush.xy);
+    vec2 d = brushDelta(uv, u_brush.xy);
     float f = exp(-dot(d, d) / (u_brush.z * u_brush.z));
     if (brush == 1) {
       vel += u_brushDir * u_gridSize * f * 0.4;
