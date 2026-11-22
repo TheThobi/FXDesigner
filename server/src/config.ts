@@ -17,6 +17,41 @@ export interface Config {
   readonly registration: boolean;
 }
 
+/** Variables replaced in local development (`npm run dev:server`) by their `DEV_` version. */
+const DEV_OVERRIDES = [
+  'DATABASE_URL',
+  'PGHOST',
+  'PGPORT',
+  'PGDATABASE',
+  'PGUSER',
+  'PGPASSWORD',
+  'PUBLIC_URL',
+] as const;
+
+/**
+ * Local development (`--dev`, set by `npm run dev:server`): the same .env serves both the
+ * server and your machine. `DEV_PGHOST=localhost`, `DEV_PGPORT=5433`… replace the container
+ * settings (the database container's name means nothing outside Docker), and PUBLIC_URL
+ * becomes the Vite dev server (requests come from it). Returns the variables that changed.
+ */
+export function applyDevOverrides(env: NodeJS.ProcessEnv, argv: readonly string[]): string[] {
+  if (!argv.includes('--dev') && env.FXD_DEV !== '1') return [];
+  const changed: string[] = [];
+  for (const key of DEV_OVERRIDES) {
+    const value = env[`DEV_${key}`];
+    if (value === undefined || value === '') continue;
+    env[key] = value;
+    changed.push(key);
+  }
+  if (!env.DEV_PUBLIC_URL) {
+    env.PUBLIC_URL = 'http://localhost:5173';
+    changed.push('PUBLIC_URL');
+  }
+  // A DATABASE_URL from the deployment would win over the local PG* settings.
+  if (!env.DEV_DATABASE_URL && changed.some((k) => k.startsWith('PG'))) delete env.DATABASE_URL;
+  return changed;
+}
+
 function flag(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined || value === '') return fallback;
   return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());

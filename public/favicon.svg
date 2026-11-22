@@ -1,1 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><defs><linearGradient id="g" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#ff8a2a"/><stop offset=".5" stop-color="#ef4f8f"/><stop offset="1" stop-color="#9a6bff"/></linearGradient></defs><rect x="1" y="1" width="22" height="22" rx="6" fill="#18181c" stroke="url(#g)" stroke-width="1.4"/><path d="M12 4.2c.6 4.9 2.9 7.2 7.8 7.8-4.9.6-7.2 2.9-7.8 7.8-.6-4.9-2.9-7.2-7.8-7.8 4.9-.6 7.2-2.9 7.8-7.8z" fill="url(#g)"/><circle cx="12" cy="12" r="1.5" fill="#fff4e8"/><circle cx="18.2" cy="5.8" r="1" fill="#ffd0a0"/></svg>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="24" height="24" viewBox="0 0 24 24">
+  <defs>
+    <linearGradient id="linear-gradient-1" x1="1" y1="23" x2="23" y2="1" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff8a2a"/>
+      <stop offset="0.5" stop-color="#ef4f8f"/>
+      <stop offset="1" stop-color="#9a6bff"/>
+    </linearGradient>
+    <linearGradient id="linear-gradient-2" x1="3.236" y1="20.764" x2="20.764" y2="3.236" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff8a2a"/>
+      <stop offset="0.5" stop-color="#ef4f8f"/>
+      <stop offset="1" stop-color="#9a6bff"/>
+    </linearGradient>
+  </defs>
+  <title>favicon.svg</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M7 1 L17 1 C20.314 1 23 3.686 23 7 L23 17 C23 20.314 20.314 23 17 23 L7 23 C3.686 23 1 20.314 1 17 L1 7 C1 3.686 3.686 1 7 1 Z" fill="#18181c" stroke="url(#linear-gradient-1)" stroke-width="1.4"/>
+    <path d="M13.226 3.962 C13.998 8.733 15.267 10.002 20.038 10.774 C20.522 10.842 20.522 13.158 20.038 13.226 C15.267 13.998 13.998 15.267 13.226 20.038 C13.158 20.522 10.842 20.522 10.774 20.038 C10.002 15.267 8.733 13.998 3.962 13.226 C3.478 13.158 3.478 10.842 3.962 10.774 C8.733 10.002 10.002 8.733 10.774 3.962 C10.842 3.478 13.158 3.478 13.226 3.962 Z" fill="url(#linear-gradient-2)"/>
+    <circle cx="12" cy="12" r="2.845" fill="#18181c"/>
+  </g>
+</svg>

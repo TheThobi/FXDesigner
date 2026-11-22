@@ -102,58 +102,37 @@ export const crystal: ShaderGenerator = {
   name: 'Crystal',
   category: 'material',
   description:
-    'Crystalline shards (in the spirit of Substance Crystal 2): long prisms with a lit and a ' +
-    'dark face, overlapping in layers. Seamless.',
+    'Long thin translucent shards layered around mid gray, mostly along one direction (in the ' +
+    'spirit of Substance Crystal 2): crystalline streaks for ice, quartz, stylized rock. Seamless.',
   animated: false,
   layout: 'tiled',
   fragment: crystalFrag,
   params: [
-    param.float('scale', 'Scale', 4, 1, 16, { description: 'Cells of the largest shards.' }),
-    param.int('density', 'Shards per cell', 2, 1, 4),
-    param.float('size', 'Size', 1.2, 0.2, 1.9, { description: 'Shard length, in cells.' }),
-    param.float('thinness', 'Width', 0.22, 0.05, 1, { description: 'Width / length ratio.' }),
-    param.float('angle', 'Angle', 60, 0, 180, { unit: '°' }),
-    param.float('disorder', 'Disorder', 1, 0, 1, {
-      description: 'Random directions (1) or all along Angle (0).',
+    param.float('scale', 'Scale', 3, 1, 16, { description: 'Cells of the largest shards.' }),
+    param.int('density', 'Shards per cell', 4, 1, 6),
+    param.float('length', 'Length', 1.9, 0.2, 1.9, { description: 'Shard length, in cells.' }),
+    param.float('width', 'Width', 0.22, 0.02, 0.8, { description: 'Base width / length.' }),
+    param.float('angle', 'Angle', 90, 0, 180, { unit: '°' }),
+    param.float('spread', 'Angle spread', 22, 0, 90, {
+      unit: '°',
+      description: 'Random tilt around Angle (90 = any direction).',
     }),
-    param.float('facet', 'Facet shading', 0.6, 0, 1, {
-      description: 'Contrast between the two faces of a shard.',
-    }),
-    param.float('edge', 'Edge', 0.08, 0, 0.5, { description: 'Dark rim around each shard.' }),
-    param.int('layers', 'Layers', 2, 1, 5, { description: 'Finer shards stacked on top.' }),
+    param.float('facet', 'Facet shading', 0.7, 0, 1),
+    param.int('layers', 'Layers', 1, 1, 4, { description: 'Finer shards on top.' }),
+    param.float('contrast', 'Contrast', 0.8, 0.2, 4),
   ],
   presets: [
-    { name: 'Quartz cluster', values: {} },
+    { name: 'Vertical shards', values: {} },
     {
-      name: 'Aligned needles',
-      values: { scale: 6, density: 3, size: 1.6, thinness: 0.08, disorder: 0.15, angle: 75 },
+      name: 'Fine needles',
+      values: { scale: 6, density: 5, length: 1.8, width: 0.05, spread: 10 },
     },
-    {
-      name: 'Shattered ice',
-      values: { scale: 3, density: 2, size: 1.4, thinness: 0.6, facet: 0.8, edge: 0.04 },
-    },
-    {
-      name: 'Gem facets',
-      values: { scale: 4, density: 4, size: 0.9, thinness: 0.9, facet: 1, edge: 0.15, layers: 1 },
-    },
-    {
-      name: 'Crystal dust',
-      values: { scale: 10, density: 3, size: 0.6, thinness: 0.3, layers: 3 },
-    },
-    {
-      name: 'Amethyst spikes',
-      values: {
-        scale: 3,
-        density: 3,
-        size: 1.9,
-        thinness: 0.18,
-        disorder: 0.5,
-        angle: 90,
-        layers: 3,
-      },
-    },
+    { name: 'Crossed slivers', values: { spread: 45, density: 4, width: 0.1, layers: 3 } },
+    { name: 'Soft facets', values: { scale: 3, width: 0.3, facet: 0.4, contrast: 0.8 } },
+    { name: 'Shattered', values: { scale: 5, spread: 90, length: 1, width: 0.25, layers: 3 } },
+    { name: 'Horizontal streaks', values: { angle: 0, spread: 12, density: 4, width: 0.08 } },
   ],
-  featuredPreset: 'Quartz cluster',
+  featuredPreset: 'Vertical shards',
 };
 
 export const anisotropicNoise: ShaderGenerator = {

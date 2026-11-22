@@ -7,14 +7,12 @@ import {
   type GradientStop,
   type GradientValue,
 } from '../../params/gradient';
-import { GRADIENT_PRESETS } from '../../params/gradientPresets';
 import type { FloatParam, GradientParam, ParamValue } from '../../params/types';
 import { rgbToHex } from '../../util/color';
 import { clamp01 } from '../../util/math';
 import { h } from '../dom';
 import { icon } from '../icons';
 import { openColorPicker } from './colorPicker';
-import { gradientPresetMenu } from './gradientMenu';
 import { numberControl } from './number';
 import type { ChangeHandler, Control } from './types';
 
@@ -83,13 +81,6 @@ export function gradientControl(
     { type: 'button', class: 'icon-btn', title: 'Reverse the ramp', 'aria-label': 'Reverse' },
     icon('swap', 14),
   );
-  const presetMenu = gradientPresetMenu(GRADIENT_PRESETS, (value) => {
-    stops = [...value.stops];
-    selected = 0;
-    render();
-    emit();
-  });
-
   const removeSelected = () => {
     if (stops.length <= 1) return;
     stops.splice(selected, 1);
@@ -229,7 +220,6 @@ export function gradientControl(
         reverseBtn,
         removeBtn,
       ),
-      h('div', { class: 'gradient-actions' }, presetMenu),
     ),
     setValue: (v) => {
       if (!isGradientValue(v)) return;

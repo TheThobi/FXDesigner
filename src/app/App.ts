@@ -2,6 +2,7 @@ import {
   CATEGORY_LABELS,
   isOperator,
   type GeneratorDefinition,
+  type ShaderGenerator,
   type Simulation,
   type SimulationGenerator,
   type SimulationPointer,
@@ -12,6 +13,7 @@ import { ShaderCompileError } from '../engine/gl/ShaderProgram';
 import { inputsOf, outputsOf, type NodeValueType } from '../engine/nodes';
 import { upgradeLegacyPost } from '../engine/post/legacy';
 import {
+  COLOR_MODE,
   DEFAULT_RAMP,
   OUTPUT_PARAMS,
   POST_MODULES,
@@ -22,6 +24,7 @@ import {
   TIME_PARAMS,
 } from '../engine/post/schema';
 import {
+  ProgramPending,
   Renderer,
   type Capture,
   type ChainInput,
@@ -31,6 +34,7 @@ import {
   type NodeTargets,
 } from '../engine/Renderer';
 import { DEFAULT_GENERATOR_ID, GENERATORS, getGenerator } from '../generators/registry';
+import { GRADIENT_PRESETS } from '../params/gradientPresets';
 import type { GradientValue } from '../params/gradient';
 import type { ParamDef, ParamValue, ParamValues, Preset } from '../params/types';
 import { defaultValues, getNumber, sanitizeValues } from '../params/values';
@@ -49,7 +53,6 @@ import { DockManager } from '../ui/Dock';
 import { Layout } from '../ui/Layout';
 import { addPanelClose, dockPanel, tabbedPanel } from '../ui/Panel';
 import { ParamPanel } from '../ui/ParamPanel';
-import { createSplitter } from '../ui/Splitter';
 import { Timeline, TIMELINE_FPS, TIMELINE_SPEEDS } from '../ui/Timeline';
 import { toast } from '../ui/toast';
 import { Toolbar } from '../ui/Toolbar';
@@ -80,6 +83,10 @@ import { clearHash, loadSession, readHashDocument, saveSession, shareUrl } from 
 import {
   codeDiffers,
   createNode,
+  customParamKey,
+  effectiveGenerator,
+  sanitizeCustomParams,
+  type CustomParamSpec,
   DEFAULT_RESOLUTION,
   evaluationOrder,
   fullEvaluationOrder,
@@ -101,12 +108,24 @@ import {
   withoutLink,
   withoutNode,
   type EditorState,
+  type GraphLink,
   type GraphNode,
 } from './state';
 import { ThumbnailCache } from './thumbnails';
 import { UserPresets } from './userPresets';
 
 const THUMBNAIL_SIZE = 64;
+/**
+ * `?e2e`: no background thumbnails (browser tiles, preset galleries). Software-rendered test
+ * browsers would spend most of their time on them.
+ */
+const LITE = new URLSearchParams(window.location.search).has('e2e');
+/** Color ramp presets as gallery presets (only their ramp matters). */
+const RAMP_PRESETS: readonly Preset[] = GRADIENT_PRESETS.map((p) => ({
+  name: p.name,
+  values: {},
+  ramp: p.value,
+}));
 /** Displayed frames a simulation runs before its browser thumbnail is captured. */
 const SIM_THUMBNAIL_FRAME = 240;
 /** Adaptive preview: frame interval (ms) above which edits render at half size… */
@@ -230,6 +249,7 @@ export class App {
   private readonly refreshGalleries = debounce(() => {
     this.paramPanel.reloadThumbnails();
     this.postPanel.reloadThumbnails();
+    this.colorPanel.reloadThumbnails();
   }, 700);
   private readonly statusLeft: HTMLElement;
   private readonly statusMid: HTMLElement;
@@ -364,36 +384,17 @@ export class App {
     );
 
     const dock = h('div', { class: 'dock' });
-    const splitters = {
-      left: createSplitter(dock, {
-        cssVar: '--left-w',
-        side: 'left',
-        min: 200,
-        max: 640,
-        defaultWidth: 300,
-        storageKey: 'ptm.ui.left',
-      }),
-      right: createSplitter(dock, {
-        cssVar: '--right-w',
-        side: 'right',
-        min: 260,
-        max: 640,
-        defaultWidth: 380,
-        storageKey: 'ptm.ui.right',
-      }),
-    };
-    dock.append(splitters.left, viewport.panel, splitters.right);
     this.dock = new DockManager(
       dock,
-      viewport.panel,
-      splitters,
       [
         { id: 'browser', title: 'Browser', icon: 'texture', element: browser.panel },
+        { id: 'viewport', title: 'Viewport', icon: 'viewport', element: viewport.panel },
         { id: 'details', title: 'Details', icon: 'details', element: details.panel },
       ],
       this.layout,
       () => window.dispatchEvent(new Event('resize')),
     );
+    this.layout.onReset = () => this.dock.reset();
     appEl.append(toolbarEl, dock, statusBar);
     root.append(appEl);
 
@@ -558,6 +559,11 @@ export class App {
 
   private get generator(): GeneratorDefinition {
     return getGenerator(this.node.generator) ?? GENERATORS[0]!;
+  }
+
+  /** The selected node's generator with its custom parameters (Code view), if any. */
+  private get nodeDef(): GeneratorDefinition {
+    return effectiveGenerator(this.generator, this.node);
   }
 
   private get params(): ParamValues {
@@ -899,6 +905,8 @@ export class App {
     // New nodes start from the default look: one node's colors never leak into others.
     const node = createNode(def, newNodeId(this.state.nodes), x, y);
     recordNodeUsage(def.id);
+    // A Custom Shader is written in code: show its Code view.
+    if (def.id === 'custom-shader') this.codeOpen = true;
     this.commit(withAddedNode(this.state, node));
   }
 
@@ -1120,7 +1128,7 @@ export class App {
     const moduleDefs = POST_PROCESS_PARAMS.filter((d) => d.group !== 'Color');
 
     this.paramPanel.render({
-      defs: def.params,
+      defs: this.nodeDef.params,
       values: this.params,
       gallery: {
         title: 'Presets',
@@ -1138,13 +1146,32 @@ export class App {
       },
       groups: def.groups,
       onChange: (key, value) => this.setParam(key, value),
-      onReset: () => this.replaceParams(defaultValues(def.params)),
+      onReset: () => this.replaceParams(defaultValues(this.nodeDef.params)),
     });
     this.colorPanel.render({
       defs: [...colorModeDef, SHARED_RAMP_PARAM],
       values: this.colorValues(),
       defaults: { ...defaults, ramp: DEFAULT_RAMP },
       groups: POST_MODULES,
+      gallery: {
+        title: 'Color presets',
+        position: 'bottom',
+        // Only gradient-map mode uses the ramp.
+        visibleWhen: (v) => v.colorMode === COLOR_MODE.gradient,
+        presets: RAMP_PRESETS,
+        onPick: (preset) => {
+          if (!preset.ramp) return;
+          this.commit(
+            withNode(this.state, this.node.id, {
+              ramp: preset.ramp,
+              post: { ...this.post, colorMode: COLOR_MODE.gradient },
+            }),
+          );
+          this.syncPanels();
+        },
+        onHover: (preset) => this.previewPreset('ramp', preset),
+        thumbnail: (preset) => this.presetThumbnail('ramp', preset),
+      },
       onChange: (key, value) => {
         if (key === 'ramp') this.setRamp(value as GradientValue);
         else setPost(key, value);
@@ -1255,13 +1282,95 @@ export class App {
     if (!show || def.kind !== 'shader') return;
     const node = this.node;
     const code = node.code ?? def.fragment.replace(/\r\n?/g, '\n');
+    const custom = node.customParams ?? [];
     this.codePanel.render({
       code,
       modified: node.code !== undefined && codeDiffers(node.code, def.fragment),
-      reference: shaderReference(def),
+      reference: shaderReference(this.nodeDef as ShaderGenerator),
+      params: {
+        params: custom,
+        builtIn: def.params,
+        onAdd: (label) => {
+          const taken = new Set([...def.params, ...custom].map((p) => p.key));
+          this.setCustomParams([
+            ...custom,
+            {
+              key: customParamKey(label, taken),
+              label,
+              type: 'float',
+              min: 0,
+              max: 1,
+              default: 0.5,
+              group: '',
+            },
+          ]);
+        },
+        onChange: (params) => this.renameAndSetCustomParams(custom, params),
+      },
       onChange: (text) => this.setNodeCode(text),
       onRevert: () => this.setNodeCode(null),
     });
+  }
+
+  /**
+   * Edited custom parameters: a renamed parameter gets a uniform named after it; its value and
+   * the code's references to the old uniform follow.
+   */
+  private renameAndSetCustomParams(
+    before: readonly CustomParamSpec[],
+    after: readonly CustomParamSpec[],
+  ): void {
+    const def = this.generator;
+    if (def.kind !== 'shader') return;
+    let code = this.node.code;
+    const params = { ...this.node.params };
+    let changed = false;
+    const taken = new Set([...def.params.map((p) => p.key), ...after.map((p) => p.key)]);
+    const renamed = after.map((p, i) => {
+      const old = before[i];
+      if (!old || old.key !== p.key || old.label === p.label) return p;
+      taken.delete(p.key);
+      const key = customParamKey(p.label, taken);
+      taken.add(key);
+      if (key === p.key) return p;
+      changed = true;
+      const pattern = new RegExp(`\\bu_${p.key}\\b`, 'g');
+      code = (code ?? def.fragment).replace(pattern, `u_${key}`);
+      if (p.key in params) {
+        params[key] = params[p.key]!;
+        delete params[p.key];
+      }
+      return { ...p, key };
+    });
+    if (changed) {
+      const node: GraphNode = { ...this.node, params };
+      const withCode =
+        code !== undefined && codeDiffers(code, def.fragment) ? { ...node, code } : node;
+      this.commit({
+        ...this.state,
+        nodes: this.state.nodes.map((n) => (n.id === node.id ? withCode : n)),
+      });
+    }
+    this.setCustomParams(renamed);
+  }
+
+  /**
+   * Parameters created in the Code view: validated, values completed with their defaults,
+   * then the panels rebuilt (new sliders, new uniforms in the reference).
+   */
+  private setCustomParams(specs: readonly CustomParamSpec[]): void {
+    const def = this.generator;
+    if (def.kind !== 'shader') return;
+    const custom = sanitizeCustomParams(specs, new Set(def.params.map((p) => p.key)));
+    const node = { ...this.node, customParams: custom };
+    if (!custom.length) delete (node as { customParams?: unknown }).customParams;
+    const params = sanitizeValues(effectiveGenerator(def, node).params, this.node.params);
+    this.commit({
+      ...this.state,
+      nodes: this.state.nodes.map((n) => (n.id === node.id ? { ...node, params } : n)),
+    });
+    this.renderPanels();
+    this.renderCode();
   }
 
   /** Edited GLSL of the selected node (null or the generator's code = back to the generator). */
@@ -1283,11 +1392,18 @@ export class App {
   // ---- Preset galleries ---------------------------------------------------------------------
 
   /** The selected node as `preset` would make it (generator settings, or Post Process look). */
-  private presetNode(kind: 'params' | 'look', preset: Preset): GraphNode {
+  private presetNode(kind: 'params' | 'look' | 'ramp', preset: Preset): GraphNode {
     const node = this.node;
     const def = this.generator;
+    if (kind === 'ramp')
+      return {
+        ...node,
+        ramp: preset.ramp ?? node.ramp,
+        post: { ...node.post, colorMode: COLOR_MODE.gradient },
+      };
     if (kind === 'params') {
-      const params = sanitizeValues(def.params, { ...defaultValues(def.params), ...preset.values });
+      const defs = effectiveGenerator(def, node).params;
+      const params = sanitizeValues(defs, { ...defaultValues(defs), ...preset.values });
       return { ...node, params };
     }
     const look = { ...defaultValues(SCOPED_POST_PARAMS), ...preset.values };
@@ -1295,7 +1411,7 @@ export class App {
   }
 
   /** Pointer over a gallery tile: the node shows the preset until the pointer leaves. */
-  private previewPreset(kind: 'params' | 'look', preset: Preset | null): void {
+  private previewPreset(kind: 'params' | 'look' | 'ramp', preset: Preset | null): void {
     this.hoverPreview = preset ? this.presetNode(kind, preset) : null;
   }
 
@@ -1306,7 +1422,11 @@ export class App {
   }
 
   /** Thumbnail of the selected node with `preset` applied (cached, rendered in the background). */
-  private presetThumbnail(kind: 'params' | 'look', preset: Preset): Promise<string | null> {
+  private presetThumbnail(
+    kind: 'params' | 'look' | 'ramp',
+    preset: Preset,
+  ): Promise<string | null> {
+    if (LITE) return Promise.resolve(null);
     const node = this.presetNode(kind, preset);
     const upstream = evaluationOrder(this.state, node.id)
       .filter((n) => n.id !== node.id)
@@ -1318,6 +1438,7 @@ export class App {
       node.ramp,
       node.postEnabled,
       node.code,
+      node.customParams,
       upstream,
       this.state.links,
       this.state.seed,
@@ -1356,7 +1477,12 @@ export class App {
         this.galleryThumbs.set(job.key, url);
         job.done(url);
       } catch (e) {
-        console.warn('Preset preview failed', e);
+        if (e instanceof ProgramPending) {
+          // Custom code compiling: come back to it later.
+          this.galleryQueue.push(job);
+          this.galleryTimer = setTimeout(() => this.renderGalleryThumb(), 200);
+          return;
+        }
         job.done(null);
       }
     }
@@ -1496,7 +1622,8 @@ export class App {
       if (!ok || node.id !== this.node.id || def !== this.generator) return;
     }
     const before = this.node.params;
-    const params = sanitizeValues(def.params, { ...defaultValues(def.params), ...preset.values });
+    const defs = this.nodeDef.params;
+    const params = sanitizeValues(defs, { ...defaultValues(defs), ...preset.values });
     this.commit(withNode(this.state, this.node.id, { params }));
     this.baseline = { ...this.baselineFor(this.node), params };
     this.syncPanels();
@@ -1871,9 +1998,15 @@ export class App {
 
   /** The frame request of `node` (inputs are resolved by the caller). */
   private requestFor(node: GraphNode, time: number, forExport: boolean): FrameRequest {
-    const def = getGenerator(node.generator) ?? GENERATORS[0]!;
+    const base = getGenerator(node.generator) ?? GENERATORS[0]!;
+    // Custom parameters are uniforms of the node's own program (code path).
+    const def = effectiveGenerator(base, node);
+    const code =
+      node.code ??
+      (base.kind === 'shader' && node.customParams?.length ? base.fragment : undefined);
     const overrides = forExport ? def.exportOverrides : undefined;
     return {
+      ...(code !== undefined ? { code } : {}),
       generator: def,
       params: overrides ? { ...node.params, ...overrides } : node.params,
       post: node.post,
@@ -1882,7 +2015,6 @@ export class App {
       seed: this.state.seed,
       key: node.id,
       postEnabled: node.postEnabled,
-      ...(node.code !== undefined ? { code: node.code } : {}),
     };
   }
 
@@ -2374,7 +2506,8 @@ export class App {
         cache.signature = signature;
         cache.version++;
       } catch (e) {
-        this.showRenderError(node.id, e);
+        // User code still compiling in the background: keep the last image, retry next frame.
+        if (!(e instanceof ProgramPending)) this.showRenderError(node.id, e);
       }
     }
 
@@ -2439,6 +2572,7 @@ export class App {
 
   /** Snapshot of the running simulation for its tile in the generator browser. */
   private captureSimulationThumbnail(def: SimulationGenerator): void {
+    if (LITE) return;
     const capture = this.renderer.createCapture(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
     try {
       const url = captureToDataUrl(capture, this.requestFor(this.node, this.time, true));
@@ -2478,15 +2612,18 @@ export class App {
   /** Browser thumbnail of `def` with its defaults, or with `preset` applied. */
   private thumbnailRequest(def: GeneratorDefinition, preset?: Preset): FrameRequest {
     const params = sanitizeValues(def.params, { ...defaultValues(def.params), ...preset?.values });
-    const base = postDefaults(def);
-    const post = sanitizeValues(
-      POST_PARAMS,
-      { ...base, ...upgradeLegacyPost(preset?.post ?? {}) },
-      base,
-    );
-    // Browser thumbnails never depend on a node's colors: preset ramp or the default one.
-    const ramp = preset?.ramp ?? DEFAULT_RAMP;
-    const req = { generator: def, params, post, ramp, time: 1.3, seed: 7, key: 'thumbnail' };
+    // Presets set shapes, not colors: thumbnails use the generator's own Post Process
+    // defaults and the default ramp, whatever look a preset may also carry.
+    const post = postDefaults(def);
+    const req = {
+      generator: def,
+      params,
+      post,
+      ramp: DEFAULT_RAMP,
+      time: 1.3,
+      seed: 7,
+      key: 'thumbnail',
+    };
     const overrides = def.exportOverrides;
     return overrides ? { ...req, params: { ...req.params, ...overrides } } : req;
   }
@@ -2496,7 +2633,7 @@ export class App {
 
   private previewPresets(id: string): void {
     const def = getGenerator(id);
-    if (!def || def.kind !== 'shader' || isOperator(def) || !def.presets?.length) return;
+    if (LITE || !def || def.kind !== 'shader' || isOperator(def) || !def.presets?.length) return;
     const cached = this.presetThumbs.get(id);
     if (cached) {
       this.generatorList.setPresetThumbnails(id, cached);
@@ -2538,6 +2675,7 @@ export class App {
   private requestThumbnail(id: string): void {
     const def = getGenerator(id);
     if (
+      LITE ||
       !def ||
       def.kind !== 'shader' ||
       isOperator(def) ||
@@ -2598,6 +2736,11 @@ export class App {
       } else if (mod && e.key.toLowerCase() === 'd') {
         e.preventDefault();
         this.duplicateNode();
+      } else if (mod && e.key.toLowerCase() === 'c' && !window.getSelection()?.toString()) {
+        this.copyNodes();
+      } else if (mod && e.key.toLowerCase() === 'v' && this.clipboard) {
+        e.preventDefault();
+        this.pasteNodes();
       } else if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         if (e.shiftKey) this.redo();
@@ -2619,6 +2762,46 @@ export class App {
   }
 
   /** Ctrl+D: copy of the selected node (settings included), next to it. */
+  /** Ctrl+C: the selected nodes and the links between them (in-app clipboard). */
+  private copyNodes(): void {
+    const ids = new Set(this.viewport.selectedIds());
+    const nodes = this.state.nodes.filter((n) => ids.has(n.id));
+    if (!nodes.length) return;
+    this.clipboard = {
+      nodes,
+      links: this.state.links.filter((l) => ids.has(l.from) && ids.has(l.to)),
+    };
+    toast(`Copied ${nodes.length} node${nodes.length > 1 ? 's' : ''}`);
+  }
+
+  /**
+   * Ctrl+V: copies of the clipboard nodes (settings and inner links kept) under the pointer,
+   * or offset from the originals; they become the selection.
+   */
+  private pasteNodes(): void {
+    const clip = this.clipboard;
+    if (!clip?.nodes.length) return;
+    const minX = Math.min(...clip.nodes.map((n) => n.x));
+    const minY = Math.min(...clip.nodes.map((n) => n.y));
+    const at = this.viewport.pointerWorld();
+    const dx = at ? Math.round((at[0] - minX) / 24) * 24 : 48;
+    const dy = at ? Math.round((at[1] - minY) / 24) * 24 : 48;
+    const ids = new Map<string, string>();
+    let nodes = [...this.state.nodes];
+    for (const n of clip.nodes) {
+      const id = newNodeId(nodes);
+      ids.set(n.id, id);
+      nodes = [...nodes, { ...n, id, x: n.x + dx, y: n.y + dy, frozenAt: null }];
+    }
+    const links = clip.links.map((l) => ({ ...l, from: ids.get(l.from)!, to: ids.get(l.to)! }));
+    const pasted = [...ids.values()];
+    const primary = pasted[pasted.length - 1]!;
+    this.commit({ ...this.state, nodes, links: [...this.state.links, ...links], selectedId: primary });
+    this.viewport.selectMany(pasted, primary);
+  }
+
+  private clipboard: { nodes: readonly GraphNode[]; links: readonly GraphLink[] } | null = null;
+
   private duplicateNode(): void {
     const source = this.node;
     const [x, y] = this.viewport.placementNear(source.id);

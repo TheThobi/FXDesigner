@@ -5,6 +5,7 @@ import { param } from '../params/define';
 import type { GradientValue } from '../params/gradient';
 import type { ParamDef, ParamValues } from '../params/types';
 import { MAX_SEED } from '../util/random';
+import { RESERVED_UNIFORMS } from '../engine/shaderBuilder';
 import { defaultValues, sanitizeValues } from '../params/values';
 
 export const RESOLUTIONS = [128, 256, 512, 1024, 2048, 4096] as const;
@@ -82,6 +83,115 @@ export interface GraphNode {
    * to code and edited, it is a custom node. Absent = the generator's own code.
    */
   readonly code?: string;
+  /** Parameters created in the Code view (custom nodes): sliders exposed as uniforms. */
+  readonly customParams?: readonly CustomParamSpec[];
+}
+
+/** A parameter made by the user for a custom node (like a material parameter in Unreal). */
+export interface CustomParamSpec {
+  /** Uniform `u_<key>`. */
+  readonly key: string;
+  readonly label: string;
+  readonly type: 'float' | 'int' | 'bool' | 'color';
+  readonly min: number;
+  readonly max: number;
+  readonly default: number | boolean | string;
+  /** Section of the panel ("General" when empty). */
+  readonly group: string;
+}
+
+export const MAX_CUSTOM_PARAMS = 32;
+const CUSTOM_KEY_RE = /^[a-z][A-Za-z0-9]{0,23}$/;
+const RESERVED: ReadonlySet<string> = new Set(RESERVED_UNIFORMS);
+
+/** A uniform-safe key from a label ("Glow size" → glowSize), unique among `taken`. */
+export function customParamKey(label: string, taken: ReadonlySet<string>): string {
+  const words = label
+    .normalize('NFD')
+    .replace(/[^A-Za-z0-9 ]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  let key = words
+    .map((w, i) => (i === 0 ? w.toLowerCase() : w[0]!.toUpperCase() + w.slice(1).toLowerCase()))
+    .join('')
+    .replace(/^[^a-z]+/, '')
+    .slice(0, 20);
+  if (!key) key = 'param';
+  let unique = key;
+  for (let i = 2; taken.has(unique) || RESERVED.has(`u_${unique}`); i++) unique = `${key}${i}`;
+  return unique;
+}
+
+/** ParamDefs of custom parameters (shown and sanitized like the generator's own). */
+export function customParamDefs(specs: readonly CustomParamSpec[]): ParamDef[] {
+  return specs.map((s) => {
+    const extra = { group: s.group || 'Custom' };
+    switch (s.type) {
+      case 'bool':
+        return param.bool(s.key, s.label, s.default === true, extra);
+      case 'color':
+        return param.color(
+          s.key,
+          s.label,
+          typeof s.default === 'string' ? s.default : '#ffffff',
+          extra,
+        );
+      case 'int':
+        return param.int(
+          s.key,
+          s.label,
+          Math.round(Number(s.default) || 0),
+          Math.round(s.min),
+          Math.round(s.max),
+          extra,
+        );
+      default:
+        return param.float(s.key, s.label, Number(s.default) || 0, s.min, s.max, extra);
+    }
+  });
+}
+
+/** Validated custom parameters (untrusted documents): keys unique and not taken by `def`. */
+export function sanitizeCustomParams(raw: unknown, taken: ReadonlySet<string>): CustomParamSpec[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CustomParamSpec[] = [];
+  const keys = new Set(taken);
+  for (const r of raw.slice(0, MAX_CUSTOM_PARAMS)) {
+    const o = (typeof r === 'object' && r !== null ? r : {}) as Record<string, unknown>;
+    const key = typeof o.key === 'string' ? o.key : '';
+    if (!CUSTOM_KEY_RE.test(key) || keys.has(key) || RESERVED.has(`u_${key}`)) continue;
+    const type = ['float', 'int', 'bool', 'color'].includes(o.type as string)
+      ? (o.type as CustomParamSpec['type'])
+      : 'float';
+    const num = (v: unknown, f: number) => (typeof v === 'number' && Number.isFinite(v) ? v : f);
+    let min = num(o.min, 0);
+    let max = num(o.max, 1);
+    if (max <= min) [min, max] = [Math.min(min, max), Math.max(min, max) + 1];
+    const label = typeof o.label === 'string' && o.label.trim() ? o.label.trim().slice(0, 40) : key;
+    const group = typeof o.group === 'string' ? o.group.trim().slice(0, 40) : '';
+    const fallback = type === 'bool' ? false : type === 'color' ? '#ffffff' : min;
+    const def =
+      type === 'bool'
+        ? o.default === true
+        : type === 'color'
+          ? typeof o.default === 'string' && /^#[0-9a-f]{6}$/i.test(o.default)
+            ? o.default
+            : fallback
+          : Math.min(max, Math.max(min, num(o.default, min)));
+    keys.add(key);
+    out.push({ key, label, type, min, max, default: def, group });
+  }
+  return out;
+}
+
+/**
+ * The generator a node actually runs: its definition plus the node's custom parameters (code
+ * view). Without custom parameters, the definition itself.
+ */
+export function effectiveGenerator(def: GeneratorDefinition, node: GraphNode): GeneratorDefinition {
+  if (def.kind !== 'shader' || !node.customParams?.length) return def;
+  return { ...def, params: [...def.params, ...customParamDefs(node.customParams)] };
 }
 
 /** Longest custom code kept in documents (characters). */
@@ -211,8 +321,17 @@ export function withNodeGenerator(
   const keepLook = !def.dataOutput && !previous?.dataOutput;
   const post = keepLook ? { ...postDefaults(def), ...pickScoped(node.post) } : postDefaults(def);
   const inputs = new Set(inputsOf(def).map((i) => i.key));
+  // Custom code and parameters belong to the previous generator.
+  const { code: _code, customParams: _custom, ...rest } = node;
+  const swapped: GraphNode = {
+    ...rest,
+    generator: def.id,
+    params: defaultValues(def.params),
+    post,
+  };
   return {
-    ...withNode(state, id, { generator: def.id, params: defaultValues(def.params), post }),
+    ...state,
+    nodes: state.nodes.map((n) => (n.id === id ? swapped : n)),
     links: state.links.filter(
       (l) => (l.to !== id || inputs.has(l.input)) && (l.from !== id || hasOutput(def, l.output)),
     ),

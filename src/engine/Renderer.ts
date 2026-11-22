@@ -12,7 +12,7 @@ import { GpuContext } from './gl/GpuContext';
 import { GradientTextureCache } from './gl/GradientTexture';
 import { ImageTextures } from './gl/ImageTextures';
 import type { RenderTarget } from './gl/RenderTarget';
-import type { ShaderProgram } from './gl/ShaderProgram';
+import type { PendingProgram, ShaderProgram } from './gl/ShaderProgram';
 import commonChunk from './glsl/common.glsl?raw';
 import noiseChunk from './glsl/noise.glsl?raw';
 import { ShaderCompileError } from './gl/ShaderProgram';
@@ -31,6 +31,19 @@ import {
   uniformName,
 } from './shaderBuilder';
 import { gradientParams, imageParams, paramUniforms } from './uniforms';
+
+/** Thrown while user GLSL is still compiling in the background: try again next frame. */
+export class ProgramPending extends Error {
+  constructor(label: string) {
+    super(`${label}: compiling`);
+    this.name = 'ProgramPending';
+  }
+}
+
+type CodeProgram =
+  | { readonly pending: PendingProgram }
+  | { readonly program: ShaderProgram }
+  | { readonly error: unknown };
 
 /** Everything needed to produce one node's image. */
 export interface FrameRequest {
@@ -168,7 +181,7 @@ export class Renderer {
   private probe: RenderTarget | null = null;
   private readonly simulations = new Map<string, { defId: string; sim: Simulation }>();
   /** Programs of custom-code generators, keyed by `${id}\n${code}`. */
-  private readonly codePrograms = new Map<string, ShaderProgram>();
+  private readonly codePrograms = new Map<string, CodeProgram>();
 
   constructor(canvas: HTMLCanvasElement) {
     this.gpu = new GpuContext(canvas);
@@ -205,24 +218,15 @@ export class Renderer {
     pass?: ShaderPass,
     nodeCode?: string,
   ): ShaderProgram {
-    // A node converted to code: its GLSL replaces the generator's main fragment.
+    // A node converted to code: its GLSL replaces the generator's main fragment. Its params
+    // may be custom too, so their declarations are part of the program's identity.
     if (nodeCode !== undefined && !pass && !def.codeParam) {
-      const key = `${def.id}\nnode\n${nodeCode}`;
-      const cached = this.codePrograms.get(key);
-      if (cached) return cached;
-      let program: ShaderProgram;
-      try {
-        program = this.gpu.createProgram(
-          buildGeneratorShader({ ...def, fragment: nodeCode }),
-          `${def.id} (custom)`,
-        );
-      } catch (e) {
-        if (e instanceof ShaderCompileError)
-          throw new Error(`Custom code error:\n${e.log}`, { cause: e });
-        throw e;
-      }
-      this.rememberCodeProgram(key, program);
-      return program;
+      const key = `${def.id}\nnode\n${uniformDeclarations(def.params)}\n${nodeCode}`;
+      return this.codeProgram(
+        key,
+        () => buildGeneratorShader({ ...def, fragment: nodeCode }),
+        def.id,
+      );
     }
     if (!def.codeParam || pass) {
       const key = pass ? `${def.id}/${pass.label}` : def.id;
@@ -235,30 +239,53 @@ export class Renderer {
     }
     const raw = params?.[def.codeParam];
     const code = typeof raw === 'string' ? raw : '';
-    const key = `${def.id}\n${code}`;
-    let program = this.codePrograms.get(key);
-    if (program) return program;
-    try {
-      program = this.gpu.createProgram(buildGeneratorShader(def, code), def.id);
-    } catch (e) {
-      if (e instanceof ShaderCompileError)
-        throw new Error(`Custom code error:\n${e.log}`, { cause: e });
-      throw e;
+    return this.codeProgram(`${def.id}\n${code}`, () => buildGeneratorShader(def, code), def.id);
+  }
+
+  /**
+   * Program of user GLSL, compiled in the background: throws ProgramPending until it is ready
+   * (the node keeps its last image), and the compile error, remembered, once it failed (a
+   * broken code is never compiled again until it changes).
+   */
+  private codeProgram(key: string, source: () => string, label: string): ShaderProgram {
+    let entry = this.codePrograms.get(key);
+    if (!entry) {
+      try {
+        entry = { pending: this.gpu.startProgram(source(), `${label} (custom)`) };
+      } catch (e) {
+        entry = { error: e };
+      }
+      this.rememberCodeProgram(key, entry);
     }
-    this.rememberCodeProgram(key, program);
-    return program;
+    if ('program' in entry) return entry.program;
+    if ('error' in entry) throw entry.error;
+    try {
+      const program = entry.pending.poll();
+      if (!program) throw new ProgramPending(label);
+      this.codePrograms.set(key, { program });
+      return program;
+    } catch (e) {
+      if (e instanceof ProgramPending) throw e;
+      const error =
+        e instanceof ShaderCompileError
+          ? new Error(`Custom code error:\n${e.log}`, { cause: e })
+          : e;
+      this.codePrograms.set(key, { error });
+      throw error;
+    }
   }
 
   /** Keeps the most recent custom-code programs (older ones are disposed). */
-  private rememberCodeProgram(key: string, program: ShaderProgram): void {
+  private rememberCodeProgram(key: string, entry: CodeProgram): void {
     if (this.codePrograms.size >= MAX_CODE_PROGRAMS) {
       const [oldest] = this.codePrograms.keys();
       if (oldest !== undefined) {
-        this.codePrograms.get(oldest)?.dispose();
+        const old = this.codePrograms.get(oldest);
+        if (old && 'program' in old) old.program.dispose();
         this.codePrograms.delete(oldest);
       }
     }
-    this.codePrograms.set(key, program);
+    this.codePrograms.set(key, entry);
   }
 
   /**
@@ -620,7 +647,7 @@ export class Renderer {
     this.retainSimulations(new Set());
     for (const p of this.programs.values()) p.dispose();
     this.programs.clear();
-    for (const p of this.codePrograms.values()) p.dispose();
+    for (const p of this.codePrograms.values()) if ('program' in p) p.program.dispose();
     this.codePrograms.clear();
     for (const p of [
       this.postProgram,

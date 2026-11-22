@@ -9,62 +9,67 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
-test('every generator compiles and renders', async ({ page }) => {
-  test.setTimeout(1_200_000);
-  const errors: string[] = [];
-  page.on('pageerror', (e) => errors.push(e.message));
-  page.on('console', (msg) => {
-    // WebGL errors only surface as console warnings (e.g. GL_INVALID_OPERATION feedback loops).
-    // The static preview has no account server: its /api 404 is expected.
-    if (msg.location().url.includes('/api/')) return;
-    if (msg.type() === 'error' || /GL_INVALID|WebGL: /.test(msg.text())) errors.push(msg.text());
+/**
+ * Every generator, split in SHARDS tests (generator i goes to shard i % SHARDS): each has its
+ * own time budget and they can run on parallel workers.
+ */
+const SHARDS = 4;
+
+for (let shard = 0; shard < SHARDS; shard++) {
+  test(`every generator compiles and renders (${shard + 1}/${SHARDS})`, async ({ page }) => {
+    test.setTimeout(900_000);
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    page.on('console', (msg) => {
+      // WebGL errors only surface as console warnings (e.g. GL_INVALID_OPERATION loops).
+      // The static preview has no account server: its /api 404 is expected.
+      if (msg.location().url.includes('/api/')) return;
+      if (msg.type() === 'error' || /GL_INVALID|WebGL: /.test(msg.text())) errors.push(msg.text());
+    });
+
+    await page.goto('/?e2e');
+    await expect(page.locator('.preview-canvas')).toBeVisible();
+    await expect(page.locator('.fatal')).toHaveCount(0);
+
+    const all = await page
+      .locator('.generator-item')
+      .evaluateAll((els) => els.map((e) => e.getAttribute('data-id')!));
+    expect(all.length).toBeGreaterThan(10);
+    const ids = all.filter((_, i) => i % SHARDS === shard);
+
+    let previous: Uint8Array | null = null;
+    for (const id of ids) {
+      const item = page.locator(`.generator-item[data-id="${id}"]`);
+      const category = await item.getAttribute('data-category');
+      const operator = ['operator', 'animation'].includes(category ?? '');
+      // Operators live in their own browser tab.
+      if (!(await item.isVisible()))
+        await page
+          .locator(`.panel-browser .segment[data-tab="${operator ? 'operators' : 'generators'}"]`)
+          .click();
+      await item.click();
+      await expect(page.locator('.inspector-header h2')).not.toBeEmpty();
+      await page.waitForTimeout(category === 'simulation' ? 4000 : 400);
+      const overlay = page.locator('.error-overlay');
+      if (await overlay.isVisible()) throw new Error(`${id}: ${await overlay.textContent()}`);
+      const shot = await page
+        .locator('.canvas-frame')
+        .screenshot({ path: `test-results/generators/${id}.png` });
+      // Guards against stale frames: each generator must change the preview.
+      // Operators have nothing to show without inputs (all empty), so they may look alike.
+      expect(
+        !operator && previous !== null && sameBytes(shot, previous),
+        `${id} rendered the same image as the previous generator`,
+      ).toBeFalsy();
+      previous = shot;
+    }
+
+    expect(errors).toEqual([]);
   });
-
-  await page.goto('/');
-  await expect(page.locator('.preview-canvas')).toBeVisible();
-  await expect(page.locator('.fatal')).toHaveCount(0);
-
-  const ids = await page
-    .locator('.generator-item')
-    .evaluateAll((els) => els.map((e) => e.getAttribute('data-id')!));
-  expect(ids.length).toBeGreaterThan(10);
-
-  let previous: Uint8Array | null = null;
-  for (const id of ids) {
-    const item = page.locator(`.generator-item[data-id="${id}"]`);
-    const category = await item.getAttribute('data-category');
-    // Operators live in their own browser tab.
-    if (!(await item.isVisible()))
-      await page
-        .locator(
-          `.panel-browser .segment[data-tab="${['operator', 'animation'].includes(category ?? '') ? 'operators' : 'generators'}"]`,
-        )
-        .click();
-    await item.click();
-    await expect(page.locator('.inspector-header h2')).not.toBeEmpty();
-    const isSimulation = category === 'simulation';
-    await page.waitForTimeout(isSimulation ? 4000 : 400);
-    const overlay = page.locator('.error-overlay');
-    if (await overlay.isVisible()) throw new Error(`${id}: ${await overlay.textContent()}`);
-    const shot = await page
-      .locator('.canvas-frame')
-      .screenshot({ path: `test-results/generators/${id}.png` });
-    // Guards against stale frames: each generator must change the preview.
-    // Operators have nothing to show without inputs (all empty), so they may look alike.
-    expect(
-      !['operator', 'animation'].includes(category ?? '') &&
-        previous !== null &&
-        sameBytes(shot, previous),
-      `${id} rendered the same image as the previous generator`,
-    ).toBeFalsy();
-    previous = shot;
-  }
-
-  expect(errors).toEqual([]);
-});
+}
 
 test('reaction-diffusion presets and share link round-trip', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?e2e');
   await page.locator('.generator-item[data-id="reaction-diffusion"]').click();
   await page.locator('.preset-tile', { hasText: 'Mitosis' }).first().click();
   await expect(page.locator('.param-row[data-key="feed"] input.num')).toHaveValue('0.0367');
@@ -82,7 +87,7 @@ async function select(page: Page, id: string, waitMs = 600) {
 }
 
 test('rendered pixels match expected patterns', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?e2e');
 
   // Reaction-diffusion grows a pattern from its seed (not a flat or ramp image).
   const rd = await select(page, 'reaction-diffusion', 4000);
@@ -114,7 +119,7 @@ async function setField(page: Page, key: string, value: string) {
 }
 
 test('posterize module reduces the output to flat tones', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?e2e');
   const smooth = await select(page, 'fractal-noise');
   expect(smooth.distinctTones).toBeGreaterThan(20);
 
@@ -127,7 +132,7 @@ test('posterize module reduces the output to flat tones', async ({ page }) => {
 });
 
 test('pixel-art mode renders uniform blocks', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?e2e');
   await select(page, 'fractal-noise');
   await enableModule(page, 'pixelateOn');
   await setField(page, 'pixelate', '16');
@@ -142,7 +147,7 @@ test('pixel-art mode renders uniform blocks', async ({ page }) => {
 });
 
 test('flowmap painter encodes the stroke direction', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?e2e');
   await select(page, 'flowmap-painter', 500);
   // Neutral start (the default has a gentle base flow), preview off, no arrows: the
   // viewport shows the plain encoded flowmap.
@@ -172,7 +177,7 @@ test('flowmap painter encodes the stroke direction', async ({ page }) => {
 test('node graph: add, link, per-node post', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto('/');
+  await page.goto('/?e2e');
   await page.locator('.generator-item[data-id="fractal-noise"]').click();
   await page.waitForTimeout(500);
   // Double-click adds a node (selected) next to the current one; operators have their tab.

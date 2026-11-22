@@ -331,6 +331,12 @@ export class Viewport {
     );
     element.append(this.stage, this.errorBox, this.toolbarSlot, zoomBar, this.hint);
     this.bindNavigation();
+    this.stage.addEventListener('pointermove', (e) => {
+      this.lastPointer = [e.clientX, e.clientY];
+    });
+    this.stage.addEventListener('pointerleave', () => {
+      this.lastPointer = null;
+    });
     this.bindPainting();
     this.bindSplit();
     new ResizeObserver(() => {
@@ -463,6 +469,18 @@ export class Viewport {
   selectOnly(id: string): void {
     if (this.cards.has(id)) this.select([id], id);
   }
+
+  /** Selects several nodes (`primary` is the edited one), e.g. after a paste. */
+  selectMany(ids: readonly string[], primary: string): void {
+    if (this.cards.has(primary)) this.select(ids, primary);
+  }
+
+  /** Last pointer position over the graph (world units), or null when it is elsewhere. */
+  pointerWorld(): [number, number] | null {
+    return this.lastPointer ? this.toWorld(this.lastPointer[0], this.lastPointer[1]) : null;
+  }
+
+  private lastPointer: [number, number] | null = null;
 
   /** Replaces the multi-selection; `primary` becomes the selected (edited) node. */
   private select(ids: Iterable<string>, primary: string): void {

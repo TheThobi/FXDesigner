@@ -178,7 +178,7 @@ documentation d'auteur, accessible depuis l'éditeur. À prévoir :
 - **Publication** : les critères de modération, la licence choisie par l'auteur (la proposer
   explicitement : CC0, CC BY, CC BY-NC-SA…) et l'attribution des sources.
 
-Les fichiers `docs/AUTHORING.md` et `agents.md` couvrent déjà une partie de ce
+Les fichiers `docs/development/authoring.md` et `agents.md` couvrent déjà une partie de ce
 contenu pour les développeurs. La documentation d'auteur en serait la version publique et
 illustrée.
 

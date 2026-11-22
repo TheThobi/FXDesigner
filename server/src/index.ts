@@ -4,7 +4,7 @@
  */
 import { createServer, type IncomingMessage } from 'node:http';
 import { Auth } from './auth.js';
-import { loadConfig } from './config.js';
+import { applyDevOverrides, loadConfig } from './config.js';
 import { createPool, migrate, type Db } from './db.js';
 import {
   HttpError,
@@ -17,18 +17,62 @@ import {
 } from './http.js';
 import { libraryRoutes } from './library.js';
 
+const devOverrides = applyDevOverrides(process.env, process.argv);
+if (devOverrides.length) console.log(`[dev] using DEV_ settings for ${devOverrides.join(', ')}`);
 const config = loadConfig();
 const router = new Router();
+/** Set once the database answered and is migrated (accounts on). */
 let db: Db | null = null;
 
-if (config.database) {
-  db = createPool();
-  await migrate(db);
-  const auth = new Auth(db, config);
-  auth.routes(router);
-  libraryRoutes(router, db, auth);
-  setInterval(() => void auth.prune().catch((e: unknown) => console.error(e)), 3_600_000).unref();
+/** Where the server looks for the database (no password), for the logs. */
+function databaseTarget(): string {
+  const env = process.env;
+  if (env.DATABASE_URL) {
+    try {
+      const u = new URL(env.DATABASE_URL);
+      return `${u.username}@${u.hostname}:${u.port || 5432}${u.pathname} (DATABASE_URL)`;
+    } catch {
+      return 'DATABASE_URL (unparsable)';
+    }
+  }
+  return `${env.PGUSER ?? '(no PGUSER)'}@${env.PGHOST}:${env.PGPORT ?? 5432}/${env.PGDATABASE ?? '(no PGDATABASE)'}`;
 }
+
+/**
+ * Connects and migrates, retrying (the database container may start after this one, or be
+ * unreachable): the app is served meanwhile, with accounts off. Every failure is logged with
+ * its reason (wrong host / network, password, missing database…).
+ */
+async function connectDatabase(): Promise<void> {
+  const pool = createPool();
+  pool.on('error', (e) => console.error('[db] idle client error:', e.message));
+  const target = databaseTarget();
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await migrate(pool);
+      break;
+    } catch (e) {
+      const reason =
+        e instanceof Error ? `${(e as { code?: string }).code ?? ''} ${e.message}` : String(e);
+      const wait = Math.min(60, attempt * 5);
+      console.error(`[db] cannot use ${target}: ${reason.trim()} · retrying in ${wait} s`);
+      await new Promise((r) => setTimeout(r, wait * 1000));
+    }
+  }
+  const auth = new Auth(pool, config);
+  auth.routes(router);
+  libraryRoutes(router, pool, auth);
+  setInterval(() => void auth.prune().catch((e: unknown) => console.error(e)), 3_600_000).unref();
+  db = pool;
+  console.log(`[db] connected to ${target}: accounts on`);
+}
+
+if (config.database) void connectDatabase();
+else
+  console.log(
+    '[db] accounts off: neither DATABASE_URL nor PGHOST is set in the environment ' +
+      '(see .env.example; `npm start` and `npm run dev:server` read ./.env)',
+  );
 
 router.add('GET', '/api/health', async (_req, res) => {
   let database = false;
@@ -102,7 +146,8 @@ const server = createServer((raw, res) => {
 
 server.listen(config.port, () => {
   console.log(
-    `FX Designer on :${config.port} (${config.publicUrl}) · accounts ${db ? 'on' : 'off'}` +
+    `FX Designer on :${config.port} (${config.publicUrl})` +
+      `${config.database ? ' · connecting to the database…' : ''}` +
       `${config.discord ? ' · Discord' : ''}`,
   );
 });

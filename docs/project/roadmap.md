@@ -76,12 +76,16 @@ Priorités indicatives. Cocher au fil de l'eau.
       refait (sélecteur de couleur complet, stops déplaçables) ; **conversion de n'importe
       quelle node shader en code GLSL** (node custom) et générateur Custom Shader ; panneaux
       déplaçables ; menu File, export / import de la bibliothèque ; valeurs tapées au-delà
-      des curseurs ; Crystal et Creased refaits ; documentation générée (`docs/NODES.md`) et
-      guide d'écriture de nodes (`docs/AUTHORING.md`, utilisable par une IA).
+      des curseurs ; Crystal et Creased refaits ; documentation générée (`docs/development/nodes.md`) et
+      guide d'écriture de nodes (`docs/development/authoring.md`, utilisable par une IA).
 - [x] **Comptes** (pseudo / email / mot de passe, Discord) et bibliothèque synchronisée sur le
       compte (PostgreSQL) ; dossiers dans la bibliothèque ; déploiement auto-update avec
       rollback ; presets de générateurs sans effets de post-process (looks toon / comic /
       topographique déplacés dans les looks).
+- [x] Dock libre façon UE5 (onglets empilables et scindables partout) ; paramètres custom des
+      nodes en code ; compilation du code custom en arrière-plan (une erreur ne bloque plus
+      le viewport) ; galerie de couleurs ; dégradé d'accent unifié ; Crystal refait d'après
+      Crystal 2.
 
 ## Court terme
 
@@ -127,7 +131,7 @@ Priorités indicatives. Cocher au fil de l'eau.
 ## Long terme
 
 - [ ] Bibliothèque communautaire (presets et shaders custom, comptes) : voir
-      [COMMUNITY.md](COMMUNITY.md) pour le découpage. Étapes 1-2 sans serveur : presets
+      [community.md](community.md) pour le découpage. Étapes 1-2 sans serveur : presets
       utilisateur locaux (fait), puis générateur « Custom shader » (GLSL ; le module Custom code
       des ajustements en est la première brique).
 - [ ] WebGPU (compute shaders) si les simulations deviennent limitantes.

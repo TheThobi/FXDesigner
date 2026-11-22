@@ -22,6 +22,8 @@ export class Layout {
   private readonly hidden = new Set<LayoutPart>();
   /** Called after any change (e.g. to refresh the layout menu or re-render). */
   onChange: (() => void) | null = null;
+  /** Called by reset() (e.g. the dock arrangement goes back to its default). */
+  onReset: (() => void) | null = null;
 
   constructor(private readonly root: HTMLElement) {
     try {
@@ -55,6 +57,7 @@ export class Layout {
 
   reset(): void {
     for (const p of LAYOUT_PARTS) this.set(p.id, !HIDDEN_BY_DEFAULT.includes(p.id));
+    this.onReset?.();
   }
 
   private apply(): void {

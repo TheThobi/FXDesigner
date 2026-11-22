@@ -1,5 +1,5 @@
 /**
- * docs/NODES.md is generated from the generator registry, so the node reference can never
+ * docs/development/nodes.md is generated from the generator registry, so the node reference can never
  * drift from the code. After changing a node: `npm run docs` (vitest -u rewrites the file).
  */
 import { expect, it } from 'vitest';
@@ -80,7 +80,7 @@ export function renderNodeDocs(): string {
     '<!-- Regenerate with `npm run docs`. -->',
     '',
     `${GENERATORS.length} nodes. Every shader node's GLSL can be shown and edited in the editor`,
-    '(Code button of the Generator page); see [AUTHORING.md](AUTHORING.md) to write new ones.',
+    '(Code button of the Generator page); see [authoring.md](authoring.md) to write new ones.',
     'Parameters are uniforms `u_<key>` (float, int for int/select, bool, vec3 for colors,',
     'vec2); ranges are the slider ranges, typed values may go up to the "typed" limits.',
     '',
@@ -100,6 +100,6 @@ export function renderNodeDocs(): string {
     .trimEnd()}\n`;
 }
 
-it('docs/NODES.md matches the registry (npm run docs to update)', async () => {
-  await expect(renderNodeDocs()).toMatchFileSnapshot('../../docs/NODES.md');
+it('docs/development/nodes.md matches the registry (npm run docs to update)', async () => {
+  await expect(renderNodeDocs()).toMatchFileSnapshot('../../docs/development/nodes.md');
 });

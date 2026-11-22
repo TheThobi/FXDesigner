@@ -1,4 +1,5 @@
-const STORAGE_KEY = 'ptm.thumbnails.v1';
+// v2: thumbnails without preset colors (older ones are dropped).
+const STORAGE_KEY = 'ptm.thumbnails.v2';
 
 /**
  * Persistent thumbnails for generators that cannot be rendered offline (simulations): they are

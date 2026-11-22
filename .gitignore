@@ -1,14 +1,28 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
 server-dist/
+
+# Test reports and artifacts
 playwright-report/
 test-results/
+
+# Logs
 *.log
-.DS_Store
+
+# Environment variables and secrets
 .env
 .env.*
 !.env.example
+
+# Deployment and GitHub configuration
 deploy
-.claude
 .github
-crystal2.png
+
+# AI assistant configuration
+.claude
+
+# Operating system files
+.DS_Store

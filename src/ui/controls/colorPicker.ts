@@ -31,12 +31,124 @@ export function hsvToRgb([hh, s, v]: HSV): RGB {
   return [f(5), f(3), f(1)];
 }
 
+/** HSL (0..1 each) from RGB. */
+export function rgbToHsl(rgb: RGB): [number, number, number] {
+  const [hue] = rgbToHsv(rgb);
+  const max = Math.max(...rgb);
+  const min = Math.min(...rgb);
+  const l = (max + min) / 2;
+  const d = max - min;
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  return [hue, clamp01(s), l];
+}
+
+export function hslToRgb([hh, s, l]: readonly [number, number, number]): RGB {
+  const v = l + s * Math.min(l, 1 - l);
+  const sv = v === 0 ? 0 : 2 * (1 - l / v);
+  return hsvToRgb([hh, sv, v]);
+}
+
+/** CMYK (0..1 each) from RGB. */
+export function rgbToCmyk([r, g, b]: RGB): [number, number, number, number] {
+  const k = 1 - Math.max(r, g, b);
+  if (k >= 1) return [0, 0, 0, 1];
+  return [(1 - r - k) / (1 - k), (1 - g - k) / (1 - k), (1 - b - k) / (1 - k), k];
+}
+
+export function cmykToRgb([c, m, y, k]: readonly [number, number, number, number]): RGB {
+  return [(1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k)];
+}
+
+/** How the channel fields read and write the color. */
+interface Mode {
+  readonly id: string;
+  readonly label: string;
+  readonly channels: readonly { readonly label: string; readonly max: number }[];
+  /** Decimals shown (floats) or 0. */
+  readonly decimals: number;
+  readonly read: (rgb: RGB) => number[];
+  readonly write: (values: readonly number[]) => RGB;
+}
+
+const pct = (x: number) => x * 100;
+const MODES: readonly Mode[] = [
+  {
+    id: 'rgb',
+    label: 'RGB',
+    channels: [
+      { label: 'R', max: 255 },
+      { label: 'G', max: 255 },
+      { label: 'B', max: 255 },
+    ],
+    decimals: 0,
+    read: (c) => c.map((v) => v * 255),
+    write: (v) => [v[0]! / 255, v[1]! / 255, v[2]! / 255],
+  },
+  {
+    id: 'float',
+    label: 'RGB 0–1',
+    channels: [
+      { label: 'R', max: 1 },
+      { label: 'G', max: 1 },
+      { label: 'B', max: 1 },
+    ],
+    decimals: 3,
+    read: (c) => [...c],
+    write: (v) => [v[0]!, v[1]!, v[2]!],
+  },
+  {
+    id: 'hsv',
+    label: 'HSV',
+    channels: [
+      { label: 'H', max: 360 },
+      { label: 'S', max: 100 },
+      { label: 'V', max: 100 },
+    ],
+    decimals: 0,
+    read: (c) => {
+      const [hh, s, v] = rgbToHsv(c);
+      return [hh * 360, pct(s), pct(v)];
+    },
+    write: (v) => hsvToRgb([Math.min(v[0]! / 360, 0.9999), v[1]! / 100, v[2]! / 100]),
+  },
+  {
+    id: 'hsl',
+    label: 'HSL',
+    channels: [
+      { label: 'H', max: 360 },
+      { label: 'S', max: 100 },
+      { label: 'L', max: 100 },
+    ],
+    decimals: 0,
+    read: (c) => {
+      const [hh, s, l] = rgbToHsl(c);
+      return [hh * 360, pct(s), pct(l)];
+    },
+    write: (v) => hslToRgb([Math.min(v[0]! / 360, 0.9999), v[1]! / 100, v[2]! / 100]),
+  },
+  {
+    id: 'cmyk',
+    label: 'CMYK',
+    channels: [
+      { label: 'C', max: 100 },
+      { label: 'M', max: 100 },
+      { label: 'Y', max: 100 },
+      { label: 'K', max: 100 },
+    ],
+    decimals: 0,
+    read: (c) => rgbToCmyk(c).map(pct),
+    write: (v) => cmykToRgb([v[0]! / 100, v[1]! / 100, v[2]! / 100, v[3]! / 100]),
+  },
+];
+
 let openPicker: (() => void) | null = null;
+/** Channel mode of the last picker (kept for the next one). */
+let lastMode = 'rgb';
 
 /**
  * Floating color picker next to `anchor`: saturation / value square, hue and opacity bars,
- * hex (`#rrggbb` or `#rrggbbaa`), RGB and HSV fields. `onChange` fires live; closes on
- * Escape or a click outside.
+ * hex (`#rrggbb` or `#rrggbbaa`) and channel fields in RGB (0–255 or 0–1 floats), HSV, HSL
+ * or CMYK. `onChange` fires live; closes on Escape or a click outside.
  */
 export function openColorPicker(
   anchor: HTMLElement,
@@ -48,6 +160,7 @@ export function openColorPicker(
   const withAlpha = opts.alpha !== false;
   let hsv = rgbToHsv(hexToRgb(initial.color));
   let alpha = withAlpha ? initial.alpha : 1;
+  let mode = MODES.find((m) => m.id === lastMode) ?? MODES[0]!;
 
   const svKnob = h('div', { class: 'cp-knob' });
   const sv = h('div', { class: 'cp-sv' }, svKnob);
@@ -58,35 +171,72 @@ export function openColorPicker(
   const alphaBar = h('div', { class: 'cp-bar cp-alpha', hidden: !withAlpha }, alphaFill, alphaKnob);
   const swatch = h('div', { class: 'cp-swatch' });
   const hex = h('input', { class: 'cp-hex', spellcheck: false, 'aria-label': 'Hex color' });
-  const field = (label: string, max: number) => {
-    const input = h('input', {
-      type: 'number',
-      class: 'cp-num',
-      min: 0,
-      max,
-      step: 1,
-      'aria-label': label,
-    });
-    return { input, el: h('label', { class: 'cp-field' }, h('span', { text: label }), input) };
-  };
-  const rgbFields = [field('R', 255), field('G', 255), field('B', 255)];
-  const hsvFields = [field('H', 360), field('S', 100), field('V', 100)];
-  const aField = field('A', 100);
-  aField.el.hidden = !withAlpha;
+  const modeSelect = h(
+    'select',
+    { class: 'cp-mode', 'aria-label': 'Channels' },
+    ...MODES.map((m) => h('option', { value: m.id, text: m.label, selected: m === mode })),
+  );
+  const fieldsRow = h('div', { class: 'cp-fields' });
+  let fields: HTMLInputElement[] = [];
+  const alphaInput = h('input', {
+    type: 'number',
+    class: 'cp-num',
+    min: 0,
+    'aria-label': 'Opacity',
+  });
+  const alphaField = h(
+    'label',
+    { class: 'cp-field', hidden: !withAlpha },
+    h('span', { text: 'A' }),
+    alphaInput,
+  );
   const panel = h(
     'div',
     { class: 'color-picker', role: 'dialog', 'aria-label': 'Color picker' },
     sv,
     h('div', { class: 'cp-row' }, h('div', { class: 'cp-bars' }, hue, alphaBar), swatch),
-    h('div', { class: 'cp-row' }, h('span', { class: 'cp-label', text: 'Hex' }), hex, aField.el),
-    h('div', { class: 'cp-fields' }, ...rgbFields.map((f) => f.el)),
-    h('div', { class: 'cp-fields' }, ...hsvFields.map((f) => f.el)),
+    h('div', { class: 'cp-row' }, h('span', { class: 'cp-label', text: 'Hex' }), hex, modeSelect),
+    fieldsRow,
+    alphaField,
   );
 
   const rgb = () => hsvToRgb(hsv);
   const current = (): PickedColor => ({ color: rgbToHex(rgb()), alpha });
+  const fmt = (v: number, decimals: number) =>
+    decimals ? String(Number(v.toFixed(decimals))) : String(Math.round(v));
+
+  const buildFields = () => {
+    fields = mode.channels.map((ch) =>
+      h('input', {
+        type: 'number',
+        class: 'cp-num',
+        min: 0,
+        max: ch.max,
+        step: mode.decimals ? 10 ** -mode.decimals : 1,
+        'aria-label': ch.label,
+      }),
+    );
+    fieldsRow.style.setProperty('--cols', String(fields.length));
+    fieldsRow.replaceChildren(
+      ...fields.map((input, i) =>
+        h('label', { class: 'cp-field' }, h('span', { text: mode.channels[i]!.label }), input),
+      ),
+    );
+    fields.forEach((input) =>
+      input.addEventListener('input', () => {
+        const values = fields.map((f, i) =>
+          Math.min(mode.channels[i]!.max, Math.max(0, Number(f.value) || 0)),
+        );
+        hsv = rgbToHsv(mode.write(values).map(clamp01) as unknown as RGB);
+        changed(input);
+      }),
+    );
+    // Opacity follows the mode's scale (0–1 for floats, else percent).
+    alphaInput.max = mode.decimals ? '1' : '100';
+    alphaInput.step = mode.decimals ? '0.001' : '1';
+  };
+
   const render = (skip?: HTMLInputElement) => {
-    const [r, g, b] = rgb();
     const pure = rgbToHex(hsvToRgb([hsv[0], 1, 1]));
     sv.style.setProperty('--hue', pure);
     svKnob.style.left = `${hsv[1] * 100}%`;
@@ -101,14 +251,12 @@ export function openColorPicker(
       .toString(16)
       .padStart(2, '0');
     if (skip !== hex) hex.value = withAlpha && alpha < 1 ? `${c}${a255}` : c;
-    [r, g, b].forEach((v, i) => {
-      if (skip !== rgbFields[i]!.input) rgbFields[i]!.input.value = String(Math.round(v * 255));
+    mode.read(rgb()).forEach((v, i) => {
+      const input = fields[i];
+      if (input && input !== skip) input.value = fmt(v, mode.decimals);
     });
-    const hv = [hsv[0] * 360, hsv[1] * 100, hsv[2] * 100];
-    hv.forEach((v, i) => {
-      if (skip !== hsvFields[i]!.input) hsvFields[i]!.input.value = String(Math.round(v));
-    });
-    if (skip !== aField.input) aField.input.value = String(Math.round(alpha * 100));
+    if (skip !== alphaInput)
+      alphaInput.value = fmt(mode.decimals ? alpha : alpha * 100, mode.decimals);
   };
   const changed = (skip?: HTMLInputElement) => {
     render(skip);
@@ -154,28 +302,16 @@ export function openColorPicker(
     if (m[2] && withAlpha) alpha = parseInt(m[2], 16) / 255;
     changed(hex);
   });
-  const num = (input: HTMLInputElement, max: number) =>
-    Math.min(max, Math.max(0, Number(input.value) || 0));
-  for (const f of rgbFields) {
-    f.input.addEventListener('input', () => {
-      const [r, g, b] = rgbFields.map((x) => num(x.input, 255) / 255) as [number, number, number];
-      hsv = rgbToHsv([r, g, b]);
-      changed(f.input);
-    });
-  }
-  for (const f of hsvFields) {
-    f.input.addEventListener('input', () => {
-      hsv = [
-        Math.min(num(hsvFields[0]!.input, 360) / 360, 0.9999),
-        num(hsvFields[1]!.input, 100) / 100,
-        num(hsvFields[2]!.input, 100) / 100,
-      ];
-      changed(f.input);
-    });
-  }
-  aField.input.addEventListener('input', () => {
-    alpha = num(aField.input, 100) / 100;
-    changed(aField.input);
+  modeSelect.addEventListener('change', () => {
+    mode = MODES.find((m) => m.id === modeSelect.value) ?? MODES[0]!;
+    lastMode = mode.id;
+    buildFields();
+    render();
+  });
+  alphaInput.addEventListener('input', () => {
+    const n = Number(alphaInput.value) || 0;
+    alpha = clamp01(mode.decimals ? n : n / 100);
+    changed(alphaInput);
   });
 
   const close = () => {
@@ -194,6 +330,7 @@ export function openColorPicker(
       close();
     }
   };
+  buildFields();
   document.body.append(panel);
   render();
   const a = anchor.getBoundingClientRect();

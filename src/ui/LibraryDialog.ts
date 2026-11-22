@@ -32,12 +32,6 @@ export interface LibraryActions {
   readonly status?: () => string | null;
 }
 
-/** Which systems the grid shows: all, the top level, or one folder. */
-type View =
-  | { readonly kind: 'all' }
-  | { readonly kind: 'root' }
-  | { readonly kind: 'folder'; readonly id: string };
-
 const DRAG_THRESHOLD = 6;
 
 function when(ms: number): string {
@@ -48,17 +42,19 @@ function when(ms: number): string {
     : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-let lastView: View = { kind: 'all' };
+/** Folder shown when the window opens again (null = the top level). */
+let lastFolder: string | null = null;
 
 /**
- * Library window: folders on the left, the systems of the chosen folder as cards. Click a card
- * to open it; drag a card onto a folder to move it there. New starts an empty system in the
- * current folder. The current system is saved automatically.
+ * Library window, like a file explorer: the top level shows the folders then the systems
+ * outside any folder; click a folder to open it, Back (or the "Library" crumb) to go up.
+ * Click a system to open it; drag it onto a folder (or onto "Library" to take it out of its
+ * folder). Search looks through every system. The current system is saved automatically.
  */
 export function openLibrary(actions: LibraryActions): void {
-  let view: View = lastView;
+  let folder: string | null = lastFolder;
   const grid = h('div', { class: 'library-grid' });
-  const sidebar = h('nav', { class: 'library-folders', 'aria-label': 'Folders' });
+  const path = h('div', { class: 'library-path' });
   const search = h('input', {
     type: 'search',
     class: 'search',
@@ -82,95 +78,62 @@ export function openLibrary(actions: LibraryActions): void {
           run();
         },
       },
-      icon(iconName, 14),
+      icon(iconName, 12),
     );
 
-  const folderOf = (v: View): string | null => (v.kind === 'folder' ? v.id : null);
+  const go = (id: string | null) => {
+    folder = id;
+    lastFolder = id;
+    search.value = '';
+    build();
+  };
 
-  const buildSidebar = () => {
-    const folders = actions.folders();
-    if (view.kind === 'folder' && !folders.some((f) => f.id === (view as { id: string }).id))
-      view = { kind: 'all' };
-    const count = (f: (i: LibraryItem) => boolean) => actions.list().filter(f).length;
-    const row = (v: View, label: string, iconName: IconName, n: number, extra?: HTMLElement[]) => {
-      const active =
-        v.kind === view.kind && (v.kind !== 'folder' || v.id === (view as { id?: string }).id);
-      const el = h(
-        'div',
-        {
-          class: `library-folder${active ? ' active' : ''}`,
-          role: 'button',
-          tabIndex: 0,
-          'data-drop': v.kind === 'all' ? '' : v.kind === 'root' ? 'root' : v.id,
-          onclick: () => {
-            view = v;
-            lastView = v;
-            build();
-          },
-        },
-        icon(iconName, 14),
-        h('span', { class: 'library-folder-name', text: label }),
-        h('span', { class: 'library-folder-count', text: String(n) }),
-        ...(extra ?? []),
-      );
-      return el;
-    };
-    sidebar.replaceChildren(
-      row(
-        { kind: 'all' },
-        'All systems',
-        'grid',
-        count(() => true),
-      ),
-      row(
-        { kind: 'root' },
-        'Not in a folder',
-        'texture',
-        count((i) => i.folder === null),
-      ),
-      h('div', { class: 'library-folders-title', text: 'Folders' }),
-      ...folders.map((f) =>
-        row(
-          { kind: 'folder', id: f.id },
-          f.name,
-          'open',
-          count((i) => i.folder === f.id),
-          [
-            h(
-              'span',
-              { class: 'library-folder-actions' },
-              smallButton(
-                'details',
-                'Rename folder',
-                () => void actions.renameFolder(f.id).then(build),
-              ),
-              smallButton(
-                'close',
-                'Delete folder (its systems are kept)',
-                () => void actions.removeFolder(f.id).then(build),
-              ),
-            ),
-          ],
-        ),
-      ),
+  /** Back button and breadcrumb ("Library" is a drop target: out of the folder). */
+  const buildPath = () => {
+    const current = folder ? actions.folders().find((f) => f.id === folder) : undefined;
+    if (folder && !current) folder = null;
+    const root = h('button', {
+      type: 'button',
+      class: 'library-crumb',
+      'data-drop': 'root',
+      text: 'Library',
+      onclick: () => go(null),
+    });
+    path.replaceChildren(
       h(
         'button',
         {
           type: 'button',
-          class: 'library-new-folder',
+          class: 'library-back',
+          title: 'Back to the library',
+          'aria-label': 'Back',
+          disabled: !current,
+          onclick: () => go(null),
+        },
+        icon('chevronDown', 16),
+      ),
+      root,
+      ...(current
+        ? [h('span', { class: 'library-sep', text: '/' }), h('span', { class: 'library-crumb current', text: current.name })]
+        : []),
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'btn btn-small library-new-folder',
+          hidden: current !== undefined,
           onclick: () =>
-            void actions.createFolder().then((id) => {
-              if (id) view = { kind: 'folder', id };
+            void actions.createFolder().then(() => {
               build();
             }),
         },
-        icon('zoomIn', 14),
-        h('span', { text: 'New folder' }),
+        icon('zoomIn', 12),
+        'New folder',
       ),
     );
   };
 
-  /** Drags a card; dropping it on a folder of the sidebar moves the system there. */
+  /** Drags a card; dropping it on a folder (or on "Library") moves the system there. */
   const dragCard = (e: PointerEvent, card: HTMLElement, item: LibraryItem) => {
     const start = [e.clientX, e.clientY] as const;
     let ghost: HTMLElement | null = null;
@@ -187,10 +150,9 @@ export function openLibrary(actions: LibraryActions): void {
       const over = document
         .elementFromPoint(ev.clientX, ev.clientY)
         ?.closest<HTMLElement>('[data-drop]');
-      const valid = over && over.dataset.drop !== '' ? over : null;
-      if (valid !== target) {
+      if (over !== target) {
         target?.classList.remove('drop-over');
-        target = valid;
+        target = over ?? null;
         target?.classList.add('drop-over');
       }
     };
@@ -219,19 +181,99 @@ export function openLibrary(actions: LibraryActions): void {
     card.addEventListener('pointercancel', up);
   };
 
+  const folderCard = (f: LibraryFolder, count: number) =>
+    h(
+      'div',
+      {
+        class: 'library-card library-folder-card',
+        role: 'button',
+        tabIndex: 0,
+        'data-drop': f.id,
+        title: `Open "${f.name}" · drop systems here to move them in`,
+        onclick: () => go(f.id),
+        onkeydown: (e: KeyboardEvent) => {
+          if (e.key === 'Enter') go(f.id);
+        },
+      },
+      h('span', { class: 'library-thumb library-folder-thumb' }, icon('open', 40)),
+      h('span', { class: 'library-name', text: f.name }),
+      h('span', { class: 'library-date', text: `${count} system${count === 1 ? '' : 's'}` }),
+      h(
+        'span',
+        { class: 'library-actions' },
+        smallButton('details', 'Rename folder', () => void actions.renameFolder(f.id).then(build)),
+        smallButton('close', 'Delete folder (its systems are kept)', () =>
+          void actions.removeFolder(f.id).then(build),
+        ),
+      ),
+    );
+
+  const systemCard = (item: LibraryItem, current: string | null, showFolder: boolean) => {
+    const folderName = showFolder && item.folder
+      ? actions.folders().find((f) => f.id === item.folder)?.name
+      : undefined;
+    const card = h(
+      'div',
+      {
+        class: `library-card${item.id === current ? ' current' : ''}`,
+        role: 'button',
+        tabIndex: 0,
+        title:
+          item.id === current
+            ? 'Current system'
+            : `Open "${item.name}" · drag onto a folder to move it`,
+        onkeydown: (e: KeyboardEvent) => {
+          if (e.key !== 'Enter') return;
+          close();
+          if (item.id !== current) actions.open(item.id);
+        },
+      },
+      h(
+        'span',
+        { class: 'library-thumb' },
+        item.thumb ? h('img', { src: item.thumb, alt: '', draggable: false }) : null,
+      ),
+      h('span', { class: 'library-name', text: item.name }),
+      h(
+        'span',
+        { class: 'library-date' },
+        item.id === current ? h('span', { class: 'library-current', text: 'Open' }) : null,
+        h('span', { text: folderName ? `${folderName} · ${when(item.updated)}` : when(item.updated) }),
+      ),
+      h(
+        'span',
+        { class: 'library-actions' },
+        smallButton('details', 'Rename', () => void actions.rename(item.id).then(build)),
+        smallButton('layout', 'Duplicate', () => {
+          actions.duplicate(item.id);
+          build();
+        }),
+        smallButton('close', 'Delete', () => void actions.remove(item.id).then(build)),
+      ),
+    );
+    card.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || (e.target as HTMLElement).closest('.library-actions')) return;
+      e.preventDefault();
+      dragCard(e, card, item);
+    });
+    return card;
+  };
+
   const buildGrid = () => {
     const q = search.value.trim().toLowerCase();
     const current = actions.currentId();
-    const items = actions
-      .list()
-      .filter((i) => (q ? i.name.toLowerCase().includes(q) : true))
-      .filter((i) =>
-        q || view.kind === 'all'
-          ? true
-          : view.kind === 'root'
-            ? i.folder === null
-            : i.folder === view.id,
+    const all = actions.list();
+    if (q) {
+      // Search: every system, wherever it is.
+      const hits = all.filter((i) => i.name.toLowerCase().includes(q));
+      grid.replaceChildren(
+        ...hits.map((i) => systemCard(i, current, true)),
+        ...(hits.length ? [] : [h('p', { class: 'library-empty', text: 'No system found' })]),
       );
+      return;
+    }
+    const folders = folder ? [] : actions.folders();
+    const systems = all.filter((i) => i.folder === folder);
     grid.replaceChildren(
       h(
         'button',
@@ -240,65 +282,20 @@ export function openLibrary(actions: LibraryActions): void {
           class: 'library-card library-new',
           onclick: () => {
             close();
-            actions.create(folderOf(view));
+            actions.create(folder);
           },
         },
         h('span', { class: 'library-thumb' }, icon('zoomIn', 28)),
         h('span', { class: 'library-name', text: 'New system' }),
         h('span', { class: 'library-date', text: 'Empty graph' }),
       ),
-      ...items.map((item) => {
-        const card = h(
-          'div',
-          {
-            class: `library-card${item.id === current ? ' current' : ''}`,
-            role: 'button',
-            tabIndex: 0,
-            title:
-              item.id === current
-                ? 'Current system'
-                : `Open "${item.name}" · drag onto a folder to move it`,
-            onkeydown: (e: KeyboardEvent) => {
-              if (e.key !== 'Enter') return;
-              close();
-              if (item.id !== current) actions.open(item.id);
-            },
-          },
-          h(
-            'span',
-            { class: 'library-thumb' },
-            item.thumb ? h('img', { src: item.thumb, alt: '', draggable: false }) : null,
-          ),
-          h('span', { class: 'library-name', text: item.name }),
-          h(
-            'span',
-            { class: 'library-date' },
-            item.id === current ? h('span', { class: 'library-current', text: 'Open' }) : null,
-            h('span', { text: when(item.updated) }),
-          ),
-          h(
-            'span',
-            { class: 'library-actions' },
-            smallButton('details', 'Rename', () => void actions.rename(item.id).then(build)),
-            smallButton('layout', 'Duplicate', () => {
-              actions.duplicate(item.id);
-              build();
-            }),
-            smallButton('close', 'Delete', () => void actions.remove(item.id).then(build)),
-          ),
-        );
-        card.addEventListener('pointerdown', (e) => {
-          if (e.button !== 0 || (e.target as HTMLElement).closest('.library-actions')) return;
-          e.preventDefault();
-          dragCard(e, card, item);
-        });
-        return card;
-      }),
+      ...folders.map((f) => folderCard(f, all.filter((i) => i.folder === f.id).length)),
+      ...systems.map((i) => systemCard(i, current, false)),
     );
   };
 
   const build = () => {
-    buildSidebar();
+    buildPath();
     buildGrid();
     status.textContent = actions.status?.() ?? '';
     status.hidden = status.textContent === '';
@@ -324,7 +321,8 @@ export function openLibrary(actions: LibraryActions): void {
         icon('close', 12),
       ),
     ),
-    h('div', { class: 'library-body' }, sidebar, grid),
+    path,
+    grid,
   );
   dialog.addEventListener('close', () => dialog.remove());
   // Clicking the backdrop closes the window.

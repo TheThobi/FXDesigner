@@ -64,20 +64,27 @@ export class ShaderProgram {
     vertexSource: string,
     fragmentSource: string,
     readonly label: string,
+    /** Already compiled and linked (see PendingProgram). */
+    linked?: WebGLProgram,
   ) {
-    const vs = compile(gl, gl.VERTEX_SHADER, vertexSource, `${label} (vertex)`);
-    const fs = compile(gl, gl.FRAGMENT_SHADER, fragmentSource, label);
-    const program = gl.createProgram();
-    if (!program) throw new Error('gl.createProgram failed');
-    gl.attachShader(program, vs);
-    gl.attachShader(program, fs);
-    gl.linkProgram(program);
-    gl.deleteShader(vs);
-    gl.deleteShader(fs);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS) && !gl.isContextLost()) {
-      const log = gl.getProgramInfoLog(program) ?? 'unknown error';
-      gl.deleteProgram(program);
-      throw new ShaderCompileError(label, log, fragmentSource);
+    let program: WebGLProgram;
+    if (linked) program = linked;
+    else {
+      const vs = compile(gl, gl.VERTEX_SHADER, vertexSource, `${label} (vertex)`);
+      const fs = compile(gl, gl.FRAGMENT_SHADER, fragmentSource, label);
+      const p = gl.createProgram();
+      if (!p) throw new Error('gl.createProgram failed');
+      gl.attachShader(p, vs);
+      gl.attachShader(p, fs);
+      gl.linkProgram(p);
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+      if (!gl.getProgramParameter(p, gl.LINK_STATUS) && !gl.isContextLost()) {
+        const log = gl.getProgramInfoLog(p) ?? 'unknown error';
+        gl.deleteProgram(p);
+        throw new ShaderCompileError(label, log, fragmentSource);
+      }
+      program = p;
     }
     this.program = program;
 
@@ -148,5 +155,68 @@ export class ShaderProgram {
   dispose(): void {
     this.gl.deleteProgram(this.program);
     this.uniforms.clear();
+  }
+}
+
+/** KHR_parallel_shader_compile: COMPLETION_STATUS_KHR. */
+const COMPLETION_STATUS = 0x91b1;
+
+/**
+ * A program compiled without blocking the main thread (KHR_parallel_shader_compile): user
+ * code is compiled in the background while the rest of the graph keeps rendering. Without the
+ * extension it behaves like a normal (blocking) compile on the first poll.
+ */
+export class PendingProgram {
+  private readonly vs: WebGLShader;
+  private readonly fs: WebGLShader;
+  private readonly program: WebGLProgram;
+
+  constructor(
+    private readonly gl: WebGL2RenderingContext,
+    private readonly parallel: boolean,
+    private readonly vertexSource: string,
+    private readonly fragmentSource: string,
+    readonly label: string,
+  ) {
+    const shader = (type: number, source: string) => {
+      const s = gl.createShader(type);
+      if (!s) throw new Error('gl.createShader failed');
+      gl.shaderSource(s, source);
+      gl.compileShader(s);
+      return s;
+    };
+    this.vs = shader(gl.VERTEX_SHADER, vertexSource);
+    this.fs = shader(gl.FRAGMENT_SHADER, fragmentSource);
+    const program = gl.createProgram();
+    if (!program) throw new Error('gl.createProgram failed');
+    gl.attachShader(program, this.vs);
+    gl.attachShader(program, this.fs);
+    gl.linkProgram(program);
+    this.program = program;
+  }
+
+  /** The program once ready (null while compiling); throws ShaderCompileError on failure. */
+  poll(): ShaderProgram | null {
+    const { gl } = this;
+    if (this.parallel && !gl.getProgramParameter(this.program, COMPLETION_STATUS)) return null;
+    try {
+      if (!gl.getProgramParameter(this.program, gl.LINK_STATUS) && !gl.isContextLost()) {
+        const fsLog = gl.getShaderInfoLog(this.fs);
+        const vsLog = gl.getShaderInfoLog(this.vs);
+        const log = fsLog || vsLog || gl.getProgramInfoLog(this.program) || 'unknown error';
+        gl.deleteProgram(this.program);
+        throw new ShaderCompileError(this.label, log, this.fragmentSource);
+      }
+      return new ShaderProgram(
+        gl,
+        this.vertexSource,
+        this.fragmentSource,
+        this.label,
+        this.program,
+      );
+    } finally {
+      gl.deleteShader(this.vs);
+      gl.deleteShader(this.fs);
+    }
   }
 }

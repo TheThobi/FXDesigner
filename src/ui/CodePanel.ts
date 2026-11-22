@@ -1,5 +1,6 @@
 import { h } from './dom';
 import { icon } from './icons';
+import { ParamEditor, type ParamEditorOptions } from './ParamEditor';
 
 export interface CodePanelOptions {
   /** Current GLSL of the node (its own code, or the generator's). */
@@ -12,6 +13,8 @@ export interface CodePanelOptions {
   readonly onChange: (code: string) => void;
   /** Back to the generator's own code. */
   readonly onRevert: () => void;
+  /** Parameters created for this node (shown above the code). */
+  readonly params: ParamEditorOptions;
 }
 
 const EDIT_DELAY_MS = 450;
@@ -27,6 +30,7 @@ export class CodePanel {
   private readonly status: HTMLElement;
   private readonly revertBtn: HTMLButtonElement;
   private readonly reference: HTMLElement;
+  private readonly paramEditor = new ParamEditor();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private opts: CodePanelOptions | null = null;
 
@@ -60,6 +64,7 @@ export class CodePanel {
     this.element = h(
       'section',
       { class: 'code-panel' },
+      this.paramEditor.element,
       h('div', { class: 'code-head' }, this.status, copyBtn, this.revertBtn),
       this.textarea,
       h(
@@ -93,6 +98,7 @@ export class CodePanel {
     if (this.textarea.value !== opts.code && document.activeElement !== this.textarea)
       this.textarea.value = opts.code;
     this.reference.textContent = opts.reference;
+    this.paramEditor.render(opts.params);
     this.setModified(opts.modified);
   }
 

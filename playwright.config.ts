@@ -9,6 +9,9 @@ const devUrl = process.env.PW_BASE_URL;
  */
 export default defineConfig({
   testDir: 'tests/e2e',
+  // One worker: SwiftShader renders on the CPU, parallel browsers starve each other (tests are
+  // split instead, each with its own time budget).
+  workers: 1,
   // SwiftShader is slow: generous per-test budget (a real GPU is ~10× faster).
   timeout: 240_000,
   reporter: [['list']],

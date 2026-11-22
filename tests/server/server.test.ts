@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadConfig } from '../../server/src/config';
+import { applyDevOverrides, loadConfig } from '../../server/src/config';
 import { parseCookies, Router, serializeCookie } from '../../server/src/http';
 import {
   hashPassword,
@@ -82,5 +82,26 @@ describe('config', () => {
     expect(c.publicUrl).toBe('https://fx.example.com');
     expect(c.discord).toEqual({ clientId: 'id', clientSecret: 'secret' });
     expect(() => loadConfig({ PORT: 'x' })).toThrow();
+  });
+});
+
+describe('local development overrides', () => {
+  it('uses DEV_ settings with --dev only', () => {
+    const env: NodeJS.ProcessEnv = {
+      PGHOST: 'postgres',
+      PGPORT: '5432',
+      DATABASE_URL: 'postgres://x@postgres/db',
+      DEV_PGHOST: 'localhost',
+      DEV_PGPORT: '5433',
+      PUBLIC_URL: 'https://fx.example.com',
+    };
+    expect(applyDevOverrides({ ...env }, [])).toEqual([]);
+    const dev = { ...env };
+    applyDevOverrides(dev, ['node', 'index.js', '--dev']);
+    expect(dev.PGHOST).toBe('localhost');
+    expect(dev.PGPORT).toBe('5433');
+    // The deployment's DATABASE_URL would win over the local PG* settings: dropped.
+    expect(dev.DATABASE_URL).toBeUndefined();
+    expect(dev.PUBLIC_URL).toBe('http://localhost:5173');
   });
 });

@@ -1,6 +1,6 @@
 import vertexSource from '../glsl/fullscreen.vert?raw';
 import { PingPong, RenderTarget, type TargetFormat, type TargetOptions } from './RenderTarget';
-import { ShaderProgram } from './ShaderProgram';
+import { PendingProgram, ShaderProgram } from './ShaderProgram';
 import { activateUploadUnit } from './units';
 
 export interface GpuCapabilities {
@@ -82,6 +82,17 @@ export class GpuContext {
   createProgram(fragmentSource: string, label: string): ShaderProgram {
     return new ShaderProgram(this.gl, vertexSource, fragmentSource, label);
   }
+
+  /**
+   * Starts compiling a fullscreen program in the background (user code): poll it until it is
+   * ready, so a slow or failing compile never blocks the frame.
+   */
+  startProgram(fragmentSource: string, label: string): PendingProgram {
+    this.parallelCompile ??= this.gl.getExtension('KHR_parallel_shader_compile') !== null;
+    return new PendingProgram(this.gl, this.parallelCompile, vertexSource, fragmentSource, label);
+  }
+
+  private parallelCompile: boolean | undefined;
 
   /** Program with a custom vertex shader (e.g. point sprites driven by a data texture). */
   createProgramWithVertex(vertex: string, fragmentSource: string, label: string): ShaderProgram {

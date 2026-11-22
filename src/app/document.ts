@@ -17,6 +17,8 @@ import {
   dependsOn,
   hasOutput,
   MAX_NODE_CODE,
+  customParamDefs,
+  sanitizeCustomParams,
   nearestResolution,
   postDefaults,
   type EditorState,
@@ -347,18 +349,27 @@ function sanitizeNode(raw: unknown, lookup: GeneratorLookup): GraphNode | null {
   const obj = record(raw);
   const def = typeof obj.generator === 'string' ? lookup(obj.generator) : undefined;
   if (!def || typeof obj.id !== 'string' || !/^[\w-]{1,32}$/.test(obj.id)) return null;
+  // Parameters created in the Code view (shader generators without a code param).
+  const custom =
+    def.kind === 'shader' && !def.codeParam
+      ? sanitizeCustomParams(obj.customParams, new Set(def.params.map((p) => p.key)))
+      : [];
+  const effective = custom.length
+    ? { ...def, params: [...def.params, ...customParamDefs(custom)] }
+    : def;
   return {
     id: obj.id,
     generator: def.id,
     x: clamp(finite(obj.x, 0), -1e6, 1e6),
     y: clamp(finite(obj.y, 0), -1e6, 1e6),
-    params: sanitizeValues(def.params, obj.params),
+    params: sanitizeValues(effective.params, obj.params),
     post: sanitizeValues(POST_PARAMS, obj.post, postDefaults(def)),
     ramp: sanitizeGradient(obj.ramp) ?? DEFAULT_RAMP,
     postEnabled: obj.postEnabled !== false,
     frozenAt:
       typeof obj.frozenAt === 'number' && Number.isFinite(obj.frozenAt) ? obj.frozenAt : null,
     ...(obj.collapsed === true ? { collapsed: true } : {}),
+    ...(custom.length ? { customParams: custom } : {}),
     ...(typeof obj.code === 'string' &&
     obj.code.length <= MAX_NODE_CODE &&
     def.kind === 'shader' &&

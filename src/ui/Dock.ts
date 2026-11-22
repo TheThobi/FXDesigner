@@ -3,252 +3,462 @@ import { h } from './dom';
 import { icon, type IconName } from './icons';
 import type { Layout, LayoutPart } from './Layout';
 
-export type DockSide = 'left' | 'right';
+export type PanelId = 'browser' | 'details' | 'viewport';
 
 export interface DockPanelSpec {
-  /** Layout part (shown / hidden from the Layout menu). */
-  readonly id: LayoutPart;
+  readonly id: PanelId;
   readonly title: string;
   readonly icon: IconName;
   readonly element: HTMLElement;
 }
 
-interface Stack {
-  readonly side: DockSide;
-  readonly element: HTMLElement;
-  readonly tabs: HTMLElement;
-  ids: LayoutPart[];
-  active: LayoutPart | null;
+/** The dock layout: splits (rows / columns, with relative sizes) of tab stacks. */
+type DockNode = Split | Stack;
+
+interface Split {
+  readonly kind: 'split';
+  dir: 'row' | 'column';
+  children: DockNode[];
+  /** Relative sizes (flex-grow) of the children. */
+  sizes: number[];
 }
 
-const STORAGE_KEY = 'ptm.ui.docks';
-/** Pointer distance (px) before pressing a tab becomes a drag. */
+interface Stack {
+  readonly kind: 'stack';
+  panels: PanelId[];
+  active: PanelId;
+}
+
+type Zone = 'center' | 'left' | 'right' | 'top' | 'bottom';
+
+const STORAGE_KEY = 'ptm.ui.dock.v2';
 const DRAG_THRESHOLD = 6;
-/** Viewport edge (fraction of its width) that docks a panel on an empty side. */
-const EDGE_ZONE = 0.18;
+/** Edge band (fraction of a stack) that splits instead of stacking. */
+const EDGE = 0.28;
+const PANELS: readonly PanelId[] = ['browser', 'details', 'viewport'];
+
+function defaultLayout(): Split {
+  return {
+    kind: 'split',
+    dir: 'row',
+    children: [
+      { kind: 'stack', panels: ['browser'], active: 'browser' },
+      { kind: 'stack', panels: ['viewport'], active: 'viewport' },
+      { kind: 'stack', panels: ['details'], active: 'details' },
+    ],
+    sizes: [0.2, 0.55, 0.25],
+  };
+}
+
+/** Validates a stored layout (every panel at most once, viewport present). */
+export function parseDockLayout(raw: unknown): Split | null {
+  const seen = new Set<PanelId>();
+  const node = (n: unknown): DockNode | null => {
+    const o = n as {
+      kind?: unknown;
+      panels?: unknown;
+      active?: unknown;
+      dir?: unknown;
+      children?: unknown;
+      sizes?: unknown[];
+    } | null;
+    if (typeof o !== 'object' || o === null) return null;
+    if (o.kind === 'stack' && Array.isArray(o.panels)) {
+      const panels = (o.panels as unknown[]).filter(
+        (p): p is PanelId => PANELS.includes(p as PanelId) && !seen.has(p as PanelId),
+      );
+      panels.forEach((p) => seen.add(p));
+      if (!panels.length) return null;
+      const active = panels.includes(o.active as PanelId) ? (o.active as PanelId) : panels[0]!;
+      return { kind: 'stack', panels, active };
+    }
+    if (
+      o.kind === 'split' &&
+      (o.dir === 'row' || o.dir === 'column') &&
+      Array.isArray(o.children)
+    ) {
+      const pairs = (o.children as unknown[])
+        .map((c, i) => [node(c), Math.max(0.05, Number(o.sizes?.[i]) || 1)] as const)
+        .filter((p): p is readonly [DockNode, number] => p[0] !== null);
+      if (!pairs.length) return null;
+      return {
+        kind: 'split',
+        dir: o.dir,
+        children: pairs.map((p) => p[0]),
+        sizes: pairs.map((p) => p[1]),
+      };
+    }
+    return null;
+  };
+  const root = node(raw);
+  if (!root || !seen.has('viewport')) return null;
+  return root.kind === 'split' ? root : { kind: 'split', dir: 'row', children: [root], sizes: [1] };
+}
 
 /**
- * Side docks of the editor. Each side (left / right of the viewport) is a stack of panels
- * shown as tabs; dragging a tab onto the other side moves the panel there (e.g. browser and
- * details stacked together on one side for a compact layout). A side without visible panels
- * collapses. The arrangement is persisted.
+ * Unreal-like docking: the editor is a tree of splits and tab stacks. Drag any tab onto a
+ * panel: its center stacks the tab there, its edges split the panel (left, right, top,
+ * bottom). Splitters resize neighbours. Panels hidden from the Layout menu leave the tree and
+ * come back next to where they were. The arrangement is persisted.
  */
 export class DockManager {
-  private readonly stacks: Record<DockSide, Stack>;
-  private readonly panels = new Map<LayoutPart, DockPanelSpec>();
-  private readonly dropHint: HTMLElement;
+  private root: Split;
+  private readonly specs = new Map<PanelId, DockPanelSpec>();
+  private readonly hint: HTMLElement;
+  /** Where hidden panels were (a panel to come back next to). */
+  private readonly homes = new Map<PanelId, PanelId>();
 
   constructor(
-    private readonly dock: HTMLElement,
-    private readonly viewport: HTMLElement,
-    private readonly splitters: Record<DockSide, HTMLElement>,
+    private readonly container: HTMLElement,
     specs: readonly DockPanelSpec[],
     private readonly layout: Layout,
-    /** Called after the arrangement changed (sizes of the viewport may have changed). */
+    /** The arrangement changed (sizes of the viewport may have changed). */
     private readonly onChange: () => void,
   ) {
-    for (const s of specs) this.panels.set(s.id, s);
-    const stack = (side: DockSide): Stack => {
-      const tabs = h('div', { class: 'panel-tabs dock-tabs', role: 'tablist' });
-      return {
-        side,
-        tabs,
-        element: h('div', { class: `dock-stack dock-${side}` }, tabs),
-        ids: [],
-        active: null,
-      };
-    };
-    this.stacks = { left: stack('left'), right: stack('right') };
-    this.dropHint = h('div', { class: 'dock-drop-hint', hidden: true });
-    document.body.append(this.dropHint);
-
-    // Default: browser on the left, details on the right; a saved arrangement wins.
-    const saved = this.load();
-    for (const spec of specs) {
-      const stored = saved?.[spec.id];
-      const side: DockSide =
-        stored === 'left' || stored === 'right' ? stored : spec.id === 'details' ? 'right' : 'left';
-      this.stacks[side].ids.push(spec.id);
-      this.stacks[side].element.append(spec.element);
+    for (const s of specs) this.specs.set(s.id, s);
+    let saved: unknown;
+    try {
+      saved = JSON.parse(readStorage(STORAGE_KEY) ?? 'null');
+    } catch {
+      saved = null;
     }
-    for (const side of ['left', 'right'] as const) {
-      const active = saved?.active?.[side];
-      const st = this.stacks[side];
-      st.active = active && st.ids.includes(active) ? active : (st.ids[0] ?? null);
-    }
-    dock.prepend(this.stacks.left.element);
-    dock.append(this.stacks.right.element);
+    this.root = parseDockLayout(saved) ?? defaultLayout();
+    this.hint = h('div', { class: 'dock-drop-hint', hidden: true });
+    document.body.append(this.hint);
     this.refresh();
   }
 
-  /** Re-applies visibility (after the Layout menu changed). */
+  /** Re-applies the Layout menu (hidden panels) and redraws. */
   refresh(): void {
-    for (const st of Object.values(this.stacks)) {
-      const visible = st.ids.filter((id) => this.layout.isVisible(id));
-      if (!st.active || !visible.includes(st.active)) st.active = visible[0] ?? null;
-      st.tabs.replaceChildren(...visible.map((id) => this.tab(st, id)));
-      for (const id of st.ids) {
-        const panel = this.panels.get(id)!.element;
-        panel.hidden = id !== st.active;
-      }
-      const empty = visible.length === 0;
-      st.element.hidden = empty;
-      this.splitters[st.side].hidden = empty;
-      // An empty side collapses its grid tracks.
-      for (const v of [`--${st.side}-col`, `--${st.side}-gap`]) {
-        if (empty) this.dock.style.setProperty(v, '0px');
-        else this.dock.style.removeProperty(v);
+    for (const id of PANELS) {
+      if (id === 'viewport') continue;
+      const visible = this.layout.isVisible(id as LayoutPart);
+      const stack = this.find(id);
+      if (!visible && stack) {
+        const other = stack.panels.find((p) => p !== id) ?? this.neighbourPanel(stack);
+        if (other) this.homes.set(id, other);
+        this.removePanel(id);
+      } else if (visible && !stack) {
+        const home = this.homes.get(id);
+        const target = home && home !== 'viewport' ? this.find(home) : null;
+        if (target) {
+          target.panels.push(id);
+          target.active = id;
+        } else {
+          // Next to the viewport: browser on the left, details on the right.
+          this.insertBeside(this.find('viewport')!, id, id === 'browser' ? 'left' : 'right');
+        }
       }
     }
+    this.render();
   }
 
-  /** Shows panel `id` (switching its side's tab to it). */
-  show(id: LayoutPart): void {
-    const st = this.stackOf(id);
-    if (!st) return;
-    st.active = id;
+  /** Back to the default arrangement (Layout → Reset). */
+  reset(): void {
+    this.root = defaultLayout();
     this.save();
     this.refresh();
   }
 
-  private stackOf(id: LayoutPart): Stack | undefined {
-    return Object.values(this.stacks).find((s) => s.ids.includes(id));
+  // ---- Tree helpers ------------------------------------------------------------------------
+
+  private find(id: PanelId, node: DockNode = this.root): Stack | null {
+    if (node.kind === 'stack') return node.panels.includes(id) ? node : null;
+    for (const c of node.children) {
+      const f = this.find(id, c);
+      if (f) return f;
+    }
+    return null;
   }
 
-  private tab(st: Stack, id: LayoutPart): HTMLElement {
-    const spec = this.panels.get(id)!;
-    const close = h(
-      'button',
-      {
-        type: 'button',
-        class: 'panel-close',
-        title: `Hide ${spec.title.toLowerCase()} (Layout menu shows it again)`,
-        'aria-label': `Hide ${spec.title}`,
-        onclick: (e: Event) => {
-          e.stopPropagation();
-          this.layout.set(id, false);
-        },
-      },
-      icon('close', 12),
-    );
+  private parentOf(target: DockNode, node: Split = this.root): Split | null {
+    for (const c of node.children) {
+      if (c === target) return node;
+      if (c.kind === 'split') {
+        const p = this.parentOf(target, c);
+        if (p) return p;
+      }
+    }
+    return null;
+  }
+
+  /** A panel of the stack's nearest neighbour (where a hidden panel comes back next to). */
+  private neighbourPanel(stack: Stack): PanelId | null {
+    const parent = this.parentOf(stack);
+    const sib = parent?.children.find((c) => c !== stack);
+    if (!sib) return null;
+    let n: DockNode = sib;
+    while (n.kind === 'split') n = n.children[0]!;
+    return n.active;
+  }
+
+  private removePanel(id: PanelId): void {
+    const stack = this.find(id);
+    if (!stack) return;
+    stack.panels = stack.panels.filter((p) => p !== id);
+    if (stack.panels.length) {
+      if (stack.active === id) stack.active = stack.panels[0]!;
+      return;
+    }
+    this.removeNode(stack);
+  }
+
+  /** Removes `node` from its parent, collapsing splits left with one child. */
+  private removeNode(node: DockNode): void {
+    const parent = this.parentOf(node);
+    if (!parent) return;
+    const i = parent.children.indexOf(node);
+    parent.children.splice(i, 1);
+    parent.sizes.splice(i, 1);
+    if (parent.children.length !== 1) return;
+    const remaining = parent.children[0]!;
+    if (parent === this.root) {
+      if (remaining.kind === 'split') this.root = remaining;
+      return;
+    }
+    const grand = this.parentOf(parent)!;
+    grand.children[grand.children.indexOf(parent)] = remaining;
+  }
+
+  /** Puts panel `id` in a new stack on `side` of `target`. */
+  private insertBeside(target: Stack, id: PanelId, side: Exclude<Zone, 'center'>): void {
+    const dir = side === 'left' || side === 'right' ? 'row' : 'column';
+    const fresh: Stack = { kind: 'stack', panels: [id], active: id };
+    const parent = this.parentOf(target) ?? this.root;
+    const index = parent.children.indexOf(target);
+    const after = side === 'right' || side === 'bottom';
+    if (parent.dir === dir && index >= 0) {
+      const size = parent.sizes[index]! / 2;
+      parent.sizes[index] = size;
+      parent.children.splice(index + (after ? 1 : 0), 0, fresh);
+      parent.sizes.splice(index + (after ? 1 : 0), 0, size);
+      return;
+    }
+    // Wrap the target in a split of the other direction.
+    const wrap: Split = {
+      kind: 'split',
+      dir,
+      children: after ? [target, fresh] : [fresh, target],
+      sizes: after ? [0.65, 0.35] : [0.35, 0.65],
+    };
+    if (index >= 0) parent.children[index] = wrap;
+  }
+
+  /** Drops panel `id` on `zone` of `target`. */
+  private dock(id: PanelId, target: Stack, zone: Zone): void {
+    if (zone === 'center') {
+      if (target.panels.includes(id)) return;
+      this.removePanel(id);
+      target.panels.push(id);
+      target.active = id;
+    } else {
+      if (target.panels.length === 1 && target.panels[0] === id) return;
+      this.removePanel(id);
+      this.insertBeside(target, id, zone);
+    }
+    this.save();
+    this.render();
+    this.onChange();
+  }
+
+  private save(): void {
+    writeStorage(STORAGE_KEY, JSON.stringify(this.root));
+  }
+
+  // ---- Rendering ---------------------------------------------------------------------------
+
+  private render(): void {
+    // Panels are moved, never recreated (the viewport keeps its WebGL canvas).
+    this.container.replaceChildren(this.renderNode(this.root));
+    window.dispatchEvent(new Event('resize'));
+  }
+
+  private renderNode(node: DockNode): HTMLElement {
+    if (node.kind === 'stack') return this.renderStack(node);
+    const el = h('div', { class: `dock-split ${node.dir}` });
+    node.children.forEach((child, i) => {
+      if (i > 0) el.append(this.splitter(node, i - 1, el));
+      const childEl = this.renderNode(child);
+      childEl.style.flex = `${node.sizes[i] ?? 1} 1 0`;
+      el.append(childEl);
+    });
+    return el;
+  }
+
+  private renderStack(stack: Stack): HTMLElement {
+    const tabs = h('div', { class: 'panel-tabs dock-tabs', role: 'tablist' });
+    const body = h('div', { class: 'dock-body' });
+    const el = h('div', { class: 'dock-stack' }, tabs, body);
+    for (const id of stack.panels) {
+      const spec = this.specs.get(id)!;
+      tabs.append(this.tab(stack, spec));
+      spec.element.hidden = id !== stack.active;
+      body.append(spec.element);
+    }
+    stacks.set(el, stack);
+    return el;
+  }
+
+  private tab(stack: Stack, spec: DockPanelSpec): HTMLElement {
+    const closable = spec.id !== 'viewport';
     const tab = h(
       'div',
       {
-        class: `panel-tab dock-tab${id === st.active ? ' active' : ''}`,
+        class: `panel-tab dock-tab${spec.id === stack.active ? ' active' : ''}`,
         role: 'tab',
-        'data-panel': id,
-        title: `${spec.title} · drag to the other side to move it`,
+        'data-panel': spec.id,
+        title: `${spec.title} · drag onto a panel: center to stack, edges to split`,
       },
       icon(spec.icon, 14),
       h('span', { text: spec.title }),
-      close,
+      closable
+        ? h(
+            'button',
+            {
+              type: 'button',
+              class: 'panel-close',
+              title: `Hide ${spec.title.toLowerCase()} (the Layout menu shows it again)`,
+              'aria-label': `Hide ${spec.title}`,
+              onclick: (e: Event) => {
+                e.stopPropagation();
+                this.layout.set(spec.id as LayoutPart, false);
+              },
+            },
+            icon('close', 12),
+          )
+        : null,
     );
     tab.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 || (e.target as HTMLElement).closest('.panel-close')) return;
       e.preventDefault();
-      this.dragTab(e, tab, id);
+      this.dragTab(e, tab, stack, spec.id);
     });
     return tab;
   }
 
-  /** Click: activate the tab; drag: move the panel to the side under the pointer. */
-  private dragTab(e: PointerEvent, tab: HTMLElement, id: LayoutPart): void {
+  /** Drag between two children of a split: moves their boundary. */
+  private splitter(split: Split, index: number, container: HTMLElement): HTMLElement {
+    const el = h('div', {
+      class: `dock-splitter ${split.dir}`,
+      role: 'separator',
+      title: 'Drag to resize',
+    });
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      el.classList.add('dragging');
+      const horizontal = split.dir === 'row';
+      const rect = container.getBoundingClientRect();
+      const total = (horizontal ? rect.width : rect.height) || 1;
+      const sum = split.sizes.reduce((a, b) => a + b, 0);
+      const start = horizontal ? e.clientX : e.clientY;
+      const a0 = split.sizes[index]!;
+      const b0 = split.sizes[index + 1]!;
+      const min = (140 / total) * sum;
+      const kids = [...container.children].filter(
+        (c): c is HTMLElement => !c.classList.contains('dock-splitter'),
+      );
+      const move = (ev: PointerEvent) => {
+        const delta = (((horizontal ? ev.clientX : ev.clientY) - start) / total) * sum;
+        const a = Math.max(min, Math.min(a0 + b0 - min, a0 + delta));
+        split.sizes[index] = a;
+        split.sizes[index + 1] = a0 + b0 - a;
+        kids[index]!.style.flex = `${a} 1 0`;
+        kids[index + 1]!.style.flex = `${a0 + b0 - a} 1 0`;
+        window.dispatchEvent(new Event('resize'));
+      };
+      const up = () => {
+        el.removeEventListener('pointermove', move);
+        el.removeEventListener('pointerup', up);
+        el.removeEventListener('pointercancel', up);
+        el.classList.remove('dragging');
+        this.save();
+      };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
+    });
+    return el;
+  }
+
+  /** Click: activate the tab. Drag: dock the panel on the zone under the pointer. */
+  private dragTab(e: PointerEvent, tab: HTMLElement, stack: Stack, id: PanelId): void {
     const start = [e.clientX, e.clientY] as const;
     let dragging = false;
-    let target: DockSide | null = null;
+    let target: DropTarget | null = null;
     tab.setPointerCapture(e.pointerId);
     const move = (ev: PointerEvent) => {
       if (!dragging && Math.hypot(ev.clientX - start[0], ev.clientY - start[1]) < DRAG_THRESHOLD)
         return;
       dragging = true;
       document.body.classList.add('dragging-tab');
-      target = this.sideAt(ev.clientX, ev.clientY);
-      const from = this.stackOf(id)?.side;
-      this.showHint(target && target !== from ? target : null);
+      target = this.zoneAt(ev.clientX, ev.clientY);
+      this.showHint(target);
     };
     const up = (ev: PointerEvent) => {
       tab.removeEventListener('pointermove', move);
       tab.removeEventListener('pointerup', up);
       tab.removeEventListener('pointercancel', up);
       document.body.classList.remove('dragging-tab');
-      this.showHint(null);
+      this.hint.hidden = true;
       if (!dragging) {
-        this.show(id);
+        stack.active = id;
+        this.save();
+        this.render();
         return;
       }
-      if (ev.type === 'pointerup' && target) this.move(id, target);
+      const t = target as DropTarget | null;
+      if (ev.type === 'pointerup' && t) this.dock(id, t.stack, t.zone);
     };
     tab.addEventListener('pointermove', move);
     tab.addEventListener('pointerup', up);
     tab.addEventListener('pointercancel', up);
   }
 
-  /** Side a dragged tab would go to at (x, y): over a stack, or near a viewport edge. */
-  private sideAt(x: number, y: number): DockSide | null {
-    for (const st of Object.values(this.stacks)) {
-      if (st.element.hidden) continue;
-      const r = st.element.getBoundingClientRect();
-      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return st.side;
-    }
-    const v = this.viewport.getBoundingClientRect();
-    if (y < v.top || y > v.bottom) return null;
-    if (x >= v.left && x < v.left + v.width * EDGE_ZONE) return 'left';
-    if (x <= v.right && x > v.right - v.width * EDGE_ZONE) return 'right';
-    return null;
+  private zoneAt(x: number, y: number): DropTarget | null {
+    const el = document
+      .elementsFromPoint(x, y)
+      .find((e): e is HTMLElement => e instanceof HTMLElement && stacks.has(e));
+    const stack = el ? stacks.get(el) : undefined;
+    if (!el || !stack) return null;
+    const r = el.getBoundingClientRect();
+    const fx = (x - r.left) / r.width;
+    const fy = (y - r.top) / r.height;
+    const edges: [Zone, number][] = [
+      ['left', fx],
+      ['right', 1 - fx],
+      ['top', fy],
+      ['bottom', 1 - fy],
+    ];
+    const [zone, d] = edges.sort((a, b) => a[1] - b[1])[0]!;
+    return { stack, zone: d < EDGE ? zone : 'center', rect: r };
   }
 
-  private showHint(side: DockSide | null): void {
-    this.dropHint.hidden = side === null;
-    if (!side) return;
-    const st = this.stacks[side];
-    const v = this.viewport.getBoundingClientRect();
-    const r = st.element.hidden
-      ? {
-          left: side === 'left' ? v.left : v.right - v.width * EDGE_ZONE,
-          top: v.top,
-          width: v.width * EDGE_ZONE,
-          height: v.height,
-        }
-      : st.element.getBoundingClientRect();
-    Object.assign(this.dropHint.style, {
-      left: `${r.left}px`,
-      top: `${r.top}px`,
-      width: `${r.width}px`,
-      height: `${r.height}px`,
+  private showHint(t: DropTarget | null): void {
+    this.hint.hidden = t === null;
+    if (!t) return;
+    const r = t.rect;
+    const box = { left: r.left, top: r.top, width: r.width, height: r.height };
+    if (t.zone === 'left' || t.zone === 'right') box.width /= 2;
+    if (t.zone === 'right') box.left += r.width / 2;
+    if (t.zone === 'top' || t.zone === 'bottom') box.height /= 2;
+    if (t.zone === 'bottom') box.top += r.height / 2;
+    Object.assign(this.hint.style, {
+      left: `${box.left}px`,
+      top: `${box.top}px`,
+      width: `${box.width}px`,
+      height: `${box.height}px`,
     });
-  }
-
-  private move(id: LayoutPart, side: DockSide): void {
-    const from = this.stackOf(id);
-    if (!from || from.side === side) return;
-    from.ids = from.ids.filter((p) => p !== id);
-    const to = this.stacks[side];
-    to.ids.push(id);
-    to.element.append(this.panels.get(id)!.element);
-    to.active = id;
-    this.save();
-    this.refresh();
-    this.onChange();
-  }
-
-  private load():
-    | ({
-        [K in LayoutPart]?: DockSide;
-      } & { active?: Partial<Record<DockSide, LayoutPart>> })
-    | null {
-    try {
-      const raw = JSON.parse(readStorage(STORAGE_KEY) ?? 'null') as unknown;
-      return typeof raw === 'object' && raw !== null ? (raw as never) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  private save(): void {
-    const out: Record<string, unknown> = {
-      active: { left: this.stacks.left.active, right: this.stacks.right.active },
-    };
-    for (const st of Object.values(this.stacks)) for (const id of st.ids) out[id] = st.side;
-    writeStorage(STORAGE_KEY, JSON.stringify(out));
+    this.hint.dataset.zone = t.zone;
   }
 }
+
+interface DropTarget {
+  readonly stack: Stack;
+  readonly zone: Zone;
+  readonly rect: DOMRect;
+}
+
+/** Stack of each rendered stack element (drop targets). */
+const stacks = new WeakMap<HTMLElement, Stack>();

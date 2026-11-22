@@ -2,7 +2,7 @@
 
 How to write generators, operators and simulations for FX Designer. Written so that a person
 can follow it step by step, and so that an AI assistant given this file (plus
-[NODES.md](NODES.md) for examples and [ARCHITECTURE.md](ARCHITECTURE.md) for the engine) can
+[nodes.md](nodes.md) for examples and [architecture.md](architecture.md) for the engine) can
 produce a working node in one go. Every rule below is enforced by a test or by review.
 
 ## 1. Pick the kind of node
@@ -72,7 +72,7 @@ fastest way to prototype: write it in the app, then move the code into a `.glsl`
    ```
 
 3. Register it in `src/generators/registry.ts` (`GENERATORS`, display order).
-4. `npm run docs` (regenerates `docs/NODES.md`), then `make check`.
+4. `npm run docs` (regenerates `docs/development/nodes.md`), then `make check`.
 
 ## 3. Parameters
 
@@ -130,14 +130,14 @@ and `physarum/` (agents, custom passes).
 ## 7. Checklist before committing
 
 - [ ] `make check` (tsc, eslint, vitest: registry, presets, uniforms, docs up to date).
-- [ ] `npm run docs` if a node changed (NODES.md is generated).
+- [ ] `npm run docs` if a node changed (nodes.md is generated).
 - [ ] `make e2e`, then look at `test-results/generators/<id>.png`.
 - [ ] Seamless? Check the 2×2 / 3×3 tiling preview in the viewport.
 - [ ] Wide / tall workspace: shapes stay round (`centered`) or patterns repeat (`tiled`).
 
 ## 8. Prompt template for an AI assistant
 
-> Read `AGENTS.md`, `docs/AUTHORING.md` and two similar nodes from `docs/NODES.md` (and their
+> Read `agents.md`, `docs/development/authoring.md` and two similar nodes from `docs/development/nodes.md` (and their
 > source files). Create a shader generator `<id>` in category `<category>` that looks like
 > `<description of the look>`. Grayscale output, seamless if it is a pattern, 5–8 params that
 > each change the result visibly, 5 presets named by their look. Register it, run

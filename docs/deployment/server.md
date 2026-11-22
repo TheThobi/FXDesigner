@@ -10,7 +10,7 @@ améliorations :
 - si la nouvelle version ne démarre pas, l'ancienne revient automatiquement (rollback), et un
   serveur qui plante est relancé.
 
-Le déploiement statique (nginx, sans comptes) de [DEPLOY_OMV.md](DEPLOY_OMV.md) reste possible.
+Le déploiement statique (nginx, sans comptes) de [static.md](static.md) reste possible.
 
 ## 1. PostgreSQL sur le même serveur (réseau Docker local)
 

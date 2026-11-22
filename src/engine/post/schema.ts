@@ -13,6 +13,8 @@ export const DEFAULT_RAMP = GRADIENTS.linear;
 /** Shared ramp (global state, edited in the Post Process tab's Color section). */
 export const SHARED_RAMP_PARAM = param.gradient('ramp', 'Color ramp', DEFAULT_RAMP, {
   group: 'Color',
+  // Source colors mode ignores the ramp.
+  visibleWhen: (v) => Number(v.colorMode ?? COLOR_MODE.gradient) === COLOR_MODE.gradient,
   description: 'Gradient map used in gradient-map color mode.',
 });
 
@@ -30,6 +32,9 @@ const PAPER_TYPES = ['Paper', 'Canvas', 'Fibers'] as const;
  * listed in pipeline order. Distances in "px" are relative to a 512 px texture, so preview and
  * export look identical at any resolution.
  */
+/** Relief lighting "Cel bands" style (bands settings only apply to it). */
+const celBands = (v: Readonly<Record<string, unknown>>) => Number(v.lighting ?? 1) === 2;
+
 export const POST_PROCESS_PARAMS: readonly ParamDef[] = [
   param.select('colorMode', 'Color mode', ['Source colors', 'Gradient map'], COLOR_MODE.gradient, {
     group: 'Color',
@@ -44,7 +49,11 @@ export const POST_PROCESS_PARAMS: readonly ParamDef[] = [
 
   param.toggle('slopeBlurOn', 'Slope blur'),
   param.select('slopeSource', 'Slope map', SLOPE_SOURCES, 0, { group: 'Slope blur' }),
-  param.float('slopeScale', 'Noise scale', 4, 1, 32, { group: 'Slope blur' }),
+  param.float('slopeScale', 'Noise scale', 4, 1, 32, {
+    group: 'Slope blur',
+    // Only the noise slope map has a scale.
+    visibleWhen: (v) => Number(v.slopeSource ?? 0) === 0,
+  }),
   param.float('slopeIntensity', 'Intensity', 12, 0, 64, { group: 'Slope blur', unit: 'px' }),
   param.int('slopeSamples', 'Samples', 12, 2, 32, { group: 'Slope blur' }),
   param.select('slopeMode', 'Mode', SLOPE_MODES, 0, { group: 'Slope blur' }),
@@ -88,8 +97,11 @@ export const POST_PROCESS_PARAMS: readonly ParamDef[] = [
     unit: '°',
   }),
   param.float('bumpStrength', 'Relief', 1, 0, 6, { group: 'Relief lighting' }),
-  param.int('bands', 'Bands', 3, 2, 8, { group: 'Relief lighting' }),
-  param.float('bandSoftness', 'Band softness', 0.25, 0, 1, { group: 'Relief lighting' }),
+  param.int('bands', 'Bands', 3, 2, 8, { group: 'Relief lighting', visibleWhen: celBands }),
+  param.float('bandSoftness', 'Band softness', 0.25, 0, 1, {
+    group: 'Relief lighting',
+    visibleWhen: celBands,
+  }),
   param.color('shadowColor', 'Shadow tint', '#5a4f86', { group: 'Relief lighting' }),
   param.color('highlightColor', 'Light tint', '#fff1d6', { group: 'Relief lighting' }),
   param.float('cavity', 'Cavity darkening', 0.3, 0, 1, { group: 'Relief lighting' }),

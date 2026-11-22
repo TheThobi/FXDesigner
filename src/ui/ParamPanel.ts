@@ -24,6 +24,10 @@ export interface PresetGalleryOptions {
   readonly thumbnail?: (preset: Preset) => Promise<string | null>;
   /** Extra elements in the gallery header (e.g. the user preset manager). */
   readonly extras?: readonly HTMLElement[];
+  /** 'bottom': after the parameters (default: above them). */
+  readonly position?: 'top' | 'bottom';
+  /** Shown only when this returns true for the panel's values (like ParamDef.visibleWhen). */
+  readonly visibleWhen?: (values: Readonly<Record<string, unknown>>) => boolean;
 }
 
 export interface ParamPanelOptions {
@@ -74,8 +78,11 @@ export class ParamPanel {
   private readonly collapsed = new Set<string>();
   private values: Record<string, ParamValue> = {};
   private query = '';
-  private gallery: { readonly opts: PresetGalleryOptions; readonly tiles: HTMLElement[] } | null =
-    null;
+  private gallery: {
+    readonly opts: PresetGalleryOptions;
+    readonly tiles: HTMLElement[];
+    readonly element: HTMLElement;
+  } | null = null;
   /** Gallery collapsed state, per gallery title (kept across renders). */
   private static readonly closedGalleries = new Set<string>();
 
@@ -90,8 +97,11 @@ export class ParamPanel {
     this.values = { ...opts.values };
 
     this.gallery = null;
-    if (opts.gallery && (opts.gallery.presets.length || opts.gallery.userPresets?.length))
-      this.element.append(this.buildGallery(opts.gallery));
+    const gallery =
+      opts.gallery && (opts.gallery.presets.length || opts.gallery.userPresets?.length)
+        ? this.buildGallery(opts.gallery)
+        : null;
+    if (gallery && opts.gallery?.position !== 'bottom') this.element.append(gallery);
 
     const actions = h('div', { class: 'panel-actions' });
     actions.append(...(opts.extras ?? []));
@@ -123,6 +133,7 @@ export class ParamPanel {
       this.sections.push(section);
       this.element.append(section.element);
     }
+    if (gallery && opts.gallery?.position === 'bottom') this.element.append(gallery);
     this.refreshSections();
     this.filter(this.query);
   }
@@ -206,7 +217,7 @@ export class ParamPanel {
     });
     // Leaving the panel while hovering a tile ends the preview.
     grid.addEventListener('pointerleave', () => opts.onHover?.(null));
-    this.gallery = { opts, tiles };
+    this.gallery = { opts, tiles, element: details };
     return details;
   }
 
@@ -324,6 +335,13 @@ export class ParamPanel {
     for (const row of this.rows.values()) {
       const shown = row.def.visibleWhen ? row.def.visibleWhen(this.values) : true;
       row.element.classList.toggle('cond-hidden', !shown);
+    }
+    const g = this.gallery;
+    if (g?.opts.visibleWhen) g.element.hidden = !g.opts.visibleWhen(this.values);
+    // Sections whose rows are all hidden by the current values disappear too.
+    for (const s of this.sections) {
+      const visible = s.element.querySelector('.param-row:not([hidden]):not(.cond-hidden)');
+      s.element.hidden = visible === null && !s.toggle;
     }
     for (const s of this.sections) {
       const on = !s.toggle || this.values[s.toggle.key] === true;

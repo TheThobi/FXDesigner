@@ -20,8 +20,11 @@
   --accent: #7b4fe0;
   --accent-hover: #8f66f0;
   --accent-soft: rgba(123, 79, 224, 0.3);
-  --focus: #e865b0;
-  --brand-gradient: linear-gradient(110deg, #ff8a2a, #ef4f8f 55%, #9a6bff);
+  /* Neutral highlight for UI chrome (hover / keyboard focus), like most node editors. */
+  --focus: #d4d4d4;
+  /* Graph selection (nodes, links, selection box): warm orange, as in Blender / Unreal / Houdini. */
+  --select: #f2a33a;
+  --select-soft: rgba(242, 163, 58, 0.5);
   --play: #3fbf4a;
   --reset: #e8a33d;
   --danger: #ff4d5e;
@@ -1145,12 +1148,22 @@ button:focus-visible {
 }
 
 .error-overlay {
+  /* The error of the selected node only: a compact panel, the rest of the graph stays
+     visible and usable (the failed card is outlined in red). */
   position: absolute;
-  inset: 0;
+  left: 10px;
+  bottom: 44px;
+  z-index: 6;
+  max-width: min(560px, calc(100% - 20px));
+  max-height: 40%;
   margin: 0;
-  padding: 12px;
+  padding: 10px 12px;
   overflow: auto;
-  background: rgba(30, 0, 6, 0.94);
+  border: 1px solid rgba(255, 77, 94, 0.5);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius);
+  background: rgba(24, 6, 10, 0.92);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
   color: #ffb3bb;
   font:
     11px/1.45 ui-monospace,
@@ -2700,6 +2713,7 @@ button.panel-tab:hover:not(.active) {
 /* ---- Full-width segmented switch (browser Generators / Operators, Details pages) ---------- */
 
 .segmented {
+  position: relative;
   display: flex;
   flex: none;
   gap: 2px;
@@ -2742,11 +2756,33 @@ button.panel-tab:hover:not(.active) {
 }
 
 .segment.active {
-  background: var(--bg-header);
   color: var(--text-strong);
+}
+
+.segment {
+  position: relative;
+  z-index: 1;
+}
+
+.segment.active:hover {
+  background: none;
+}
+
+/* The active segment's highlight: one element sliding sideways between segments. */
+.segment-indicator {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px - (var(--n, 2) - 1) * 2px) / var(--n, 2));
+  border-radius: 3px;
+  background: var(--bg-header);
   box-shadow:
     inset 0 -2px 0 var(--accent),
     0 1px 2px rgba(0, 0, 0, 0.5);
+  transform: translateX(calc(var(--i, 0) * (100% + 2px)));
+  transition: transform 0.22s cubic-bezier(0.3, 0.7, 0.2, 1);
+  pointer-events: none;
 }
 
 /* ---- Graph links: clickable, selectable, colored by value type ---------------------------- */
@@ -2955,9 +2991,6 @@ button.panel-tab:hover:not(.active) {
   margin-left: auto;
 }
 
-.library-head .search-box + .panel-close {
-  margin-left: 0;
-}
 
 .library-dialog > .dialog-info {
   margin: 10px 14px 0;
@@ -2965,6 +2998,8 @@ button.panel-tab:hover:not(.active) {
 
 .library-grid {
   display: grid;
+  /* Rows keep their content height (the grid itself may be taller than its cards). */
+  align-content: start;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 10px;
   padding: 12px 14px 16px;
@@ -3230,16 +3265,15 @@ body.dragging-tab * {
   inset: 0;
 }
 
-/* Primary actions and brand accents use the logo gradient. */
+/* Export stays a regular (slightly emphasized) toolbar button. */
 .tool-btn.primary {
-  border: none;
-  background: var(--brand-gradient);
-  color: #fff;
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  background: var(--bg-tab);
+  color: var(--text-strong);
 }
 
 .tool-btn.primary:hover {
-  filter: brightness(1.1);
+  background: var(--bg-hover);
 }
 
 /* ---- Node cards: sharp text after pan / zoom (layer only while moving) ------------------------ */
@@ -3420,8 +3454,24 @@ body.dragging-tab * {
 
 .cp-fields {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr));
   gap: 6px;
+}
+
+.cp-mode {
+  flex: none;
+  width: 78px;
+  height: 22px;
+  border: 1px solid var(--border-soft);
+  border-radius: 3px;
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+}
+
+.color-picker > .cp-field {
+  width: calc((100% - 12px) / 3);
 }
 
 .cp-field {
@@ -3811,9 +3861,6 @@ body.dragging-tab * {
   font-size: 11px;
 }
 
-.library-head .library-status + .search-box {
-  margin-left: 0;
-}
 
 /* ---- Account -------------------------------------------------------------------------------- */
 
@@ -3977,4 +4024,457 @@ body.dragging-tab * {
   margin: 0;
   color: var(--text-dim);
   font-size: 11px;
+}
+
+/* ---- Accent and selection: flat colors -------------------------------------------------------- */
+/*
+ * The violet accent marks a few states only (active tab line, primary dialog buttons,
+ * switches, slider fill); everything else stays neutral so the category colors of nodes and
+ * tiles remain the strongest cue. The graph selection is orange.
+ */
+
+.btn-primary,
+.module-toggle:checked {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.tl-toggle.on {
+  background: var(--accent-soft);
+}
+
+.spin {
+  background:
+    linear-gradient(rgba(123, 79, 224, 0.26), rgba(123, 79, 224, 0.26)) 0 0 / var(--fill) 100%
+      no-repeat,
+    var(--bg-input);
+}
+
+.generator-item.active,
+.library-folder.active,
+.code-toggle.on,
+.menu-item:hover {
+  background-image: none;
+}
+
+.export-choice-icon {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+}
+
+.library-card.current,
+.preset-tile:hover,
+.preset-tile:focus-visible {
+  border-color: var(--focus);
+}
+
+.dock-drop-hint {
+  border-color: var(--focus);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.splitter:hover::after,
+.splitter.dragging::after,
+.dock-splitter::after {
+  background: #6a6a6a;
+}
+
+/* Graph selection. */
+.node.selected {
+  outline-color: var(--select);
+}
+
+.node.multi,
+.node.marquee-hit {
+  outline-color: var(--select-soft);
+}
+
+.vp-marquee {
+  border-color: var(--select);
+  background: rgba(242, 163, 58, 0.1);
+}
+
+.vp-link.selected {
+  stroke: var(--select) !important;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9));
+}
+
+@keyframes node-pulse {
+  from {
+    box-shadow:
+      0 0 0 calc(5px / var(--zoom, 1)) rgba(242, 163, 58, 0.35),
+      0 6px 22px rgba(0, 0, 0, 0.55);
+  }
+}
+
+/* ---- Dock tree (ui/Dock.ts): splits of tab stacks, Unreal-like ------------------------------- */
+
+.dock {
+  display: flex;
+  padding: 3px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.dock > .dock-split {
+  flex: 1;
+}
+
+.dock-split {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.dock-split.row {
+  flex-direction: row;
+}
+
+.dock-split.column {
+  flex-direction: column;
+}
+
+.dock-split > .dock-stack,
+.dock-split > .dock-split {
+  min-width: 140px;
+  min-height: 120px;
+}
+
+.dock-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+}
+
+.dock-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.dock-body > .panel {
+  flex: 1;
+  border-radius: 0;
+}
+
+.dock-body > .panel[hidden] {
+  display: none;
+}
+
+.dock-body > .panel > .panel-tabs {
+  display: none;
+}
+
+.dock-splitter {
+  position: relative;
+  flex: none;
+}
+
+.dock-splitter.row {
+  width: 5px;
+  cursor: col-resize;
+}
+
+.dock-splitter.column {
+  height: 5px;
+  cursor: row-resize;
+}
+
+.dock-splitter::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 2px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.dock-splitter:hover::after,
+.dock-splitter.dragging::after {
+  opacity: 0.8;
+}
+
+.dock-drop-hint {
+  transition:
+    left 0.08s,
+    top 0.08s,
+    width 0.08s,
+    height 0.08s;
+}
+
+/* ---- Parameter editor (custom nodes) --------------------------------------------------------- */
+
+.pe {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.pe-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pe-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pe-row {
+  /* Two lines per parameter: name, type, uniform / default, range, category. */
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-areas:
+    'name name type tail'
+    'def min max cat';
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  border-radius: var(--radius);
+  background: var(--bg-row);
+}
+
+.pe-row > :nth-child(1) {
+  grid-area: name;
+}
+.pe-row > :nth-child(2) {
+  grid-area: type;
+}
+.pe-row > :nth-child(3) {
+  grid-area: def;
+}
+.pe-row > :nth-child(4) {
+  grid-area: min;
+}
+.pe-row > :nth-child(5) {
+  grid-area: max;
+}
+.pe-row > :nth-child(6) {
+  grid-area: cat;
+}
+.pe-row > :nth-child(7) {
+  grid-area: tail;
+  justify-content: flex-end;
+}
+
+.pe-labels {
+  padding: 0 5px;
+  background: none;
+}
+
+.pe-labels > span {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.pe-input {
+  width: 100%;
+  min-width: 0;
+  height: 22px;
+  padding: 0 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: 3px;
+  background: var(--bg-input);
+  color: var(--text-strong);
+  font: inherit;
+  font-size: 11px;
+}
+
+.pe-input:disabled {
+  opacity: 0.35;
+}
+
+.pe-num::-webkit-inner-spin-button {
+  display: none;
+}
+
+.pe-tail {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.pe-key {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.pe-empty,
+.pe-builtin {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+/* Angle parameters: a dial next to the field (drag around it). */
+.angle-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.angle-field > .spin {
+  flex: 1;
+  min-width: 0;
+}
+
+.angle-dial {
+  display: inline-flex;
+  flex: none;
+  cursor: grab;
+  touch-action: none;
+}
+
+.angle-dial.dragging {
+  cursor: grabbing;
+}
+
+.dial-ring {
+  fill: var(--bg-input);
+  stroke: var(--border);
+  stroke-width: 1.2;
+}
+
+.angle-dial:hover .dial-ring,
+.angle-dial.dragging .dial-ring {
+  stroke: var(--focus);
+}
+
+.dial-hand {
+  stroke: var(--text-strong);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.dial-tip {
+  fill: var(--accent);
+}
+
+/* Library as an explorer: folders and systems in one grid, a path bar to go back. */
+.library-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(1040px, calc(100vw - 40px));
+  height: min(820px, calc(100vh - 60px));
+  max-height: none;
+}
+
+.library-dialog[open] {
+  display: flex;
+}
+
+.library-head .search-box {
+  flex: 0 1 260px;
+  margin: 0 0 0 auto;
+}
+
+.library-head .panel-close {
+  margin-left: 4px;
+}
+
+.library-path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.library-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.library-back .icon {
+  transform: rotate(90deg);
+}
+
+.library-back:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.library-crumb {
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.library-crumb.current {
+  color: var(--text-strong);
+  font-weight: 600;
+  cursor: default;
+}
+
+.library-crumb.drop-over {
+  border-color: var(--focus);
+  color: var(--text-strong);
+}
+
+.library-sep {
+  color: var(--text-dim);
+}
+
+.library-path .library-new-folder {
+  margin: 0 0 0 auto;
+  border-style: solid;
+}
+
+.library-dialog > .library-grid {
+  flex: 1;
+  overflow: auto;
+}
+
+.library-folder-thumb {
+  background: var(--bg-input);
+  color: #c9a35a;
+}
+
+.library-folder-card.drop-over {
+  border-color: var(--focus);
+  background: var(--bg-hover);
+}
+
+.library-empty {
+  grid-column: 1 / -1;
+  color: var(--text-dim);
+}
+
+.library-btn {
+  width: 20px;
+  height: 18px;
+}
+
+/* Window tabs and dialog headers: no color highlight (active = lighter background only). */
+.panel-tab.active,
+.dialog h2,
+.library-head {
+  box-shadow: none;
 }

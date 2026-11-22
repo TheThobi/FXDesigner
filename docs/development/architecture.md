@@ -268,7 +268,13 @@ fragment (`FrameRequest.code` → `Renderer.programFor` compiles `{ ...def, frag
 cached with the custom-code programs). The Generator page's Code button shows
 `ui/CodePanel.ts` (the code + `shaderReference(def)`: built-ins, uniforms, helper signatures);
 edited code that differs from the generator's (`codeDiffers`) makes the node custom, Revert
-removes it. Simulations and `codeParam` generators are not convertible.
+removes it. Simulations and `codeParam` generators are not convertible. `GraphNode.customParams`
+(Code view parameter editor, `ui/ParamEditor.ts`) adds params to the node's schema:
+`effectiveGenerator(def, node)` is the definition a node really runs (panels, presets,
+documents, requests); renaming one renames its uniform in the code. User GLSL never compiles
+in the frame: `Renderer.codeProgram` starts a `PendingProgram` (KHR_parallel_shader_compile)
+and throws `ProgramPending` until it is ready (the node keeps its last image); failures are
+cached per code, so a broken shader is not recompiled every frame.
 
 **Exports.** One toolbar button opens `ui/ExportDialog.ts` (every export kind: PNG, maps,
 flipbook, every node as a ZIP, document, share link). `app/exporter.ts` renders through a `Capture` (offscreen chain at a fixed size):
@@ -300,7 +306,7 @@ Client side, `app/cloud.ts` checks `/api/health` (no server = no account UI), re
 session, pushes every local library change (debounced, `Library.onChange`) and reconciles the
 whole library at sign-in and on window focus (`applyRemote*` methods write server data
 without echoing it back). `ui/AccountUI.ts` is the toolbar button and sign-in window.
-Deployment: [DEPLOY_SERVER.md](DEPLOY_SERVER.md) (`deploy/autoupdate`: build next to the live
+Deployment: [deployment/server.md](../deployment/server.md) (`deploy/autoupdate`: build next to the live
 version, swap on success, health check and rollback).
 
 ## Voronoi
@@ -312,10 +318,11 @@ a uniform width, unlike F2 − F1.
 
 ## UI
 
-Unreal Engine 5-inspired (design tokens at the top of `styles/main.css`; accent colors follow
-the logo palette). The side panels live in `ui/Dock.ts`: each side of the viewport is a stack
-of panels shown as tabs; dragging a tab to the other side moves the panel (persisted), an
-empty side collapses. Docked panels built
+Unreal Engine 5-inspired (design tokens at the top of `styles/main.css`; neutral chrome, a flat
+violet `--accent` for a few active states, orange `--select` for the graph selection). Panels are docked by `ui/Dock.ts`: a persisted tree of
+splits (rows / columns with relative sizes and splitters) and tab stacks; dragging a tab onto
+a stack's center adds it there, onto an edge splits that stack (`insertBeside`); panels hidden
+from the Layout menu leave the tree and come back next to where they were. Docked panels built
 with `ui/Panel.ts#dockPanel`, Content-Browser tiles with a category color stripe (simulation
 thumbnails are captured from the live preview after 240 frames and cached in localStorage),
 Details panel with three pages switched by a full-width segmented control (like the browser's

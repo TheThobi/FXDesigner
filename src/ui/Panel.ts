@@ -67,8 +67,13 @@ export function segmentedTabs(
 ): SegmentedTabs {
   const buttons: Record<string, HTMLButtonElement> = {};
   const badges: Record<string, HTMLElement> = {};
-  const element = h('div', { class: 'segmented', role: 'tablist' });
+  // One highlight that slides from segment to segment (instead of each segment lighting up).
+  const indicator = h('span', { class: 'segment-indicator', 'aria-hidden': 'true' });
+  const element = h('div', { class: 'segmented', role: 'tablist' }, indicator);
+  element.style.setProperty('--n', String(tabs.length));
   const select = (id: string) => {
+    const index = tabs.findIndex((t) => t.id === id);
+    if (index >= 0) element.style.setProperty('--i', String(index));
     for (const t of tabs) {
       const on = t.id === id;
       buttons[t.id]?.classList.toggle('active', on);

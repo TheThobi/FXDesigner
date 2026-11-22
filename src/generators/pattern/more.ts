@@ -20,7 +20,9 @@ export const runes: ShaderGenerator = {
     param.int('strokes', 'Strokes per glyph', 4, 2, 7),
     param.float('lineWidth', 'Line width', 0.08, 0.02, 0.25),
     param.float('glow', 'Glow', 0.25, 0, 1),
-    param.float('ringRadius', 'Ring radius', 0.7, 0.3, 0.9),
+    param.float('ringRadius', 'Ring radius', 0.7, 0.3, 0.9, {
+      visibleWhen: (v) => Number(v.layout) === 1,
+    }),
     param.float('flicker', 'Flicker', 0, 0, 1),
     param.speed(1, 4),
   ],

@@ -66,6 +66,9 @@ export const slash: ShaderGenerator = {
   featuredPreset: 'Wide swing',
 };
 
+/** Speed lines in radial focus mode (its settings are hidden for parallel streaks). */
+const radial = (v: Readonly<Record<string, unknown>>) => Number(v.mode ?? 0) === 0;
+
 export const speedLines: ShaderGenerator = {
   kind: 'shader',
   id: 'speed-lines',
@@ -80,10 +83,19 @@ export const speedLines: ShaderGenerator = {
     param.float('width', 'Width', 0.4, 0.02, 1),
     param.float('density', 'Density', 0.8, 0, 1),
     param.float('randomness', 'Randomness', 0.7, 0, 1),
-    param.float('innerRadius', 'Clear radius', 0.5, 0, 1.4, { group: 'Radial' }),
-    param.float('taperLength', 'Taper length', 0.5, 0.01, 1.5, { group: 'Radial' }),
-    param.vec2('center', 'Center', [0, 0], -1, 1, { group: 'Radial' }),
-    param.float('streakLength', 'Streak length', 0.4, 0.05, 1, { group: 'Parallel' }),
+    param.float('innerRadius', 'Clear radius', 0.5, 0, 1.4, {
+      group: 'Radial',
+      visibleWhen: radial,
+    }),
+    param.float('taperLength', 'Taper length', 0.5, 0.01, 1.5, {
+      group: 'Radial',
+      visibleWhen: radial,
+    }),
+    param.vec2('center', 'Center', [0, 0], -1, 1, { group: 'Radial', visibleWhen: radial }),
+    param.float('streakLength', 'Streak length', 0.4, 0.05, 1, {
+      group: 'Parallel',
+      visibleWhen: (v) => !radial(v),
+    }),
     param.float('rate', 'Re-rolls / s', 12, 0, 30, { group: 'Animation' }),
     param.speed(1, 4),
   ],

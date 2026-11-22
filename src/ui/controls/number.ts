@@ -11,6 +11,89 @@ export function stepFor(def: FloatParam | IntParam): number {
 
 const DRAG_THRESHOLD_PX = 3;
 
+/** Angles in degrees (unit °, or an angle / rotation / direction spanning 90° or more). */
+export function isAngle(def: FloatParam | IntParam): boolean {
+  if (def.unit === '°') return true;
+  return (
+    /angle|rotation|direction/i.test(`${def.key} ${def.label}`) &&
+    def.max - def.min >= 90 &&
+    !def.unit
+  );
+}
+
+/**
+ * Substance-like angle dial: drag around the circle to aim the direction (0° = right,
+ * counter-clockwise, y up as in the shaders); Shift snaps to 15°. Ranges of 180° wrap
+ * (directions), negative ranges map to -180…180.
+ */
+function angleDial(def: FloatParam | IntParam, set: (deg: number) => void) {
+  const SVG = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(SVG, 'svg');
+  svg.setAttribute('viewBox', '-12 -12 24 24');
+  svg.setAttribute('width', '22');
+  svg.setAttribute('height', '22');
+  const ring = document.createElementNS(SVG, 'circle');
+  ring.setAttribute('r', '10');
+  ring.classList.add('dial-ring');
+  const hand = document.createElementNS(SVG, 'line');
+  hand.setAttribute('x1', '0');
+  hand.setAttribute('y1', '0');
+  hand.classList.add('dial-hand');
+  const tip = document.createElementNS(SVG, 'circle');
+  tip.setAttribute('r', '2');
+  tip.classList.add('dial-tip');
+  svg.append(ring, hand, tip);
+  const element = h('span', {
+    class: 'angle-dial',
+    title: 'Drag around to set the angle (Shift: 15° steps)',
+  });
+  element.append(svg);
+
+  const toValue = (deg: number) => {
+    let d = ((deg % 360) + 360) % 360;
+    if (def.min >= 0 && def.max <= 180) d %= 180;
+    else if (def.min < 0 && d > 180) d -= 360;
+    return Math.min(def.max, Math.max(def.min, d));
+  };
+  const pick = (e: PointerEvent) => {
+    const r = element.getBoundingClientRect();
+    const dx = e.clientX - (r.left + r.width / 2);
+    const dy = e.clientY - (r.top + r.height / 2);
+    let deg = (Math.atan2(-dy, dx) * 180) / Math.PI;
+    if (e.shiftKey) deg = Math.round(deg / 15) * 15;
+    set(toValue(deg));
+  };
+  element.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    element.setPointerCapture(e.pointerId);
+    element.classList.add('dragging');
+    pick(e);
+    const move = (ev: PointerEvent) => pick(ev);
+    const up = () => {
+      element.removeEventListener('pointermove', move);
+      element.removeEventListener('pointerup', up);
+      element.removeEventListener('pointercancel', up);
+      element.classList.remove('dragging');
+    };
+    element.addEventListener('pointermove', move);
+    element.addEventListener('pointerup', up);
+    element.addEventListener('pointercancel', up);
+  });
+  return {
+    element,
+    show(deg: number) {
+      const a = (deg * Math.PI) / 180;
+      const x = Math.cos(a) * 8;
+      const y = -Math.sin(a) * 8;
+      hand.setAttribute('x2', x.toFixed(2));
+      hand.setAttribute('y2', y.toFixed(2));
+      tip.setAttribute('cx', x.toFixed(2));
+      tip.setAttribute('cy', y.toFixed(2));
+    },
+  };
+}
+
 /**
  * Unreal-style numeric field: the box shows the value over a fill bar (position in range).
  *  - drag horizontally to scrub (Shift = fine, Ctrl = coarse),
@@ -52,12 +135,14 @@ export function numberControl(
   );
   let value = typeof initial === 'number' ? initial : def.default;
 
+  const dial = isAngle(def) ? angleDial(def, (v) => commit(v)) : null;
   const show = (v: number) => {
     value = v;
     input.value = document.activeElement === input ? format(v) : display(v);
     const t = (v - def.min) / (def.max - def.min || 1);
     box.style.setProperty('--fill', `${Math.min(1, Math.max(0, t)) * 100}%`);
     box.classList.toggle('over-range', v > def.max || v < def.min);
+    dial?.show(v);
   };
   const commit = (v: number, typed = false) => {
     const q = quantize(v, typed);
@@ -121,7 +206,7 @@ export function numberControl(
 
   show(value);
   return {
-    element: box,
+    element: dial ? h('div', { class: 'angle-field' }, dial.element, box) : box,
     setValue: (v) => {
       if (typeof v === 'number') show(v);
     },

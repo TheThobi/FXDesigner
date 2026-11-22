@@ -4,7 +4,7 @@
 <!-- Regenerate with `npm run docs`. -->
 
 96 nodes. Every shader node's GLSL can be shown and edited in the editor
-(Code button of the Generator page); see [AUTHORING.md](AUTHORING.md) to write new ones.
+(Code button of the Generator page); see [authoring.md](authoring.md) to write new ones.
 Parameters are uniforms `u_<key>` (float, int for int/select, bool, vec3 for colors,
 vec2); ranges are the slider ranges, typed values may go up to the "typed" limits.
 
@@ -1213,22 +1213,22 @@ Crumpled sheet as a height map: a network of short sharp creases (ridges and val
 
 ### Crystal `crystal`
 
-Crystalline shards (in the spirit of Substance Crystal 2): long prisms with a lit and a dark face, overlapping in layers. Seamless.
+Long thin translucent shards layered around mid gray, mostly along one direction (in the spirit of Substance Crystal 2): crystalline streaks for ice, quartz, stylized rock. Seamless.
 
 - Kind: shader (`vec4 generate(vec2 uv)`, convertible to code in the editor)
-- Presets: Quartz cluster, Aligned needles, Shattered ice, Gem facets, Crystal dust, Amethyst spikes
+- Presets: Vertical shards, Fine needles, Crossed slivers, Soft facets, Shattered, Horizontal streaks
 
 | Param | Uniform | Type | Range / options | Default | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Scale `scale` | `float u_scale` | float | 1 … 16 (typed: 1 … 61) | 4 | Cells of the largest shards. |
-| Shards per cell `density` | `int u_density` | int | 1 … 4 (typed: 1 … 7) | 2 |  |
-| Size `size` | `float u_size` | float | 0.2 … 1.9 (typed: 0.2 … 7) | 1.2 | Shard length, in cells. |
-| Width `thinness` | `float u_thinness` | float | 0.05 … 1 (typed: 0.05 … 3.85) | 0.22 | Width / length ratio. |
-| Angle `angle` | `float u_angle` | float | 0 … 180 (typed: 0 … 720) | 60 |  |
-| Disorder `disorder` | `float u_disorder` | float | 0 … 1 (typed: 0 … 4) | 1 | Random directions (1) or all along Angle (0). |
-| Facet shading `facet` | `float u_facet` | float | 0 … 1 (typed: 0 … 4) | 0.6 | Contrast between the two faces of a shard. |
-| Edge `edge` | `float u_edge` | float | 0 … 0.5 (typed: 0 … 2) | 0.08 | Dark rim around each shard. |
-| Layers `layers` | `int u_layers` | int | 1 … 5 (typed: 1 … 9) | 2 | Finer shards stacked on top. |
+| Scale `scale` | `float u_scale` | float | 1 … 16 (typed: 1 … 61) | 3 | Cells of the largest shards. |
+| Shards per cell `density` | `int u_density` | int | 1 … 6 (typed: 1 … 11) | 4 |  |
+| Length `length` | `float u_length` | float | 0.2 … 1.9 (typed: 0.2 … 7) | 1.9 | Shard length, in cells. |
+| Width `width` | `float u_width` | float | 0.02 … 0.8 (typed: 0.02 … 3.14) | 0.22 | Base width / length. |
+| Angle `angle` | `float u_angle` | float | 0 … 180 (typed: 0 … 720) | 90 |  |
+| Angle spread `spread` | `float u_spread` | float | 0 … 90 (typed: 0 … 360) | 22 | Random tilt around Angle (90 = any direction). |
+| Facet shading `facet` | `float u_facet` | float | 0 … 1 (typed: 0 … 4) | 0.7 |  |
+| Layers `layers` | `int u_layers` | int | 1 … 4 (typed: 1 … 7) | 1 | Finer shards on top. |
+| Contrast `contrast` | `float u_contrast` | float | 0.2 … 4 (typed: 0.2 … 15.4) | 0.8 |  |
 
 ### Bricks `bricks`
 
