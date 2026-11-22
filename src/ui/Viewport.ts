@@ -1,5 +1,12 @@
 import type { SimulationPointer } from '../engine/generator';
-import type { NodeInputDef, NodeOutputDef, NodeValueType } from '../engine/nodes';
+import {
+  channelType,
+  STANDARD_OUTPUTS,
+  type NodeChannel,
+  type NodeInputDef,
+  type NodeOutputDef,
+  type NodeValueType,
+} from '../engine/nodes';
 import { clamp } from '../util/math';
 import { h } from './dom';
 import { icon } from './icons';
@@ -25,19 +32,24 @@ export const GRID = 24;
 const COLLAPSED_ROW = 26;
 /** Width of a collapsed card (header buttons and pin names still fit). */
 const COLLAPSED_WIDTH = 232;
+/** Reroute: a small pill, input pin left, output pin right, a grab area between them. */
+const REROUTE_WIDTH = 2 * GUTTER + 16;
+const REROUTE_HEIGHT = 18;
 /** Idle time (ms) after a pan / zoom before the cards are re-rasterized at the new scale. */
 const SETTLE_MS = 180;
-/** Pin and link colors by value type. */
+/** Pin and link colors by value type (Unity Shader Graph's). */
 export const VALUE_COLORS: Readonly<Record<NodeValueType, string>> = {
-  gray: '#cfcfcf',
-  color: '#f08fd8',
+  float: '#84e4e7',
+  vec2: '#9aef92',
+  vec3: '#f6ff9a',
+  vec4: '#fbcbf4',
 };
 const VALUE_LABELS: Readonly<Record<NodeValueType, string>> = {
-  gray: 'grayscale',
-  color: 'color',
+  float: 'float',
+  vec2: 'vector 2',
+  vec3: 'RGB',
+  vec4: 'RGBA',
 };
-/** Inputs reading any image, and outputs whose kind is not known yet. */
-const ANY_COLOR = '#e8e8e8';
 /** Drag distance (px) before a press on a card becomes a move. */
 const DRAG_THRESHOLD = 4;
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -120,14 +132,53 @@ export interface GraphViewNode {
   readonly postEnabled: boolean;
   /** Frozen nodes keep their current image (time and simulation stopped). */
   readonly frozen: boolean;
+  readonly seeded: boolean;
+  readonly canShuffleSeed: boolean;
   readonly inputs: readonly NodeInputDef[];
   /** Channel outputs; empty = one main output pin. */
   readonly outputs: readonly NodeOutputDef[];
   readonly failed: boolean;
   /** Collapsed cards hide their image (header and pins only). */
   readonly collapsed: boolean;
-  /** Detected kind of the main output (null while unknown). */
-  readonly outputType: NodeValueType | null;
+  /** The image has transparent pixels: its alpha pin is always shown. */
+  readonly transparent: boolean;
+  /** Output (no output pin) and Reroute (a small dot) nodes. */
+  readonly role: 'output' | 'reroute' | null;
+}
+
+/** An output pin of a card: the main output (key undefined) or a channel output. */
+interface OutPin {
+  readonly key: string | undefined;
+  readonly label: string;
+  readonly description: string;
+  readonly channel: NodeChannel | null;
+  readonly type: NodeValueType;
+  /** Standard channel pins: shown on hover / selection, or when linked. */
+  readonly extra: boolean;
+}
+
+/** Output pins of a node: its declared outputs, else RGBA then the standard channels. */
+function outPins(node: GraphViewNode): OutPin[] {
+  const pin = (o: NodeOutputDef, extra: boolean): OutPin => ({
+    key: o.key,
+    label: o.label,
+    description: o.description,
+    channel: o.channel,
+    type: channelType(o.channel),
+    extra,
+  });
+  if (node.outputs.length > 0) return node.outputs.map((o) => pin(o, false));
+  if (node.role === 'output') return [];
+  const main: OutPin = {
+    key: undefined,
+    label: node.role === 'reroute' ? '' : 'RGBA',
+    description: 'The image with its alpha.',
+    channel: null,
+    type: 'vec4',
+    extra: false,
+  };
+  if (node.role === 'reroute') return [main];
+  return [main, ...STANDARD_OUTPUTS.map((o) => pin(o, true))];
 }
 
 /** Stable identity of a link (one link per target input). */
@@ -159,11 +210,30 @@ export interface ViewportCallbacks {
   readonly onToggleCollapse: (id: string) => void;
   readonly onTogglePost: (id: string) => void;
   readonly onToggleFreeze: (id: string) => void;
+  readonly onShuffleSeed: (id: string) => void;
+  /** A channel pin is hovered: show that channel in the node's preview (null: hover ended). */
+  readonly onPinPreview: (id: string | null, channel: NodeChannel | null) => void;
+  /** Double-click on a link: split it with a Reroute dot at `world`. */
+  readonly onInsertReroute: (
+    link: { readonly to: string; readonly input: string },
+    world: readonly [number, number],
+  ) => void;
+  /** Right-click on nodes (the selection), a link or the background. */
+  readonly onContextMenu: (menu: GraphContextMenu) => void;
   /**
    * A link was dropped on empty space: from an output (`from`) or from an input (`to`), at
    * `world` graph units / `client` screen pixels (quick-add menu).
    */
   readonly onLinkDrop: (drop: LinkDrop) => void;
+}
+
+export interface GraphContextMenu {
+  readonly target:
+    | { readonly kind: 'nodes'; readonly ids: readonly string[] }
+    | { readonly kind: 'link'; readonly link: GraphViewLink }
+    | { readonly kind: 'background' };
+  readonly world: readonly [number, number];
+  readonly client: readonly [number, number];
 }
 
 export interface LinkDrop {
@@ -194,6 +264,8 @@ interface Card {
   readonly title: HTMLElement;
   readonly postBtn: HTMLButtonElement;
   readonly freezeBtn: HTMLButtonElement;
+  readonly seedBtn: HTMLButtonElement;
+  readonly closeBtn: HTMLButtonElement;
   readonly collapseBtn: HTMLButtonElement;
   readonly inGutter: HTMLElement;
   readonly outGutter: HTMLElement;
@@ -357,16 +429,66 @@ export class Viewport {
 
   /** Height of a card's body: its image, or one row per pin when collapsed. */
   private bodyHeight(card: Card): number {
+    if (card.data.role === 'reroute') return REROUTE_HEIGHT;
     if (!card.data.collapsed) return this.imageHeight;
-    return Math.max(1, card.data.inputs.length, card.data.outputs.length) * COLLAPSED_ROW;
+    return Math.max(1, card.data.inputs.length, this.outSlots(card).length) * COLLAPSED_ROW;
   }
 
   private cardHeight(card: Card): number {
+    if (card.data.role === 'reroute') return REROUTE_HEIGHT;
     return HEADER + PAD + this.bodyHeight(card) + PAD;
   }
 
   private cardWidth(card: Card): number {
+    if (card.data.role === 'reroute') return REROUTE_WIDTH;
     return card.data.collapsed ? COLLAPSED_WIDTH : NODE_WIDTH;
+  }
+
+  /** Top of a card's body (pins are placed from there). */
+  private bodyTop(card: Card): number {
+    return card.data.role === 'reroute' ? 0 : HEADER + PAD;
+  }
+
+  /** Cards without an image on the canvas (collapsed, reroutes). */
+  private static imageless(card: Card): boolean {
+    return card.data.collapsed || card.data.role === 'reroute';
+  }
+
+  /** Standard channel pin with nothing to show right now (hidden until hover / selection). */
+  private isIdle(card: Card, pin: OutPin): boolean {
+    if (!pin.extra) return false;
+    if (pin.key === 'a' && card.data.transparent) return false;
+    return !this.links.some((l) => l.from === card.id && l.output === pin.key);
+  }
+
+  /**
+   * Output pins taking a place on the card, in order (main output = ''). Expanded cards keep
+   * a slot for every pin, so links never move when the channel pins appear; collapsed ones
+   * list the useful pins only (all of them once selected).
+   */
+  private outSlots(card: Card): string[] {
+    const pins = outPins(card.data);
+    const keep =
+      card.data.collapsed && card.id !== this.selectedId
+        ? pins.filter((p) => !this.isIdle(card, p))
+        : pins;
+    return keep.map((p) => p.key ?? '');
+  }
+
+  /** Where a Reroute dot goes so that it is centered on `world`. */
+  rerouteOrigin(world: readonly [number, number]): [number, number] {
+    return [Math.round(world[0] - REROUTE_WIDTH / 2), Math.round(world[1] - REROUTE_HEIGHT / 2)];
+  }
+
+  /** Value type leaving output `key` of node `id` (a reroute carries what feeds it). */
+  private outType(id: string, key: string | undefined, depth = 0): NodeValueType {
+    const card = this.cards.get(id);
+    if (!card) return 'vec4';
+    if (card.data.role === 'reroute') {
+      const into = this.links.find((l) => l.to === id);
+      return into && depth < 64 ? this.outType(into.from, into.output, depth + 1) : 'vec4';
+    }
+    return outPins(card.data).find((p) => p.key === key)?.type ?? 'vec4';
   }
 
   /** Nearest grid position: cards snap to the background dots. */
@@ -398,14 +520,23 @@ export class Viewport {
 
   /** Center of pin `index` of `count` on a side, from the top of the card body. */
   private pinOffset(card: Card, index: number, count: number): number {
+    if (card.data.role === 'reroute') return REROUTE_HEIGHT / 2;
     if (card.data.collapsed) return (index + 0.5) * COLLAPSED_ROW;
     return this.imageHeight / 2 + (index - (count - 1) / 2) * PIN_STEP;
   }
 
   private layoutPins(card: Card): void {
-    for (const gutter of [card.inGutter, card.outGutter]) {
-      const pins = [...gutter.querySelectorAll<HTMLElement>('.pin')];
-      pins.forEach((pin, i) => (pin.style.top = `${this.pinOffset(card, i, pins.length)}px`));
+    const ins = [...card.inGutter.querySelectorAll<HTMLElement>('.pin')];
+    ins.forEach((pin, i) => (pin.style.top = `${this.pinOffset(card, i, ins.length)}px`));
+    const slots = this.outSlots(card);
+    const pins = outPins(card.data);
+    for (const el of card.outGutter.querySelectorAll<HTMLElement>('.pin')) {
+      const key = el.dataset.output ?? '';
+      const i = slots.indexOf(key);
+      el.hidden = i < 0;
+      if (i >= 0) el.style.top = `${this.pinOffset(card, i, slots.length)}px`;
+      const pin = pins.find((p) => (p.key ?? '') === key);
+      el.classList.toggle('idle', pin !== undefined && this.isIdle(card, pin));
     }
   }
 
@@ -438,7 +569,13 @@ export class Viewport {
         changed = true;
       }
     }
-    if (!this.selection.has(selectedId)) {
+    if (!selectedId) {
+      // Nothing selected (click in the void).
+      if (this.selection.size) {
+        this.selection.clear();
+        changed = true;
+      }
+    } else if (!this.selection.has(selectedId)) {
       this.selection.clear();
       this.selection.add(selectedId);
       changed = true;
@@ -446,6 +583,8 @@ export class Viewport {
     if (changed) this.callbacks.onSelection([...this.selection]);
     for (const card of this.cards.values()) {
       const selected = card.id === selectedId;
+      // Pin visibility depends on the links and the selection (collapsed cards may resize).
+      this.sizeImage(card);
       card.element.classList.toggle('selected', selected);
       card.element.classList.toggle('multi', !selected && this.selection.has(card.id));
       card.image.classList.toggle('canvas-frame', selected);
@@ -504,7 +643,7 @@ export class Viewport {
     const out = new Map<string, NodeRect>();
     // Back to front: a card in front draws over the ones behind it.
     for (const card of [...this.cards.values()].sort((a, b) => a.z - b.z)) {
-      if (card.data.collapsed) continue;
+      if (Viewport.imageless(card)) continue;
       const r = card.image.getBoundingClientRect();
       out.set(card.id, {
         x: (r.left - stage.left) * dpr,
@@ -605,7 +744,30 @@ export class Viewport {
       },
       icon('expand', 16),
     );
-    const head = h('div', { class: 'node-head' }, collapseBtn, title, freezeBtn, postBtn, close);
+    const seedBtn = h(
+      'button',
+      {
+        type: 'button',
+        class: 'node-btn node-seed',
+        title: 'Shuffle this node’s seed',
+        'aria-label': 'Shuffle node seed',
+        onclick: (e: Event) => {
+          e.stopPropagation();
+          this.callbacks.onShuffleSeed(node.id);
+        },
+      },
+      icon('dice', 13),
+    );
+    const head = h(
+      'div',
+      { class: 'node-head' },
+      collapseBtn,
+      title,
+      seedBtn,
+      freezeBtn,
+      postBtn,
+      close,
+    );
     const image = h('div', { class: 'node-image' });
     const inGutter = h('div', { class: 'node-gutter in' });
     const outGutter = h('div', { class: 'node-gutter out' });
@@ -617,6 +779,8 @@ export class Viewport {
       h('div', { class: 'node-foot' }),
     );
     element.style.width = `${NODE_WIDTH}px`;
+    element.classList.toggle('reroute', node.role === 'reroute');
+    element.classList.toggle('output-node', node.role === 'output');
     const card: Card = {
       id: node.id,
       element,
@@ -624,6 +788,8 @@ export class Viewport {
       title,
       postBtn,
       freezeBtn,
+      seedBtn,
+      closeBtn: close,
       collapseBtn,
       inGutter,
       outGutter,
@@ -633,7 +799,7 @@ export class Viewport {
     element.style.zIndex = String(card.z);
     this.sizeImage(card);
     this.bindCard(card, head);
-    this.buildOutputs(card, node.outputs);
+    this.buildOutputs(card);
     this.world.append(element);
     this.cards.set(node.id, card);
     return card;
@@ -651,6 +817,9 @@ export class Viewport {
     card.postBtn.classList.toggle('on', node.postEnabled);
     card.postBtn.setAttribute('aria-pressed', String(node.postEnabled));
     card.freezeBtn.classList.toggle('on', node.frozen);
+    card.seedBtn.hidden = !node.canShuffleSeed;
+    card.seedBtn.classList.toggle('on', node.seeded);
+    card.closeBtn.hidden = node.role === 'output';
     card.freezeBtn.setAttribute('aria-pressed', String(node.frozen));
     card.element.classList.toggle('collapsed', node.collapsed);
     card.collapseBtn.setAttribute('aria-expanded', String(!node.collapsed));
@@ -658,19 +827,10 @@ export class Viewport {
       ? 'Expand the node'
       : 'Collapse the node (hides its image)';
     const sameOutputs =
+      prev.role === node.role &&
       prev.outputs.length === node.outputs.length &&
       prev.outputs.every((d, i) => d.key === node.outputs[i]?.key);
-    if (!sameOutputs) this.buildOutputs(card, node.outputs);
-    if (node.outputs.length === 0) {
-      // The main output pin shows the detected kind of value.
-      const pin = card.outGutter.querySelector<HTMLElement>('.pin.out');
-      pin?.style.setProperty(
-        '--pin-color',
-        node.outputType ? VALUE_COLORS[node.outputType] : ANY_COLOR,
-      );
-      if (pin)
-        pin.title = `Output${node.outputType ? ` (${VALUE_LABELS[node.outputType]})` : ''}: drag onto another node’s input`;
-    }
+    if (!sameOutputs) this.buildOutputs(card);
     if (prev !== node || card.inGutter.childElementCount !== node.inputs.length) {
       const sameInputs =
         prev.inputs.length === node.inputs.length &&
@@ -684,16 +844,14 @@ export class Viewport {
               {
                 class: 'pin in',
                 'data-input': input.key,
-                title: `${input.label}${input.value ? ` (${VALUE_LABELS[input.value]})` : ''}: ${input.description}`,
+                title: `${input.label} (${VALUE_LABELS[input.value ?? 'vec4']}): ${input.description}`,
               },
               h('span', { class: 'pin-dot' }),
               h('span', { class: 'pin-label', text: input.label }),
             );
-            pin.style.setProperty(
-              '--pin-color',
-              input.value ? VALUE_COLORS[input.value] : ANY_COLOR,
-            );
+            pin.style.setProperty('--pin-color', VALUE_COLORS[input.value ?? 'vec4']);
             this.bindInputPin(card, pin, input.key);
+            if (input.preview !== undefined) this.bindPreview(card, pin, input.preview);
             return pin;
           }),
         );
@@ -703,32 +861,37 @@ export class Viewport {
     else this.layoutPins(card);
   }
 
-  /** Output pins: one main output, or one per channel output. */
-  private buildOutputs(card: Card, outputs: readonly NodeOutputDef[]): void {
-    const pin = (output: NodeOutputDef | null) => {
+  /** Output pins: declared channel outputs, or RGBA and the standard channels. */
+  private buildOutputs(card: Card): void {
+    const pin = (output: OutPin) => {
       const el = h(
         'div',
         {
-          class: 'pin out',
-          'data-output': output?.key ?? '',
-          title: output
-            ? `${output.label}: ${output.description} Drag onto another node’s input.`
-            : 'Output: drag onto another node’s input',
+          class: `pin out${output.extra ? ' extra' : ''}`,
+          'data-output': output.key ?? '',
+          title: `${output.label || 'Output'} (${VALUE_LABELS[output.type]}): ${output.description} Drag onto another node’s input.`,
         },
         h('span', { class: 'pin-dot' }),
-        ...(output ? [h('span', { class: 'pin-label', text: output.label })] : []),
+        ...(output.label ? [h('span', { class: 'pin-label', text: output.label })] : []),
       );
-      if (output) el.style.setProperty('--pin-color', output.color);
+      el.style.setProperty('--pin-color', VALUE_COLORS[output.type]);
       el.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) return;
         e.preventDefault();
         e.stopPropagation();
-        this.dragLink(card.id, output?.key, e, el);
+        this.dragLink(card.id, output.key, e, el);
       });
+      if (output.channel !== null) this.bindPreview(card, el, output.channel);
       return el;
     };
-    card.outGutter.replaceChildren(...(outputs.length > 0 ? outputs.map(pin) : [pin(null)]));
+    card.outGutter.replaceChildren(...outPins(card.data).map(pin));
     this.layoutPins(card);
+  }
+
+  /** Hovering `pin` shows `channel` of the card's image in its preview. */
+  private bindPreview(card: Card, pin: HTMLElement, channel: NodeChannel): void {
+    pin.addEventListener('pointerenter', () => this.callbacks.onPinPreview(card.id, channel));
+    pin.addEventListener('pointerleave', () => this.callbacks.onPinPreview(null, null));
   }
 
   // ---- Links --------------------------------------------------------------------------------
@@ -736,10 +899,10 @@ export class Viewport {
   private outPinPos(id: string, output?: string): [number, number] | null {
     const c = this.cards.get(id);
     if (!c) return null;
-    const outputs = c.data.outputs;
-    const i = output ? outputs.findIndex((d) => d.key === output) : 0;
+    const slots = this.outSlots(c);
+    const i = slots.indexOf(output ?? '');
     if (i < 0) return null;
-    const y = c.data.y + HEADER + PAD + this.pinOffset(c, i, Math.max(1, outputs.length));
+    const y = c.data.y + this.bodyTop(c) + this.pinOffset(c, i, slots.length);
     return [c.data.x + this.cardWidth(c) - GUTTER / 2, y];
   }
 
@@ -748,7 +911,7 @@ export class Viewport {
     const inputs = c?.data.inputs ?? [];
     const i = inputs.findIndex((d) => d.key === input);
     return c && i >= 0
-      ? [c.data.x + GUTTER / 2, c.data.y + HEADER + PAD + this.pinOffset(c, i, inputs.length)]
+      ? [c.data.x + GUTTER / 2, c.data.y + this.bodyTop(c) + this.pinOffset(c, i, inputs.length)]
       : null;
   }
 
@@ -778,18 +941,15 @@ export class Viewport {
   }
 
   /**
-   * Colors of a link at its output and input ends. The start is the value leaving the output
-   * (detected grayscale / color, or the channel color of a channel output); the end is the
-   * value the input reads, so feeding color into a grayscale input (or the reverse) shows as a
-   * gradient. Inputs reading any image keep the start color.
+   * Colors of a link at its output and input ends: the type leaving the output pin (RGBA,
+   * RGB, float…) and the type the input reads, so a conversion shows as a gradient. Inputs
+   * reading any image keep the start color.
    */
   private linkColors(link: GraphViewLink): [string, string] {
-    const from = this.cards.get(link.from)?.data;
-    const channel = link.output ? from?.outputs.find((d) => d.key === link.output) : undefined;
-    const sourceType: NodeValueType | null = channel ? 'gray' : (from?.outputType ?? null);
-    const start = channel?.color ?? (sourceType ? VALUE_COLORS[sourceType] : ANY_COLOR);
+    const source = this.outType(link.from, link.output);
+    const start = VALUE_COLORS[source];
     const wanted = this.cards.get(link.to)?.data.inputs.find((d) => d.key === link.input)?.value;
-    const end = wanted && sourceType && wanted !== sourceType ? VALUE_COLORS[wanted] : start;
+    const end = wanted && wanted !== source ? VALUE_COLORS[wanted] : start;
     return [start, end];
   }
 
@@ -845,7 +1005,7 @@ export class Viewport {
         // Inputs reading any image take the color of what feeds them.
         const def = card.data.inputs.find((d) => d.key === pin.dataset.input);
         if (def && !def.value)
-          pin.style.setProperty('--pin-color', startColors.get(key) ?? ANY_COLOR);
+          pin.style.setProperty('--pin-color', startColors.get(key) ?? VALUE_COLORS.vec4);
       }
       for (const pin of card.outGutter.querySelectorAll<HTMLElement>('.pin.out')) {
         const key = pin.dataset.output || undefined;
@@ -853,6 +1013,13 @@ export class Viewport {
           'linked',
           this.links.some((l) => l.from === card.id && l.output === key),
         );
+      }
+      if (card.data.role === 'reroute') {
+        // A reroute carries the type that feeds it.
+        const color = VALUE_COLORS[this.outType(card.id, undefined)];
+        card.element.style.setProperty('--pin-color', color);
+        for (const pin of card.element.querySelectorAll<HTMLElement>('.pin'))
+          pin.style.setProperty('--pin-color', color);
       }
     }
     this.linkLayer.replaceChildren(defs, ...paths, this.dragPath);
@@ -900,7 +1067,7 @@ export class Viewport {
       const outer: Rect = [-mx, -my, w + mx, hgt + my];
       const holes: Rect[] = [];
       for (const d of cards.slice(i + 1)) {
-        if (d.data.collapsed) continue;
+        if (Viewport.imageless(d)) continue;
         const x0 = d.data.x + GUTTER - c.data.x;
         const y0 = d.data.y + HEADER + PAD - c.data.y;
         const hole: Rect = [
@@ -920,9 +1087,10 @@ export class Viewport {
     const end = this.inPinPos(to, input);
     if (!end) return;
     capture.setPointerCapture(e.pointerId);
-    this.stage.classList.add('linking');
+    // Every output pin shows up while looking for one.
+    this.stage.classList.add('linking', 'linking-in');
     const clearHover = () => {
-      for (const el of this.stage.querySelectorAll('.pin.out.hover')) el.classList.remove('hover');
+      for (const el of this.stage.querySelectorAll('.hover')) el.classList.remove('hover');
     };
     const move = (ev: PointerEvent) => {
       const p = this.toWorld(ev.clientX, ev.clientY);
@@ -934,7 +1102,7 @@ export class Viewport {
       capture.removeEventListener('pointermove', move);
       capture.removeEventListener('pointerup', up);
       capture.removeEventListener('pointercancel', up);
-      this.stage.classList.remove('linking');
+      this.stage.classList.remove('linking', 'linking-in');
       this.dragPath.setAttribute('d', '');
       clearHover();
       const source = ev.type === 'pointerup' ? this.outPinAt(ev.clientX, ev.clientY) : null;
@@ -960,8 +1128,11 @@ export class Viewport {
   ): { pin: HTMLElement; node: string; output: string | undefined } | null {
     let best: { pin: HTMLElement; node: string; output: string | undefined } | null = null;
     let bestDist = 18;
+    const all = this.stage.classList.contains('linking-in');
     for (const card of this.cards.values()) {
+      const open = all || card.id === this.selectedId || card.element.matches(':hover');
       for (const pin of card.outGutter.querySelectorAll<HTMLElement>('.pin.out')) {
+        if (pin.hidden || (pin.classList.contains('idle') && !open)) continue;
         const r = pin.querySelector('.pin-dot')!.getBoundingClientRect();
         const d = Math.hypot(x - (r.left + r.width / 2), y - (r.top + r.height / 2));
         if (d < bestDist) {
@@ -987,7 +1158,7 @@ export class Viewport {
     const move = (ev: PointerEvent) => {
       const p = this.toWorld(ev.clientX, ev.clientY);
       this.dragPath.setAttribute('d', Viewport.curve(start, p));
-      for (const el of this.stage.querySelectorAll('.pin.in.hover')) el.classList.remove('hover');
+      for (const el of this.stage.querySelectorAll('.hover')) el.classList.remove('hover');
       this.pinAt(ev.clientX, ev.clientY)?.pin.classList.add('hover');
     };
     const up = (ev: PointerEvent) => {
@@ -996,7 +1167,7 @@ export class Viewport {
       capture.removeEventListener('pointercancel', up);
       this.stage.classList.remove('linking');
       this.dragPath.setAttribute('d', '');
-      for (const el of this.stage.querySelectorAll('.pin.in.hover')) el.classList.remove('hover');
+      for (const el of this.stage.querySelectorAll('.hover')) el.classList.remove('hover');
       const target = ev.type === 'pointerup' ? this.pinAt(ev.clientX, ev.clientY) : null;
       if (target && target.node !== from)
         this.callbacks.onConnect(from, output, target.node, target.input);
@@ -1199,14 +1370,14 @@ export class Viewport {
       this.marquee.hidden = true;
       for (const card of this.cards.values()) card.element.classList.remove('marquee-hit');
       if (!dragged) {
-        // Click on the background: back to the selected node alone.
-        if (!additive && this.selection.size > 1) this.select([this.selectedId], this.selectedId);
+        // Click on the background: nothing selected any more.
+        if (!additive) this.deselect();
         return;
       }
       const picked = hits(box(ev));
       const ids = additive ? [...new Set([...before, ...picked])] : picked;
       if (ids.length === 0) {
-        this.select([this.selectedId], this.selectedId);
+        this.deselect();
         return;
       }
       const primary = ids.includes(this.selectedId) ? this.selectedId : ids[ids.length - 1]!;
@@ -1339,16 +1510,28 @@ export class Viewport {
     );
   }
 
+  /** Frames the selected nodes (all of them when several are selected). */
   frameSelected(): void {
-    const c = this.cards.get(this.selectedId);
-    if (c)
-      this.frameBox(
-        c.data.x,
-        c.data.y,
-        c.data.x + this.cardWidth(c),
-        c.data.y + this.cardHeight(c),
-        8,
-      );
+    const cards = [...this.selection]
+      .map((id) => this.cards.get(id))
+      .filter((c): c is Card => c !== undefined);
+    if (!cards.length) return;
+    this.frameBox(
+      Math.min(...cards.map((c) => c.data.x)),
+      Math.min(...cards.map((c) => c.data.y)),
+      Math.max(...cards.map((c) => c.data.x + this.cardWidth(c))),
+      Math.max(...cards.map((c) => c.data.y + this.cardHeight(c))),
+      cards.length === 1 ? 8 : 2,
+    );
+  }
+
+  /** Clears the selection: no node is edited until one is clicked. */
+  private deselect(): void {
+    this.selection.clear();
+    for (const card of this.cards.values()) card.element.classList.remove('multi');
+    this.selectLink(null);
+    this.callbacks.onSelection([]);
+    if (this.selectedId) this.callbacks.onSelect('');
   }
 
   zoomBy(factor: number, clientX?: number, clientY?: number): void {
@@ -1427,8 +1610,46 @@ export class Viewport {
       },
       { passive: false },
     );
+    // Right-click: menu for the nodes (the selection), a link or the background. Painting
+    // simulations use the right button to erase (their image cancels the event first).
+    this.stage.addEventListener('contextmenu', (e) => {
+      const painting = e.defaultPrevented;
+      e.preventDefault();
+      if (painting) return;
+      const target = e.target as Element;
+      const world = this.toWorld(e.clientX, e.clientY);
+      const client = [e.clientX, e.clientY] as const;
+      const cardEl = target.closest<HTMLElement>('.node');
+      const id = cardEl?.dataset.id;
+      if (id && this.cards.has(id)) {
+        if (!this.selection.has(id)) this.select([id], id);
+        this.callbacks.onContextMenu({
+          target: { kind: 'nodes', ids: [...this.selection] },
+          world,
+          client,
+        });
+        return;
+      }
+      if (target.classList.contains('vp-link-hit')) {
+        const key = (target as SVGElement).dataset.key;
+        const link = this.links.find((l) => linkKey(l) === key);
+        if (link) {
+          this.selectLink(linkKey(link));
+          this.callbacks.onContextMenu({ target: { kind: 'link', link }, world, client });
+          return;
+        }
+      }
+      this.callbacks.onContextMenu({ target: { kind: 'background' }, world, client });
+    });
     this.stage.addEventListener('dblclick', (e) => {
-      if (!(e.target as HTMLElement).closest('.node')) this.fit();
+      const target = e.target as Element;
+      if (target.classList.contains('vp-link-hit')) {
+        const key = (target as SVGElement).dataset.key;
+        const link = this.links.find((l) => linkKey(l) === key);
+        if (link) this.callbacks.onInsertReroute(link, this.toWorld(e.clientX, e.clientY));
+        return;
+      }
+      if (!target.closest('.node')) this.fit();
     });
     // Capture phase: middle / Alt drags pan even over cards; left-drag on the background
     // draws a selection box.
@@ -1520,14 +1741,14 @@ export class Viewport {
     const r = this.brushRadius;
     if (r === null) return;
     const rect = image.getBoundingClientRect();
-    const size = NODE_IMAGE; // the cursor lives in (unscaled) card space
-    const x = ((e.clientX - rect.left) / rect.width) * size;
-    const y = ((e.clientY - rect.top) / rect.height) * size;
-    const d = (2 * r * size) / this.viewTiles;
+    const x = ((e.clientX - rect.left) / rect.width) * NODE_IMAGE;
+    const y = ((e.clientY - rect.top) / rect.height) * this.imageHeight;
+    const w = (2 * r * NODE_IMAGE) / this.viewTiles;
+    const h = (2 * r * this.imageHeight) / this.viewTiles;
     this.brushCursor.hidden = false;
-    this.brushCursor.style.width = `${d}px`;
-    this.brushCursor.style.height = `${d}px`;
-    this.brushCursor.style.transform = `translate(${x - d / 2}px, ${y - d / 2}px)`;
+    this.brushCursor.style.width = `${w}px`;
+    this.brushCursor.style.height = `${h}px`;
+    this.brushCursor.style.transform = `translate(${x - w / 2}px, ${y - h / 2}px)`;
     this.brushCursor.classList.toggle('erase', e.shiftKey || (e.buttons & 2) !== 0);
   }
 

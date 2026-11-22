@@ -102,3 +102,12 @@ docker exec postgres pg_dump -U fxdesigner fxdesigner | gzip > fxdesigner-$(date
 ```
 
 Chaque utilisateur peut aussi exporter sa bibliothèque (File → Save library).
+
+## 7. Communauté
+
+La fenêtre Community utilise la même base : la migration 2 crée `community_systems` et
+`community_subscriptions` au démarrage, rien à configurer. Sans base de données (image nginx
+seule), la fenêtre affiche « The community is unavailable ». Les catégories se modifient dans
+`server/src/community.ts` (`COMMUNITY_CATEGORIES`) ; leurs identifiants sont stockés, ne pas les
+renommer sans migration. Il n'y a pas encore de modération : un système se supprime à la main
+(`DELETE FROM community_systems WHERE id = '…'`).

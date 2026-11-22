@@ -166,6 +166,11 @@ export class AccountButton {
     );
   }
 
+  /** Opens the sign-in window (signed out only). */
+  signIn(): void {
+    if (this.state && !this.state.user) openAuthDialog(this.state, this.actions);
+  }
+
   update(state: AccountState): void {
     this.state = state;
     this.element.hidden = !state.available;

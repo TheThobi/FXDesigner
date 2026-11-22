@@ -34,6 +34,10 @@ export function toast(
       }),
     );
   }
+  // Above an open modal window (the page under it is not shown in front of it).
+  const dialogs = document.querySelectorAll('dialog[open]');
+  const host = dialogs[dialogs.length - 1] ?? document.body;
+  if (container.parentElement !== host) host.append(container);
   container.append(el);
   setTimeout(leave, durationMs);
 }

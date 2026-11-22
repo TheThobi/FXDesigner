@@ -5,6 +5,7 @@ import {
   isOperator,
 } from '../engine/generator';
 import { generatorsByFamily } from '../generators/registry';
+import { openContextMenu } from './ContextMenu';
 import { clear, h } from './dom';
 import { icon } from './icons';
 import { segmentedTabs, type SegmentedTabs } from './Panel';
@@ -247,6 +248,13 @@ export class GeneratorList {
     el.addEventListener('dblclick', () => {
       clearTimeout(clickTimer);
       this.onAdd(g.id);
+    });
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openContextMenu(e.clientX, e.clientY, [
+        { label: 'Add to the graph', shortcut: 'Dbl-click', run: () => this.onAdd(g.id) },
+        { label: 'Replace the selected node', shortcut: 'Click', run: () => this.onSelect(g.id) },
+      ]);
     });
     // Pointer-driven drag (not native HTML drag & drop, which other pointer captures and
     // browser extensions can leave in a stuck state): a ghost follows the pointer.

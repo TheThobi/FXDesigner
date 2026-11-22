@@ -19,6 +19,7 @@ export const caustics: ShaderGenerator = {
     param.speed(0.5, 3),
   ],
 
+  defaultPost: { alphaMode: 1 },
   presets: [
     {
       name: 'Sharp caustics',
@@ -29,5 +30,4 @@ export const caustics: ShaderGenerator = {
     { name: 'Soft light', values: { scale: 1, iterations: 4, intensity: 0.01, sharpness: 3 } },
     { name: 'Fine net', values: { scale: 4, iterations: 8, intensity: 0.004, sharpness: 14 } },
   ],
-  featuredPreset: 'Pool floor',
 };

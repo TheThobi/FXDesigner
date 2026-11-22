@@ -17,7 +17,8 @@ import {
   dependsOn,
   hasOutput,
   MAX_NODE_CODE,
-  customParamDefs,
+  effectiveGenerator,
+  sanitizeBaseParamEdits,
   sanitizeCustomParams,
   nearestResolution,
   postDefaults,
@@ -354,15 +355,21 @@ function sanitizeNode(raw: unknown, lookup: GeneratorLookup): GraphNode | null {
     def.kind === 'shader' && !def.codeParam
       ? sanitizeCustomParams(obj.customParams, new Set(def.params.map((p) => p.key)))
       : [];
-  const effective = custom.length
-    ? { ...def, params: [...def.params, ...customParamDefs(custom)] }
-    : def;
+  const edits =
+    def.kind === 'shader' && !def.codeParam
+      ? sanitizeBaseParamEdits(obj.baseParamEdits, def.params)
+      : {};
+  const baseParamEdits = Object.keys(edits).length ? edits : undefined;
+  const effective = effectiveGenerator(def, { customParams: custom, baseParamEdits });
   return {
     id: obj.id,
     generator: def.id,
     x: clamp(finite(obj.x, 0), -1e6, 1e6),
     y: clamp(finite(obj.y, 0), -1e6, 1e6),
     params: sanitizeValues(effective.params, obj.params),
+    ...(typeof obj.seed === 'number' && Number.isFinite(obj.seed)
+      ? { seed: clamp(Math.round(obj.seed), 0, MAX_SEED) }
+      : {}),
     post: sanitizeValues(POST_PARAMS, obj.post, postDefaults(def)),
     ramp: sanitizeGradient(obj.ramp) ?? DEFAULT_RAMP,
     postEnabled: obj.postEnabled !== false,
@@ -370,6 +377,7 @@ function sanitizeNode(raw: unknown, lookup: GeneratorLookup): GraphNode | null {
       typeof obj.frozenAt === 'number' && Number.isFinite(obj.frozenAt) ? obj.frozenAt : null,
     ...(obj.collapsed === true ? { collapsed: true } : {}),
     ...(custom.length ? { customParams: custom } : {}),
+    ...(baseParamEdits ? { baseParamEdits } : {}),
     ...(typeof obj.code === 'string' &&
     obj.code.length <= MAX_NODE_CODE &&
     def.kind === 'shader' &&

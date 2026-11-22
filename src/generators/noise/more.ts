@@ -134,6 +134,7 @@ export const ripples: ShaderGenerator = {
   description: 'Interference of circular waves. Seamless; loops at integer speeds.',
   animated: true,
   fragment: ripplesFrag,
+  defaultPost: { alphaMode: 1 },
   params: [
     param.int('sources', 'Sources', 6, 1, 16),
     param.float('frequency', 'Frequency', 10, 1, 60),

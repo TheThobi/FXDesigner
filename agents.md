@@ -31,6 +31,8 @@ npm scripts need Node ≥ 20 (local Node 22 works); `make <target>` runs the sam
   fails otherwise).
 - `npm run test:e2e` (`make e2e`): Playwright against the production build, one worker; the
   app runs with `?e2e` (no background thumbnails) and the generator sweep is split in 4 tests.
+  Every test is tagged `@part1`…`@part4` (similar durations): CI runs the parts on 4 parallel
+  jobs (`--grep @partN`); tag new tests to keep them balanced.
   Screenshots in `test-results/generators/`: look at them after touching GLSL.
   `PW_BASE_URL=http://localhost:5173` runs against the dev server (no build). Keep the
   Playwright image tag in Makefile and CI in sync with `@playwright/test`.
@@ -45,10 +47,18 @@ npm scripts need Node ≥ 20 (local Node 22 works); `make <target>` runs the sam
   `collapsed`, `code` and `customParams`.
 - Combining / transforming images is an **operator** node's job (`generators/operators/`),
   never engine-side inputs or per-node modules. Inputs are declared by the generator (`inputs`,
-  sampled as `u_in_<key>` / `u_has_<key>`); one-channel inputs declare `value: 'gray'`.
+  sampled as `u_in_<key>` / `u_has_<key>`); one-channel inputs declare `value: 'float'`
+  (pin / link colors follow Shader Graph: float blue, vec2 green, vec3 yellow, vec4 pink).
   Settings tied to an input go in `NodeInputDef.params` (greyed out while unconnected).
 - Multi-pass shaders: `ShaderGenerator.passes` (previous pass as `u_prev`, `precise` for data).
-  Channel outputs: `outputs` (links carry `output`). Data generators: `dataOutput`.
+  Data generators: `dataOutput`.
+- Outputs: every node has RGBA plus `STANDARD_OUTPUTS` (rgb, r, g, b, a), extracted on demand
+  by `Renderer.outputOf`; declared `outputs` replace them (Unpack RGBA). Links carry `output`.
+- Exports and the library thumbnail use the connected Output node, else the selection
+  (`App.exportNode`). Output / Reroute are pass-through operators marked by `role`. The
+  selection may be empty (`selectedId` = '').
+- User presets (`app/userPresets.ts`) are keyed by generator id, or the shared scopes `@look`
+  (Post Process) and `@color` (ramps).
 - Simulations live per node: `App.liveSim()` (a new instance must be reset).
 - Non-square workspaces: shader generators are `centered` (shapes stay round) or `tiled`
   (whole repeats), default from calling `centered()`; simulations size grids with
@@ -112,7 +122,10 @@ npm scripts need Node ≥ 20 (local Node 22 works); `make <target>` runs the sam
 - Keep UI text short: no explanatory paragraphs where a label or tooltip does the job.
 - No native HTML drag & drop: pointer events only (the browser cancels the pointer stream when
   it starts its own drag).
-- Panels are docked by `ui/Dock.ts` (tree of splits and tab stacks).
+- Panels are docked by `ui/Dock.ts` (tree of splits and tab stacks). Hidden panels stay in
+  the tree (not drawn): never remove them to hide them, sizes would drift.
+- Right-click menus use `ui/ContextMenu.ts` (pass the dialog as container inside a modal);
+  anything listable (cards, tiles, nodes, links) should offer its actions there.
 
 ## WebGL pitfalls (both happened, see `engine/gl/units.ts`)
 
@@ -131,6 +144,10 @@ SwiftShader (e2e) is slow with SSAA materials: judge performance on a real GPU.
   replace the deployment ones under `npm run dev:server`.
 - Schema changes: append to `MIGRATIONS` (`server/src/db.ts`), never edit an applied one.
 - Library sync is last-write-wins by `updated`, deletions as tombstones (`src/app/cloud.ts`).
+- Community (`server/src/community.ts`): categories live on the server (`COMMUNITY_CATEGORIES`,
+  ids are stored); the client never trusts a community document before `parseDocument`.
+  Library systems link to their publication (`SystemEntry.published`, hash from
+  `contentHash`): keep local and published states visibly apart in the UI.
 
 ## Art direction
 

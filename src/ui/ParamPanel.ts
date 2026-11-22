@@ -8,6 +8,7 @@ import type {
 } from '../params/types';
 import { deepEqual } from '../util/equal';
 import { createControl, type Control } from './controls';
+import { openContextMenu } from './ContextMenu';
 import { clear, h } from './dom';
 import { icon, isIconName } from './icons';
 
@@ -17,6 +18,11 @@ export interface PresetGalleryOptions {
   readonly presets: readonly Preset[];
   /** User presets, after the built-in ones. */
   readonly userPresets?: readonly Preset[];
+  /** Right-click actions on user presets. */
+  readonly userActions?: {
+    readonly rename: (preset: Preset) => void;
+    readonly remove: (preset: Preset) => void;
+  };
   readonly onPick: (preset: Preset) => void;
   /** Pointer over a tile (preview it live), null when it leaves. */
   readonly onHover?: (preset: Preset | null) => void;
@@ -177,6 +183,20 @@ export class ParamPanel {
         ),
         h('span', { class: 'preset-name', text: preset.name }),
       );
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const actions = user ? opts.userActions : undefined;
+        openContextMenu(e.clientX, e.clientY, [
+          { label: 'Apply', run: () => opts.onPick(preset) },
+          ...(actions
+            ? [
+                null,
+                { label: 'Rename…', run: () => actions.rename(preset) },
+                { label: 'Delete', run: () => actions.remove(preset) },
+              ]
+            : []),
+        ]);
+      });
       if (opts.onHover) {
         el.addEventListener('pointerenter', () => opts.onHover?.(preset));
         el.addEventListener('pointerleave', () => opts.onHover?.(null));
@@ -217,6 +237,15 @@ export class ParamPanel {
     });
     // Leaving the panel while hovering a tile ends the preview.
     grid.addEventListener('pointerleave', () => opts.onHover?.(null));
+    // Two rows of tiles by default (scroll for more); tiles scale with the panel width.
+    new ResizeObserver(() => {
+      const first = tiles[0];
+      if (!first || !first.offsetHeight) return;
+      const style = getComputedStyle(grid);
+      const gap = parseFloat(style.rowGap) || 0;
+      const pad = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+      grid.style.maxHeight = `${Math.ceil(first.offsetHeight * 2 + gap + pad)}px`;
+    }).observe(grid);
     this.gallery = { opts, tiles, element: details };
     return details;
   }

@@ -61,9 +61,7 @@ export function userPresetMenu(actions: UserPresetActions): HTMLElement {
           }),
         ),
       ),
-      presets.length === 0
-        ? h('p', { class: 'menu-empty', text: 'No saved preset for this generator yet.' })
-        : null,
+      presets.length === 0 ? h('p', { class: 'menu-empty', text: 'No saved preset yet.' }) : null,
     ];
     panel.replaceChildren(...children.filter((c): c is HTMLElement => c !== null));
   }

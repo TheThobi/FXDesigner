@@ -122,7 +122,10 @@ export function generatorsByFamily(): GeneratorFamilyGroup[] {
     id: f.id,
     label: f.label,
     sections: f.categories
-      .map((category) => ({ category, generators: byCategory.get(category) ?? [] }))
+      .map((category) => ({
+        category,
+        generators: (byCategory.get(category) ?? []).filter((def) => !def.role),
+      }))
       .filter((s) => s.generators.length > 0),
   })).filter((f) => f.sections.length > 0);
 }

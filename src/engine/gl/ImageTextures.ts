@@ -20,6 +20,19 @@ export class ImageTextures {
 
   constructor(private readonly gpu: GpuContext) {}
 
+  /** Waits for the textures needed by an offscreen capture. */
+  async preload(urls: readonly string[]): Promise<void> {
+    const unique = [...new Set(urls.filter(Boolean))];
+    if (unique.length > MAX_IMAGES) throw new Error('Too many images for a community preview');
+    unique.forEach((url) => this.get(url));
+    const deadline = performance.now() + 10_000;
+    while (unique.some((url) => !this.entries.get(url)?.texture)) {
+      if (unique.some((url) => this.entries.get(url)?.failed) || performance.now() > deadline)
+        throw new Error('Could not load an image for the community preview');
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+  }
+
   get(url: string): { texture: WebGLTexture; width: number; height: number } | null {
     if (!url) return null;
     let entry = this.entries.get(url);
@@ -36,6 +49,10 @@ export class ImageTextures {
 
   private load(url: string, entry: Entry): void {
     const image = new Image();
+    if (!url.startsWith('data:')) {
+      image.crossOrigin = 'anonymous';
+      image.referrerPolicy = 'no-referrer';
+    }
     image.onload = () => {
       if (this.entries.get(url) !== entry) return; // evicted meanwhile
       entry.texture = this.gpu.createImageTexture(image, 'linear');

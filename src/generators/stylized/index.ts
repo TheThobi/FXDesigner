@@ -386,7 +386,6 @@ export const toonWater: ShaderGenerator = {
       values: { scale: 2, lineWidth: 0.03, distortion: 0.6, secondLayer: 1, shading: 1.8 },
     },
   ],
-  featuredPreset: 'Rapids',
 };
 
 export const sparkles: ShaderGenerator = {
@@ -493,8 +492,9 @@ export const hookFlame: ShaderGenerator = {
     param.float('core', 'Core threshold', 0.55, 0.1, 0.9),
     param.float('outline', 'Outline band', 0.08, 0, 0.3),
     param.float('offset', 'Vertical offset', 0, -0.5, 0.5, {
-      description: 'Moves the flame up (positive) or down; it never touches the image edges.',
+      description: 'Moves the flame up (positive) or down.',
     }),
+    param.bool('fadeEdges', 'Fade at top and bottom', true),
     param.speed(1, 4),
   ],
   defaultPost: { alphaMode: SOURCE_ALPHA },

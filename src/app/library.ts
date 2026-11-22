@@ -16,6 +16,67 @@ export interface SystemEntry {
   readonly thumb: string | null;
   /** Folder id, or null at the top level. */
   readonly folder: string | null;
+  /** Community publication of this system (yours), absent / null when it is local only. */
+  readonly published?: PublishedLink | null;
+}
+
+/** Link from a library system to the community system it was published as. */
+export interface PublishedLink {
+  /** Community id. */
+  readonly id: string;
+  /** Version published last, or null for older server responses that omitted it. */
+  readonly version: number | null;
+  /** `contentHash` of the document published last (tells local edits apart). */
+  readonly hash: string;
+  /** Framing of the community preview, reused for the next versions. */
+  readonly framing?: PreviewFraming;
+}
+
+/** How the community preview shows the effect (see ui/PreviewStudio.ts). */
+export interface PreviewFraming {
+  /** 1 = the whole image, 4 = a quarter of its width. */
+  readonly zoom: number;
+  /** Center of the shown area, in [0, 1] (y down). */
+  readonly cx: number;
+  readonly cy: number;
+  /** Poster frame among the preview frames. */
+  readonly frame: number;
+  readonly background: 'checker' | 'black' | 'dark';
+}
+
+/** Publication state of a system in the library. */
+export type PublishState = 'local' | 'published' | 'modified';
+
+/**
+ * Hash of a document's content (the selection is not content): equal hashes = nothing to
+ * publish. FNV-1a over the JSON.
+ */
+export function contentHash(doc: unknown): string {
+  const { selected: _selected, ...rest } =
+    doc && typeof doc === 'object' ? (doc as Record<string, unknown>) : { selected: null };
+  const text = JSON.stringify(rest);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0') + text.length.toString(16);
+}
+
+export function publicationVersion(raw: unknown): number | null {
+  return typeof raw === 'number' && Number.isSafeInteger(raw) && raw > 0 ? raw : null;
+}
+
+function parseLink(raw: unknown): PublishedLink | null {
+  const p = raw as Partial<PublishedLink> | null;
+  if (!p || typeof p !== 'object') return null;
+  if (typeof p.id !== 'string' || !p.id || typeof p.hash !== 'string') return null;
+  return {
+    id: p.id,
+    version: publicationVersion(p.version),
+    hash: p.hash,
+    ...(p.framing ? { framing: p.framing } : {}),
+  };
 }
 
 export interface FolderEntry {
@@ -96,6 +157,7 @@ export class Library {
     this.entries = (Array.isArray(raw) ? raw.filter(isEntry) : []).map((e) => ({
       ...e,
       folder: typeof e.folder === 'string' ? e.folder : null,
+      published: parseLink(e.published),
     }));
     const folders = readJson(FOLDERS_KEY);
     this.folderList = (Array.isArray(folders) ? folders.filter(isFolder) : []).map((f) => ({
@@ -180,6 +242,23 @@ export class Library {
     return this.get(copy.id) ?? copy;
   }
 
+  /** Links system `id` to its community publication (null: local only again). */
+  setPublished(id: string, link: PublishedLink | null): void {
+    this.update(id, { published: parseLink(link), updated: this.now() });
+  }
+
+  /** Whether system `id` is local only, published as is, or edited since it was published. */
+  publishState(id: string): PublishState {
+    const link = this.get(id)?.published;
+    if (!link) return 'local';
+    return contentHash(this.load(id)) === link.hash ? 'published' : 'modified';
+  }
+
+  /** The library system published as community system `communityId`, if any. */
+  findPublished(communityId: string): SystemEntry | undefined {
+    return this.entries.find((e) => e.published?.id === communityId);
+  }
+
   rename(id: string, name: string): void {
     this.update(id, {
       name: name.trim().slice(0, MAX_NAME) || 'Untitled system',
@@ -239,6 +318,11 @@ export class Library {
   applyRemoteSystem(entry: SystemEntry, doc: unknown): void {
     const fixed = {
       ...entry,
+      // An omitted field from an older server is not an explicit unlink.
+      published:
+        entry.published === undefined
+          ? (this.get(entry.id)?.published ?? null)
+          : parseLink(entry.published),
       folder: entry.folder && this.folder(entry.folder) ? entry.folder : null,
     };
     const exists = this.get(entry.id);

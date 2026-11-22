@@ -32,7 +32,7 @@ const SEED_INPUTS: readonly NodeInputDef[] = [
     label: 'Seed',
     description: 'Bright areas of this input seed the ink pattern (restarts it when connected).',
     color: '#ffd166',
-    value: 'gray',
+    value: 'float',
   },
 ];
 

@@ -5,6 +5,7 @@ export interface ConfirmOptions {
   readonly title: string;
   readonly message: string;
   readonly confirmLabel?: string;
+  readonly irreversible?: boolean;
   /** When set, a "Don't ask again" box is shown; once ticked the dialog resolves true at once. */
   readonly dontAskKey?: string;
 }
@@ -23,6 +24,9 @@ export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
       { method: 'dialog' },
       h('h2', { text: opts.title }),
       h('p', { class: 'dialog-info', text: opts.message }),
+      opts.irreversible
+        ? h('p', { class: 'dialog-warning', text: 'This cannot be undone.' })
+        : null,
       storageKey
         ? h('label', { class: 'dialog-check' }, dontAsk, h('span', { text: "Don't ask again" }))
         : null,
@@ -60,6 +64,7 @@ export interface PromptOptions {
   readonly title: string;
   readonly label: string;
   readonly value?: string;
+  readonly maxLength?: number;
   readonly confirmLabel?: string;
 }
 
@@ -70,7 +75,7 @@ export function promptDialog(opts: PromptOptions): Promise<string | null> {
       type: 'text',
       name: 'value',
       class: 'dialog-text',
-      maxLength: 64,
+      maxLength: opts.maxLength ?? 64,
       required: true,
     });
     input.value = opts.value ?? '';

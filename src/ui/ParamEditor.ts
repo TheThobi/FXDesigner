@@ -1,6 +1,8 @@
 import { h } from './dom';
 import { icon } from './icons';
 import { openColorPicker } from './controls/colorPicker';
+import { createControl } from './controls';
+import type { ParamDef, ParamType, ParamValue } from '../params/types';
 
 /** Same shape as app/state.ts CustomParamSpec (the UI doesn't depend on the app layer). */
 export interface EditableParam {
@@ -15,15 +17,21 @@ export interface EditableParam {
 
 export interface ParamEditorOptions {
   readonly params: readonly EditableParam[];
-  /** Parameters of the generator itself (read-only, listed for reference). */
-  readonly builtIn: readonly {
-    readonly key: string;
-    readonly label: string;
-    readonly type: string;
-  }[];
+  readonly nodeKey: string;
+  readonly builtIn: readonly ParamDef[];
+  readonly onBaseChange: (key: string, edit: BaseEdit | null) => void;
   /** A new parameter named `label` (the app picks a unique uniform key). */
   readonly onAdd: (label: string) => void;
   readonly onChange: (params: readonly EditableParam[]) => void;
+}
+
+export interface BaseEdit {
+  readonly label: string;
+  readonly type: ParamType;
+  readonly group: string;
+  readonly default: ParamValue;
+  readonly min?: number;
+  readonly max?: number;
 }
 
 const TYPES: readonly [EditableParam['type'], string][] = [
@@ -41,12 +49,11 @@ const TYPES: readonly [EditableParam['type'], string][] = [
 export class ParamEditor {
   readonly element: HTMLElement;
   private readonly list: HTMLElement;
-  private readonly builtIn: HTMLElement;
   private opts: ParamEditorOptions | null = null;
+  private readonly expanded = new Map<string, Set<string>>();
 
   constructor() {
     this.list = h('div', { class: 'pe-list' });
-    this.builtIn = h('p', { class: 'pe-builtin' });
     this.element = h(
       'section',
       { class: 'pe' },
@@ -67,29 +74,81 @@ export class ParamEditor {
         ),
       ),
       this.list,
-      this.builtIn,
     );
   }
 
   render(opts: ParamEditorOptions): void {
+    let open = this.expanded.get(opts.nodeKey);
+    if (!open) this.expanded.set(opts.nodeKey, (open = new Set()));
     this.opts = opts;
-    this.builtIn.textContent = opts.builtIn.length
-      ? `Generator parameters: ${opts.builtIn.map((p) => `u_${p.key}`).join(', ')}`
-      : '';
+    const section = (
+      key: string,
+      label: string,
+      type: string,
+      body: HTMLElement,
+      remove: () => void,
+    ) => {
+      const row = h(
+        'details',
+        { class: 'pe-param', open: open.has(key) },
+        h(
+          'summary',
+          {},
+          h('span', { class: 'pe-type-icon', 'data-type': type, title: type }),
+          h('span', { text: label }),
+          h('code', { class: 'pe-key', text: `u_${key}` }),
+        ),
+        body,
+      );
+      const close = h(
+        'button',
+        {
+          type: 'button',
+          class: 'icon-btn pe-remove',
+          title: 'Remove parameter',
+          'aria-label': `Remove parameter ${label}`,
+          onclick: remove,
+        },
+        icon('close', 10),
+      );
+      row.addEventListener('toggle', () => {
+        if (!row.isConnected) return;
+        if (row.open) open.add(key);
+        else open.delete(key);
+      });
+      return h('div', { class: 'pe-entry', 'data-param': key }, row, close);
+    };
     this.list.replaceChildren(
-      ...(opts.params.length
-        ? [
-            h(
-              'div',
-              { class: 'pe-row pe-labels' },
-              ...['Name', 'Type', 'Default', 'Min', 'Max', 'Category', ''].map((t) =>
-                h('span', { text: t }),
-              ),
-            ),
-          ]
-        : [h('p', { class: 'pe-empty', text: 'No parameters yet: Add creates a slider.' })]),
-      ...opts.params.map((p, i) => this.row(p, i)),
+      ...opts.builtIn.map((def) => {
+        const config: BaseEdit = {
+          label: def.label,
+          type: def.type,
+          group: def.group ?? '',
+          default: def.default,
+          ...('min' in def ? { min: def.min, max: def.max } : {}),
+        };
+        const patch = (edit: Partial<BaseEdit>) =>
+          opts.onBaseChange(def.key, { ...config, ...edit });
+        return section(def.key, def.label, def.type, this.fields(config, patch, def), () =>
+          opts.onBaseChange(def.key, null),
+        );
+      }),
+      ...opts.params.map((p, i) =>
+        section(
+          p.key,
+          p.label,
+          p.type,
+          this.fields(p, (patch) => this.update(i, patch as Partial<EditableParam>)),
+          () => opts.onChange(opts.params.filter((_, index) => index !== i)),
+        ),
+      ),
     );
+  }
+
+  expand(nodeKey: string, key: string): void {
+    const open = this.expanded.get(nodeKey) ?? new Set<string>();
+    open.add(key);
+    this.expanded.set(nodeKey, open);
   }
 
   private update(index: number, patch: Partial<EditableParam>): void {
@@ -99,7 +158,11 @@ export class ParamEditor {
     opts.onChange(params);
   }
 
-  private row(p: EditableParam, index: number): HTMLElement {
+  private fields(
+    p: BaseEdit,
+    update: (patch: Partial<BaseEdit>) => void,
+    def?: ParamDef,
+  ): HTMLElement {
     const text = (value: string, label: string, apply: (v: string) => void, cls = '') => {
       const input = h('input', {
         type: 'text',
@@ -110,13 +173,12 @@ export class ParamEditor {
       input.addEventListener('change', () => apply(input.value));
       return input;
     };
-    const number = (value: number, label: string, apply: (v: number) => void, disabled = false) => {
+    const number = (value: number, label: string, apply: (v: number) => void) => {
       const input = h('input', {
         type: 'number',
         class: 'pe-input pe-num',
         value: String(value),
         step: p.type === 'int' ? 1 : 'any',
-        disabled,
         'aria-label': label,
       });
       input.addEventListener('change', () => {
@@ -125,15 +187,17 @@ export class ParamEditor {
       });
       return input;
     };
+    const types: [ParamType, string][] = [...TYPES];
+    if (def && !types.some(([value]) => value === p.type)) types.unshift([p.type, p.type]);
     const type = h(
       'select',
       { class: 'pe-input', 'aria-label': 'Type' },
-      ...TYPES.map(([v, l]) => h('option', { value: v, text: l, selected: v === p.type })),
+      ...types.map(([v, l]) => h('option', { value: v, text: l, selected: v === p.type })),
     );
     type.addEventListener('change', () => {
       const t = type.value as EditableParam['type'];
-      const def = t === 'bool' ? false : t === 'color' ? '#ffffff' : p.min;
-      this.update(index, { type: t, default: def });
+      const value = t === 'bool' ? false : t === 'color' ? '#ffffff' : (p.min ?? 0);
+      update({ type: t, default: value });
     });
     let defaultCell: HTMLElement;
     if (p.type === 'bool') {
@@ -142,7 +206,7 @@ export class ParamEditor {
         checked: p.default === true,
         'aria-label': 'Default',
       });
-      box.addEventListener('change', () => this.update(index, { default: box.checked }));
+      box.addEventListener('change', () => update({ default: box.checked }));
       defaultCell = box;
     } else if (p.type === 'color') {
       const color = typeof p.default === 'string' ? p.default : '#ffffff';
@@ -154,45 +218,53 @@ export class ParamEditor {
       swatch.style.setProperty('--c', color);
       swatch.style.setProperty('--a', '1');
       swatch.addEventListener('click', () =>
-        openColorPicker(
-          swatch,
-          { color, alpha: 1 },
-          (c) => this.update(index, { default: c.color }),
-          {
-            alpha: false,
-          },
-        ),
+        openColorPicker(swatch, { color, alpha: 1 }, (c) => update({ default: c.color }), {
+          alpha: false,
+        }),
       );
       defaultCell = swatch;
+    } else if (p.type === 'int' || p.type === 'float' || !def) {
+      defaultCell = number(Number(p.default) || 0, 'Default', (v) => update({ default: v }));
     } else {
-      defaultCell = number(Number(p.default) || 0, 'Default', (v) =>
-        this.update(index, { default: v }),
-      );
+      defaultCell = createControl(def, p.default, (value) => update({ default: value })).element;
     }
-    const ranged = p.type === 'float' || p.type === 'int';
+    const field = (label: string, control: HTMLElement) =>
+      h('label', {}, h('span', { text: label }), control);
     return h(
       'div',
-      { class: 'pe-row' },
-      text(p.label, 'Name', (v) => this.update(index, { label: v.trim() || p.label })),
-      type,
-      defaultCell,
-      number(p.min, 'Min', (v) => this.update(index, { min: v }), !ranged),
-      number(p.max, 'Max', (v) => this.update(index, { max: v }), !ranged),
-      text(p.group, 'Category', (v) => this.update(index, { group: v.trim() }), 'pe-group'),
+      { class: 'pe-config' },
       h(
-        'span',
-        { class: 'pe-tail' },
-        h('code', { class: 'pe-key', text: `u_${p.key}`, title: 'Uniform name in the code' }),
-        h(
-          'button',
-          {
-            type: 'button',
-            class: 'icon-btn',
-            title: 'Remove parameter',
-            'aria-label': 'Remove parameter',
-            onclick: () => this.opts?.onChange(this.opts.params.filter((_, i) => i !== index)),
-          },
-          icon('close', 10),
+        'div',
+        { class: 'pe-fields pe-identity' },
+        field(
+          'Name',
+          text(p.label, 'Name', (v) => update({ label: v.trim() || p.label })),
+        ),
+        field('Type', type),
+      ),
+      h(
+        'div',
+        { class: 'pe-fields pe-values' },
+        field('Default', defaultCell),
+        p.min !== undefined
+          ? field(
+              'Min',
+              number(p.min, 'Min', (v) => update({ min: v })),
+            )
+          : null,
+        p.max !== undefined
+          ? field(
+              'Max',
+              number(p.max, 'Max', (v) => update({ max: v })),
+            )
+          : null,
+      ),
+      h(
+        'div',
+        { class: 'pe-fields' },
+        field(
+          'Category',
+          text(p.group, 'Category', (v) => update({ group: v.trim() })),
         ),
       ),
     );

@@ -15,6 +15,7 @@ import {
   serveStatic,
   type Request,
 } from './http.js';
+import { communityRoutes } from './community.js';
 import { libraryRoutes } from './library.js';
 
 const devOverrides = applyDevOverrides(process.env, process.argv);
@@ -62,6 +63,7 @@ async function connectDatabase(): Promise<void> {
   const auth = new Auth(pool, config);
   auth.routes(router);
   libraryRoutes(router, pool, auth);
+  communityRoutes(router, pool, auth);
   setInterval(() => void auth.prune().catch((e: unknown) => console.error(e)), 3_600_000).unref();
   db = pool;
   console.log(`[db] connected to ${target}: accounts on`);

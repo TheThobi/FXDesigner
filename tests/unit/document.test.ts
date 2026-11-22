@@ -9,11 +9,38 @@ import {
   encodeDocumentForUrl,
   parseDocument,
 } from '../../src/app/document';
-import { createNode, type EditorState } from '../../src/app/state';
+import { createNode, effectiveGenerator, type EditorState } from '../../src/app/state';
 import { getGenerator } from '../../src/generators/registry';
 
 const noise = getGenerator('fractal-noise')!;
 const blend = getGenerator('op-blend')!;
+
+it('round-trips node-local edits, type changes and removals of generator parameters', () => {
+  const def = getGenerator('custom-shader')!;
+  const edited = {
+    ...createNode(def, 'custom', 0, 0),
+    baseParamEdits: {
+      a: { label: 'Radius', type: 'float' as const, default: 0.75, min: 0, max: 2, group: 'Shape' },
+      b: { label: 'Enabled', type: 'bool' as const, default: true, group: 'Shape' },
+      d: null,
+    },
+  };
+  const document = documentFromState(
+    { ...state, nodes: [edited], links: [], selectedId: edited.id },
+    getGenerator,
+  );
+  const node = parseDocument(JSON.parse(JSON.stringify(document)), getGenerator).nodes[0]!;
+  const params = effectiveGenerator(def, node).params;
+  expect(params.find((p) => p.key === 'a')).toMatchObject({
+    label: 'Radius',
+    default: 0.75,
+    max: 2,
+  });
+  expect(params.find((p) => p.key === 'b')).toMatchObject({ type: 'bool', default: true });
+  expect(params.some((p) => p.key === 'd')).toBe(false);
+  expect(node.params).not.toHaveProperty('d');
+  expect(def.params.find((p) => p.key === 'a')?.label).toBe('A');
+});
 
 const state: EditorState = {
   nodes: [
@@ -342,14 +369,18 @@ describe('v5 -> v6: channel outputs', () => {
           { id: 'c', generator: 'op-blend', x: 0, y: 0 },
         ],
         links: [
-          { from: 'a', to: 'u', input: 'image', output: 'r' }, // noise has no channel outputs
+          { from: 'a', to: 'u', input: 'image', output: 'rgb' }, // standard channel output
+          { from: 'a', to: 'c', input: 'background', output: 'nope' }, // no such output
           { from: 'u', to: 'c', input: 'mask' }, // unpack has no main output
           { from: 'u', to: 'c', input: 'foreground', output: 'a' },
         ],
       },
       getGenerator,
     );
-    expect(doc.links).toEqual([{ from: 'u', to: 'c', input: 'foreground', output: 'a' }]);
+    expect(doc.links).toEqual([
+      { from: 'a', to: 'u', input: 'image', output: 'rgb' },
+      { from: 'u', to: 'c', input: 'foreground', output: 'a' },
+    ]);
   });
 });
 

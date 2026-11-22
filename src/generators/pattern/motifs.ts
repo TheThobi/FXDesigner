@@ -282,9 +282,7 @@ export const imageNode: ShaderGenerator = {
   id: 'image',
   name: 'Image',
   category: 'pattern',
-  description:
-    'Your own picture as a node (load or drop a file): plug it into Base, Mask, Warp or a ' +
-    'simulation Emitter, or recolor it with the Post Process.',
+  description: 'Use an imported or linked image.',
   animated: false,
   layout: 'centered',
   fragment: imageFrag,

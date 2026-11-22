@@ -25,11 +25,13 @@ describe('zip', () => {
 describe('image params', () => {
   const def = param.image('image', 'Image');
 
-  it('accepts base64 image data URLs only', () => {
+  it('accepts base64 images and direct HTTPS URLs', () => {
     expect(isImageDataUrl('data:image/png;base64,iVBORw0KGgo=')).toBe(true);
     expect(isImageDataUrl('data:image/svg+xml;base64,PHN2Zz4=')).toBe(false);
     expect(isImageDataUrl('javascript:alert(1)')).toBe(false);
-    expect(sanitizeValue(def, 'https://example.com/a.png')).toBe('');
+    expect(sanitizeValue(def, 'https://example.com/a.png')).toBe('https://example.com/a.png');
+    expect(sanitizeValue(def, 'http://example.com/a.png')).toBe('');
+    expect(sanitizeValue(def, 'https://user:password@example.com/a.png')).toBe('');
     expect(sanitizeValue(def, 'data:image/webp;base64,UklGRg==')).toBe(
       'data:image/webp;base64,UklGRg==',
     );

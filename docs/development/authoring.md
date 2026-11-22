@@ -105,14 +105,15 @@ fastest way to prototype: write it in the app, then move the code into a `.glsl`
 ```ts
 inputs: [
   { key: 'image', label: 'Image', description: 'The image to process.', color: '#e8e8e8' },
-  { key: 'mask', label: 'Mask', description: 'White keeps.', color: '#9be86a', value: 'gray' },
+  { key: 'mask', label: 'Mask', description: 'White keeps.', color: '#9be86a', value: 'float' },
 ],
 ```
 
 - Sampled as `sampler2D u_in_<key>` with `bool u_has_<key>` (false when unconnected: use a
   sensible fallback).
-- `value: 'gray'` for inputs read as one channel (masks, patterns, heights), `'color'` for
-  vectors; absent = any image. Links feeding the other kind are drawn as gradients.
+- `value: 'float'` for inputs read as one channel (masks, patterns, heights), `'vec2'` for
+  flow vectors in RG; absent = any image (RGBA). Links feeding another type are drawn as
+  gradients.
 - Operators default to a pass-through Post Process (`PASS_THROUGH` in operators/index.ts).
 - Multi-pass (blur, distance): `passes: [{ label, fragment, repeat, precise }]`, each reads the
   previous as `u_prev`.

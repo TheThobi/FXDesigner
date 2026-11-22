@@ -1,12 +1,13 @@
 import type { GeneratorDefinition } from '../engine/generator';
-import { inputsOf, outputsOf } from '../engine/nodes';
+import { inputsOf, outputDef, outputsOf } from '../engine/nodes';
 import { DEFAULT_RAMP, POST_PARAMS, POST_PROCESS_PARAMS } from '../engine/post/schema';
 import { param } from '../params/define';
 import type { GradientValue } from '../params/gradient';
-import type { ParamDef, ParamValues } from '../params/types';
+import type { ParamDef, ParamType, ParamValue, ParamValues } from '../params/types';
 import { MAX_SEED } from '../util/random';
+import { clamp } from '../util/math';
 import { RESERVED_UNIFORMS } from '../engine/shaderBuilder';
-import { defaultValues, sanitizeValues } from '../params/values';
+import { defaultValues, sanitizeValue, sanitizeValues } from '../params/values';
 
 export const RESOLUTIONS = [128, 256, 512, 1024, 2048, 4096] as const;
 export const DEFAULT_RESOLUTION = 512;
@@ -68,6 +69,8 @@ export interface GraphNode {
   readonly x: number;
   readonly y: number;
   readonly params: ParamValues;
+  /** Optional seed for this node. Otherwise it follows the workspace seed. */
+  readonly seed?: number;
   /** This node's Post Process values (every node has its own look). */
   readonly post: ParamValues;
   /** Color ramp of the post pass (gradient-map mode). */
@@ -85,6 +88,17 @@ export interface GraphNode {
   readonly code?: string;
   /** Parameters created in the Code view (custom nodes): sliders exposed as uniforms. */
   readonly customParams?: readonly CustomParamSpec[];
+  /** Per-node edits to generator parameters. Null removes a parameter and its uniform. */
+  readonly baseParamEdits?: Readonly<Record<string, BaseParamEdit | null>>;
+}
+
+export interface BaseParamEdit {
+  readonly label: string;
+  readonly type: ParamType;
+  readonly group: string;
+  readonly default: ParamValue;
+  readonly min?: number;
+  readonly max?: number;
 }
 
 /** A parameter made by the user for a custom node (like a material parameter in Unreal). */
@@ -185,13 +199,100 @@ export function sanitizeCustomParams(raw: unknown, taken: ReadonlySet<string>): 
   return out;
 }
 
-/**
- * The generator a node actually runs: its definition plus the node's custom parameters (code
- * view). Without custom parameters, the definition itself.
- */
-export function effectiveGenerator(def: GeneratorDefinition, node: GraphNode): GeneratorDefinition {
-  if (def.kind !== 'shader' || !node.customParams?.length) return def;
-  return { ...def, params: [...def.params, ...customParamDefs(node.customParams)] };
+/** Applies a node's edits to its generator's parameters, keeping their original order. */
+export function editedBaseParams(
+  defs: readonly ParamDef[],
+  edits: GraphNode['baseParamEdits'],
+): ParamDef[] {
+  return defs.flatMap((def) => {
+    const edit = edits?.[def.key];
+    if (edit === null) return [];
+    if (!edit) return [def];
+    if (edit.type !== def.type) {
+      const specs = sanitizeCustomParams([{ ...edit, key: def.key }], new Set());
+      return specs.length ? customParamDefs(specs) : [def];
+    }
+    const updated = { ...def, label: edit.label, group: edit.group };
+    if ('min' in updated && edit.min !== undefined && edit.max !== undefined)
+      Object.assign(updated, { min: edit.min, max: edit.max });
+    return [{ ...updated, default: sanitizeValue(updated, edit.default) } as ParamDef];
+  });
+}
+
+export function sanitizeBaseParamEdits(
+  raw: unknown,
+  defs: readonly ParamDef[],
+): Record<string, BaseParamEdit | null> {
+  const out: Record<string, BaseParamEdit | null> = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  const edits = raw as Record<string, unknown>;
+  for (const def of defs) {
+    if (!Object.hasOwn(edits, def.key)) continue;
+    const value = edits[def.key];
+    if (value === null) {
+      out[def.key] = null;
+      continue;
+    }
+    if (!value || typeof value !== 'object') continue;
+    const edit = value as Partial<BaseParamEdit>;
+    const label =
+      typeof edit.label === 'string' ? edit.label.trim().slice(0, 40) || def.label : def.label;
+    const group =
+      typeof edit.group === 'string' ? edit.group.trim().slice(0, 40) : (def.group ?? '');
+    if (
+      edit.type !== def.type &&
+      (edit.type === 'float' ||
+        edit.type === 'int' ||
+        edit.type === 'bool' ||
+        edit.type === 'color')
+    ) {
+      const spec = sanitizeCustomParams([{ ...edit, key: def.key, label, group }], new Set())[0];
+      if (spec) {
+        const { key: _key, ...rest } = spec;
+        out[def.key] = rest;
+        continue;
+      }
+    }
+    let shape: ParamDef = def;
+    let range = {};
+    if ('min' in def) {
+      const bound = (value: number | undefined, fallback: number) =>
+        typeof value === 'number' && Number.isFinite(value)
+          ? def.type === 'int'
+            ? Math.round(value)
+            : value
+          : fallback;
+      const step = def.type === 'int' ? 1 : 0.000001;
+      const [lower, upper] = 'limit' in def && def.limit ? def.limit : [-1e9, 1e9];
+      const min = clamp(bound(edit.min, def.min), lower, Math.max(lower, upper - step));
+      const max = clamp(bound(edit.max, def.max), Math.min(upper, min + step), upper);
+      range = { min, max };
+      shape = { ...def, ...range };
+    }
+    out[def.key] = {
+      label,
+      group,
+      type: def.type,
+      default: sanitizeValue(shape, edit.default),
+      ...range,
+    };
+  }
+  return out;
+}
+
+/** The generator a node runs, with its edited and custom parameters. */
+export function effectiveGenerator(
+  def: GeneratorDefinition,
+  node: Pick<GraphNode, 'baseParamEdits' | 'customParams'>,
+): GeneratorDefinition {
+  if (def.kind !== 'shader' || (!node.baseParamEdits && !node.customParams?.length)) return def;
+  return {
+    ...def,
+    params: [
+      ...editedBaseParams(def.params, node.baseParamEdits),
+      ...customParamDefs(node.customParams ?? []),
+    ],
+  };
 }
 
 /** Longest custom code kept in documents (characters). */
@@ -208,7 +309,7 @@ export interface GraphLink {
   readonly from: string;
   readonly to: string;
   readonly input: string;
-  /** Channel output of `from` (generators declaring `outputs`); absent = main output. */
+  /** Output of `from`: a declared channel output, or a standard one (rgb, r, g, b, a); absent = main RGBA. */
   readonly output?: string;
 }
 
@@ -260,6 +361,7 @@ export function createNode(
     ramp,
     postEnabled: true,
     frozenAt: null,
+    ...(def.startCollapsed ? { collapsed: true } : {}),
   };
 }
 
@@ -322,7 +424,7 @@ export function withNodeGenerator(
   const post = keepLook ? { ...postDefaults(def), ...pickScoped(node.post) } : postDefaults(def);
   const inputs = new Set(inputsOf(def).map((i) => i.key));
   // Custom code and parameters belong to the previous generator.
-  const { code: _code, customParams: _custom, ...rest } = node;
+  const { code: _code, customParams: _custom, baseParamEdits: _edits, ...rest } = node;
   const swapped: GraphNode = {
     ...rest,
     generator: def.id,
@@ -340,8 +442,8 @@ export function withNodeGenerator(
 
 /** Whether links from a `def` node may use `output` (main output when absent). */
 export function hasOutput(def: GeneratorDefinition, output: string | undefined): boolean {
-  const outputs = outputsOf(def);
-  return output === undefined ? outputs.length === 0 : outputs.some((o) => o.key === output);
+  if (output === undefined) return outputsOf(def).length === 0;
+  return outputDef(def, output) !== undefined;
 }
 
 /** True when `from` is `to` or depends on it (linking from → to would create a cycle). */

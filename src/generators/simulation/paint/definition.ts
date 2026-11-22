@@ -31,9 +31,7 @@ export const paintMask: SimulationGenerator = {
   id: 'paint-mask',
   name: 'Paint Mask',
   category: 'pattern',
-  description:
-    'A canvas you paint on (left drag) and erase (right / Shift drag). Strokes stay: plug it ' +
-    'into the Emitter of Smoke & Fire, or into any Mask / Warp input.',
+  description: 'Paint a persistent mask. Right-drag or Shift-drag to erase.',
   animated: true,
   seedless: true,
   params: PARAMS,

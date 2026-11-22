@@ -53,6 +53,43 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (user_id, kind, id)
   );
   `,
+  // 2: community (published systems, subscriptions).
+  `
+  CREATE TABLE community_systems (
+    id text PRIMARY KEY,
+    user_id uuid NOT NULL REFERENCES users ON DELETE CASCADE,
+    name text NOT NULL,
+    description text NOT NULL DEFAULT '',
+    category text NOT NULL,
+    tags text[] NOT NULL DEFAULT '{}',
+    thumb text,
+    document jsonb NOT NULL,
+    version int NOT NULL DEFAULT 1,
+    uses int NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE INDEX community_systems_user ON community_systems (user_id);
+  CREATE INDEX community_systems_category ON community_systems (category, created_at DESC);
+
+  CREATE TABLE community_subscriptions (
+    user_id uuid NOT NULL REFERENCES users ON DELETE CASCADE,
+    system_id text NOT NULL REFERENCES community_systems ON DELETE CASCADE,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, system_id)
+  );
+  CREATE INDEX community_subscriptions_system ON community_subscriptions (system_id, created_at);
+  `,
+  // 3: animated / static community systems with a hover animation strip; library systems
+  // remember their community publication (id, version, content hash, preview framing).
+  `
+  ALTER TABLE community_systems
+    ADD COLUMN animated boolean NOT NULL DEFAULT false,
+    ADD COLUMN preview text,
+    ADD COLUMN preview_frames int NOT NULL DEFAULT 0;
+  CREATE INDEX community_systems_animated ON community_systems (animated, created_at DESC);
+  ALTER TABLE systems ADD COLUMN published jsonb;
+  `,
 ];
 
 export type Db = pg.Pool;

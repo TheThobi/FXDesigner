@@ -50,9 +50,7 @@ export const creased: ShaderGenerator = {
   id: 'creased',
   name: 'Creased',
   category: 'material',
-  description:
-    'Crumpled sheet as a height map: a network of short sharp creases (ridges and valleys) ' +
-    'over several octaves, like crumpled paper or foil. Seamless.',
+  description: 'Seamless creases and folds for crumpled paper or foil.',
   animated: false,
   layout: 'tiled',
   fragment: creasedFrag,
@@ -101,9 +99,7 @@ export const crystal: ShaderGenerator = {
   id: 'crystal',
   name: 'Crystal',
   category: 'material',
-  description:
-    'Long thin translucent shards layered around mid gray, mostly along one direction (in the ' +
-    'spirit of Substance Crystal 2): crystalline streaks for ice, quartz, stylized rock. Seamless.',
+  description: 'Seamless directional crystal shards for ice, quartz and rock.',
   animated: false,
   layout: 'tiled',
   fragment: crystalFrag,

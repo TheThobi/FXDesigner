@@ -76,7 +76,7 @@ export const PHYSARUM_INPUTS: readonly NodeInputDef[] = [
     label: 'Food',
     description: 'Bright areas attract the agents (e.g. an Image, Paint Mask or pattern).',
     color: '#9be86a',
-    value: 'gray',
+    value: 'float',
     params: ['foodStrength'],
   },
 ];

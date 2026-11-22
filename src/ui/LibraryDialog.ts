@@ -1,3 +1,5 @@
+import type { PublishState } from '../app/library';
+import { openContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { h } from './dom';
 import { icon, type IconName } from './icons';
 
@@ -30,7 +32,28 @@ export interface LibraryActions {
   readonly removeFolder: (id: string) => Promise<void>;
   /** Account line shown in the header (sync state), or null when signed out. */
   readonly status?: () => string | null;
+  /** Local only, published as is, or edited since it was published. */
+  readonly publishState: (id: string) => PublishState;
+  /** Community actions on a library system. */
+  readonly community: {
+    /** First publication, or an update when it is published. */
+    readonly publish: (id: string) => void;
+    readonly view: (id: string) => void;
+    /** Name, category, tags, description of the community page. */
+    readonly edit: (id: string) => void;
+    /** Back to local only (stays online). */
+    readonly unlink: (id: string) => void;
+  };
 }
+
+/** Which systems the window lists. */
+type LibraryFilter = 'all' | 'local' | 'published';
+const FILTERS: readonly { id: LibraryFilter; label: string; title: string }[] = [
+  { id: 'all', label: 'All', title: 'Every system' },
+  { id: 'local', label: 'Local', title: 'Systems only in your library' },
+  { id: 'published', label: 'Published', title: 'Systems you published in the community' },
+];
+let lastFilter: LibraryFilter = 'all';
 
 const DRAG_THRESHOLD = 6;
 
@@ -40,6 +63,23 @@ function when(ms: number): string {
   return d.toDateString() === today.toDateString()
     ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
     : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/** Corner marker of a published system: up to date, or with unpublished changes. */
+function publishBadge(state: PublishState): HTMLElement | null {
+  if (state === 'local') return null;
+  return h(
+    'span',
+    {
+      class: `library-publish ${state}`,
+      title:
+        state === 'modified'
+          ? 'Published, with local changes not published yet'
+          : 'Published in the community, up to date',
+    },
+    icon('globe', 11),
+    state === 'modified' ? 'Modified' : 'Published',
+  );
 }
 
 /** Folder shown when the window opens again (null = the top level). */
@@ -53,6 +93,15 @@ let lastFolder: string | null = null;
  */
 export function openLibrary(actions: LibraryActions): void {
   let folder: string | null = lastFolder;
+  let filter: LibraryFilter = lastFilter;
+  const states = new Map<string, PublishState>();
+  const stateOf = (id: string) => {
+    let s = states.get(id);
+    if (!s) states.set(id, (s = actions.publishState(id)));
+    return s;
+  };
+  const shown = (item: LibraryItem) =>
+    filter === 'all' || (filter === 'local') === (stateOf(item.id) === 'local');
   const grid = h('div', { class: 'library-grid' });
   const path = h('div', { class: 'library-path' });
   const search = h('input', {
@@ -64,6 +113,46 @@ export function openLibrary(actions: LibraryActions): void {
   const status = h('span', { class: 'library-status' });
   const dialog = h('dialog', { class: 'dialog library-dialog' });
   const close = () => dialog.close();
+
+  /** Right-click menu inside the window (the page under a modal dialog is inert). */
+  const menu = (e: MouseEvent, entries: readonly ContextMenuEntry[]) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openContextMenu(e.clientX, e.clientY, entries, dialog);
+  };
+  const openSystem = (item: LibraryItem) => {
+    close();
+    if (item.id !== actions.currentId()) actions.open(item.id);
+  };
+  const newFolder = () => void actions.createFolder().then(() => build());
+  const newSystem = () => {
+    close();
+    actions.create(folder);
+  };
+
+  /** Community part of a system's menu, by its publication state. */
+  const communityEntries = (id: string): ContextMenuEntry[] => {
+    const c = actions.community;
+    const state = stateOf(id);
+    if (state === 'local')
+      return [{ label: 'Publish to the community…', run: () => (close(), c.publish(id)) }];
+    return [
+      ...(state === 'modified'
+        ? [{ label: 'Publish update…', run: () => (close(), c.publish(id)) }]
+        : [{ label: 'Published · up to date', disabled: true, run: () => undefined }]),
+      { label: 'View in the community', run: () => (close(), c.view(id)) },
+      { label: 'Edit community page…', run: () => (close(), c.edit(id)) },
+      {
+        label: 'Make local only…',
+        run: () => {
+          void Promise.resolve(c.unlink(id)).then(() => {
+            states.clear();
+            build();
+          });
+        },
+      },
+    ];
+  };
 
   const smallButton = (iconName: IconName, title: string, run: () => void) =>
     h(
@@ -114,8 +203,29 @@ export function openLibrary(actions: LibraryActions): void {
       ),
       root,
       ...(current
-        ? [h('span', { class: 'library-sep', text: '/' }), h('span', { class: 'library-crumb current', text: current.name })]
+        ? [
+            h('span', { class: 'library-sep', text: '/' }),
+            h('span', { class: 'library-crumb current', text: current.name }),
+          ]
         : []),
+      h(
+        'div',
+        { class: 'library-filter', role: 'group', 'aria-label': 'Show' },
+        ...FILTERS.map((f) =>
+          h('button', {
+            type: 'button',
+            class: `library-filter-btn${f.id === filter ? ' active' : ''}`,
+            text: f.label,
+            title: f.title,
+            'aria-pressed': String(f.id === filter),
+            onclick: () => {
+              filter = f.id;
+              lastFilter = f.id;
+              build();
+            },
+          }),
+        ),
+      ),
       h(
         'button',
         {
@@ -194,6 +304,16 @@ export function openLibrary(actions: LibraryActions): void {
         onkeydown: (e: KeyboardEvent) => {
           if (e.key === 'Enter') go(f.id);
         },
+        oncontextmenu: (e: MouseEvent) =>
+          menu(e, [
+            { label: 'Open', run: () => go(f.id) },
+            { label: 'Rename…', run: () => void actions.renameFolder(f.id).then(build) },
+            null,
+            {
+              label: 'Delete folder',
+              run: () => void actions.removeFolder(f.id).then(build),
+            },
+          ]),
       },
       h('span', { class: 'library-thumb library-folder-thumb' }, icon('open', 40)),
       h('span', { class: 'library-name', text: f.name }),
@@ -202,16 +322,20 @@ export function openLibrary(actions: LibraryActions): void {
         'span',
         { class: 'library-actions' },
         smallButton('details', 'Rename folder', () => void actions.renameFolder(f.id).then(build)),
-        smallButton('close', 'Delete folder (its systems are kept)', () =>
-          void actions.removeFolder(f.id).then(build),
+        smallButton(
+          'close',
+          'Delete folder (its systems are kept)',
+          () => void actions.removeFolder(f.id).then(build),
         ),
       ),
     );
 
   const systemCard = (item: LibraryItem, current: string | null, showFolder: boolean) => {
-    const folderName = showFolder && item.folder
-      ? actions.folders().find((f) => f.id === item.folder)?.name
-      : undefined;
+    const state = stateOf(item.id);
+    const folderName =
+      showFolder && item.folder
+        ? actions.folders().find((f) => f.id === item.folder)?.name
+        : undefined;
     const card = h(
       'div',
       {
@@ -223,7 +347,7 @@ export function openLibrary(actions: LibraryActions): void {
             ? 'Current system'
             : `Open "${item.name}" · drag onto a folder to move it`,
         onkeydown: (e: KeyboardEvent) => {
-          if (e.key !== 'Enter') return;
+          if (e.key !== 'Enter' || e.target !== e.currentTarget) return;
           close();
           if (item.id !== current) actions.open(item.id);
         },
@@ -232,14 +356,29 @@ export function openLibrary(actions: LibraryActions): void {
         'span',
         { class: 'library-thumb' },
         item.thumb ? h('img', { src: item.thumb, alt: '', draggable: false }) : null,
+        publishBadge(state),
       ),
       h('span', { class: 'library-name', text: item.name }),
       h(
         'span',
         { class: 'library-date' },
         item.id === current ? h('span', { class: 'library-current', text: 'Open' }) : null,
-        h('span', { text: folderName ? `${folderName} · ${when(item.updated)}` : when(item.updated) }),
+        h('span', {
+          text: folderName ? `${folderName} · ${when(item.updated)}` : when(item.updated),
+        }),
       ),
+      state === 'local'
+        ? h('button', {
+            type: 'button',
+            class: 'btn btn-small library-quick-publish',
+            text: 'Publish',
+            'aria-label': `Publish ${item.name}`,
+            onclick: () => {
+              close();
+              actions.community.publish(item.id);
+            },
+          })
+        : null,
       h(
         'span',
         { class: 'library-actions' },
@@ -252,9 +391,40 @@ export function openLibrary(actions: LibraryActions): void {
       ),
     );
     card.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0 || (e.target as HTMLElement).closest('.library-actions')) return;
+      if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return;
       e.preventDefault();
       dragCard(e, card, item);
+    });
+    card.addEventListener('contextmenu', (e) => {
+      const folders = actions.folders();
+      const move = (target: string | null) => {
+        actions.move(item.id, target);
+        build();
+      };
+      menu(e, [
+        {
+          label: item.id === current ? 'Current system' : 'Open',
+          disabled: item.id === current,
+          run: () => openSystem(item),
+        },
+        { label: 'Rename…', run: () => void actions.rename(item.id).then(build) },
+        {
+          label: 'Duplicate',
+          run: () => {
+            actions.duplicate(item.id);
+            build();
+          },
+        },
+        null,
+        ...communityEntries(item.id),
+        null,
+        ...(item.folder ? [{ label: 'Move out of the folder', run: () => move(null) }] : []),
+        ...folders
+          .filter((f) => f.id !== item.folder)
+          .map((f) => ({ label: `Move to "${f.name}"`, run: () => move(f.id) })),
+        null,
+        { label: 'Delete', run: () => void actions.remove(item.id).then(build) },
+      ]);
     });
     return card;
   };
@@ -265,7 +435,7 @@ export function openLibrary(actions: LibraryActions): void {
     const all = actions.list();
     if (q) {
       // Search: every system, wherever it is.
-      const hits = all.filter((i) => i.name.toLowerCase().includes(q));
+      const hits = all.filter((i) => i.name.toLowerCase().includes(q) && shown(i));
       grid.replaceChildren(
         ...hits.map((i) => systemCard(i, current, true)),
         ...(hits.length ? [] : [h('p', { class: 'library-empty', text: 'No system found' })]),
@@ -273,7 +443,7 @@ export function openLibrary(actions: LibraryActions): void {
       return;
     }
     const folders = folder ? [] : actions.folders();
-    const systems = all.filter((i) => i.folder === folder);
+    const systems = all.filter((i) => i.folder === folder && shown(i));
     grid.replaceChildren(
       h(
         'button',
@@ -293,6 +463,16 @@ export function openLibrary(actions: LibraryActions): void {
       ...systems.map((i) => systemCard(i, current, false)),
     );
   };
+
+  // Right-click on the empty part of the window: create things here.
+  grid.addEventListener('contextmenu', (e) => {
+    if ((e.target as HTMLElement).closest('.library-card')) return;
+    menu(e, [
+      { label: 'New system', run: newSystem },
+      ...(folder === null ? [{ label: 'New folder…', run: newFolder }] : []),
+      ...(folder !== null ? [{ label: 'Back to the library', run: () => go(null) }] : []),
+    ]);
+  });
 
   const build = () => {
     buildPath();

@@ -97,11 +97,11 @@ describe('generator registry', () => {
 });
 
 describe('generator browser', () => {
-  it('lists every generator exactly once across families', () => {
+  it('lists every generator except graph utilities exactly once across families', () => {
     const listed = generatorsByFamily().flatMap((f) =>
       f.sections.flatMap((s) => s.generators.map((g) => g.id)),
     );
-    expect(listed.sort()).toEqual(GENERATORS.map((g) => g.id).sort());
+    expect(listed.sort()).toEqual(GENERATORS.filter((g) => !g.role).map((g) => g.id).sort());
   });
 });
 

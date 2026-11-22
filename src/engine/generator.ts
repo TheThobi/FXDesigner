@@ -97,6 +97,13 @@ interface GeneratorBase {
   readonly inputs?: readonly NodeInputDef[];
   /** Channel outputs replacing the main output pin (see NodeOutputDef). */
   readonly outputs?: readonly NodeOutputDef[];
+  /**
+   * Graph utilities passing their input through: 'output' (what the system exports and shows
+   * in the library once connected), 'reroute' (a dot that bends links, Unreal-like).
+   */
+  readonly role?: 'output' | 'reroute';
+  /** New nodes start collapsed (header and pins only), e.g. Output. */
+  readonly startCollapsed?: boolean;
 }
 
 /**

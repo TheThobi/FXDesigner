@@ -1,3 +1,4 @@
+import type { PublishState } from '../app/library';
 import { h } from './dom';
 import { icon, type IconName } from './icons';
 import { LAYOUT_PARTS, type Layout } from './Layout';
@@ -6,6 +7,8 @@ import { attachPopover } from './popover';
 export interface ToolbarState {
   /** Name of the current system (library). */
   readonly systemName: string;
+  /** Community state of the current system (badge next to its name). */
+  readonly publishState: PublishState;
   readonly viewTiles: number;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
@@ -18,6 +21,8 @@ export interface ToolbarActions {
   /** Opens the export window (every export kind). */
   openExport(): void;
   openLibrary(): void;
+  /** Systems shared by everyone (browse, subscribe, publish). */
+  openCommunity(): void;
   newSystem(): void;
   renameSystem(): void;
   saveFile(): void;
@@ -52,7 +57,14 @@ export class Toolbar {
   private readonly systemLabel: HTMLButtonElement;
   /** Filled by the app with the account control (right side, before Layout). */
   readonly accountSlot: HTMLElement;
-  private state: ToolbarState = { systemName: '', viewTiles: 1, canUndo: false, canRedo: false };
+  private readonly publishBadge: HTMLButtonElement;
+  private state: ToolbarState = {
+    systemName: '',
+    publishState: 'local',
+    viewTiles: 1,
+    canUndo: false,
+    canRedo: false,
+  };
 
   constructor(
     mainBar: HTMLElement,
@@ -88,6 +100,11 @@ export class Toolbar {
       title: 'Current system · click to rename',
       onclick: () => actions.renameSystem(),
     });
+    this.publishBadge = h('button', {
+      class: 'publish-badge',
+      hidden: true,
+      onclick: () => actions.openCommunity(),
+    });
 
     mainBar.append(
       h('div', { class: 'brand' }, logo(), h('span', { text: 'FX Designer' })),
@@ -98,8 +115,15 @@ export class Toolbar {
         toolButton('library', 'Library', 'Your systems: open, create, rename, duplicate', () =>
           actions.openLibrary(),
         ),
+        toolButton(
+          'globe',
+          'Community',
+          'Systems shared by everyone: browse, subscribe, publish',
+          () => actions.openCommunity(),
+        ),
       ),
       this.systemLabel,
+      this.publishBadge,
       h('div', { class: 'spacer' }),
       this.accountSlot,
       layoutMenu(layout),
@@ -113,25 +137,33 @@ export class Toolbar {
     this.state = state;
     this.tilesSelect.value = String(state.viewTiles);
     this.systemLabel.textContent = state.systemName;
+    const badge = this.publishBadge;
+    badge.hidden = state.publishState === 'local';
+    badge.className = `publish-badge ${state.publishState}`;
+    badge.replaceChildren(
+      icon('globe', 13),
+      state.publishState === 'modified' ? 'Modified' : 'Published',
+    );
+    badge.title =
+      state.publishState === 'modified'
+        ? 'Changed since it was published: open the community to publish an update'
+        : 'Published in the community, up to date';
   }
 }
 
-/**
- * App logo: a four-point spark (the effects) in a rounded tile, warm to violet like the
- * category colors. Inline SVG (unique gradient id).
- */
+/** App logo: the site's favicon (public/favicon.svg), so both always match. */
 function logo(): HTMLElement {
-  const span = h('span', { class: 'logo', 'aria-hidden': 'true' });
-  span.innerHTML =
-    '<svg viewBox="0 0 24 24" width="22" height="22">' +
-    '<defs><linearGradient id="fxd-logo-grad" x1="0" y1="1" x2="1" y2="0">' +
-    '<stop offset="0" stop-color="#ff8a2a"/><stop offset=".5" stop-color="#ef4f8f"/>' +
-    '<stop offset="1" stop-color="#9a6bff"/></linearGradient></defs>' +
-    '<rect x="1" y="1" width="22" height="22" rx="6" fill="#18181c" stroke="url(#fxd-logo-grad)" stroke-width="1.4"/>' +
-    '<path d="M12 4.2c.6 4.9 2.9 7.2 7.8 7.8-4.9.6-7.2 2.9-7.8 7.8-.6-4.9-2.9-7.2-7.8-7.8 4.9-.6 7.2-2.9 7.8-7.8z" fill="url(#fxd-logo-grad)"/>' +
-    '<circle cx="12" cy="12" r="1.5" fill="#fff4e8"/>' +
-    '<circle cx="18.2" cy="5.8" r="1" fill="#ffd0a0"/></svg>';
-  return span;
+  return h(
+    'span',
+    { class: 'logo', 'aria-hidden': 'true' },
+    h('img', {
+      src: `${import.meta.env.BASE_URL}favicon.svg`,
+      alt: '',
+      width: 22,
+      height: 22,
+      draggable: false,
+    }),
+  );
 }
 
 /** "File" dropdown: systems, documents, history and library files. */

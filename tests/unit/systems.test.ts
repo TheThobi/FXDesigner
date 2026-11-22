@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { Library } from '../../src/app/library';
+import { contentHash, Library } from '../../src/app/library';
 import { rectMinusHoles } from '../../src/ui/Viewport';
 
 describe('system library', () => {
@@ -40,6 +40,26 @@ describe('system library', () => {
     lib.remove(a.id);
     expect(lib.load(a.id)).toBeNull();
     expect(new Library().currentId).toBeNull();
+  });
+
+  it('tells local, published and modified systems apart', () => {
+    const lib = new Library();
+    const doc = { nodes: [{ id: 'n1' }], selected: 'n1' };
+    const a = lib.create('Fire', doc);
+    expect(lib.publishState(a.id)).toBe('local');
+    lib.setPublished(a.id, { id: 'abcdef012345', version: 1, hash: contentHash(doc) });
+    expect(lib.publishState(a.id)).toBe('published');
+    // The selection is not content.
+    lib.save(a.id, { ...doc, selected: 'n2' });
+    expect(lib.publishState(a.id)).toBe('published');
+    lib.save(a.id, { nodes: [{ id: 'n1' }, { id: 'n2' }], selected: 'n1' });
+    expect(lib.publishState(a.id)).toBe('modified');
+    expect(new Library().get(a.id)?.published?.id).toBe('abcdef012345');
+    expect(lib.findPublished('abcdef012345')?.id).toBe(a.id);
+    // A duplicate is a new, local system.
+    expect(lib.publishState(lib.duplicate(a.id)!.id)).toBe('local');
+    lib.setPublished(a.id, null);
+    expect(lib.publishState(a.id)).toBe('local');
   });
 
   it('sorts systems into folders and reports local changes only', () => {

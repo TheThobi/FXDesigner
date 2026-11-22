@@ -23,6 +23,7 @@ export function attachPopover(
   function open() {
     build();
     panel.hidden = false;
+    keepOnScreen(panel);
     button.setAttribute('aria-expanded', 'true');
     document.addEventListener('pointerdown', onOutside, true);
     document.addEventListener('keydown', onKey, true);
@@ -35,4 +36,15 @@ export function attachPopover(
   }
   button.addEventListener('click', () => (panel.hidden ? open() : close()));
   return { close };
+}
+
+/** Shifts an absolutely positioned panel horizontally so it stays inside the window. */
+function keepOnScreen(panel: HTMLElement): void {
+  panel.style.translate = '';
+  const r = panel.getBoundingClientRect();
+  const margin = 6;
+  let dx = 0;
+  if (r.left < margin) dx = margin - r.left;
+  else if (r.right > window.innerWidth - margin) dx = window.innerWidth - margin - r.right;
+  if (dx) panel.style.translate = `${Math.round(dx)}px 0`;
 }

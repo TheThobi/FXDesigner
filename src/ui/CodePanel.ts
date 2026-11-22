@@ -3,6 +3,7 @@ import { icon } from './icons';
 import { ParamEditor, type ParamEditorOptions } from './ParamEditor';
 
 export interface CodePanelOptions {
+  readonly nodeKey: string;
   /** Current GLSL of the node (its own code, or the generator's). */
   readonly code: string;
   /** True when the code differs from the generator's: the node is custom. */
@@ -78,6 +79,9 @@ export class CodePanel {
       clearTimeout(this.timer);
       this.timer = setTimeout(() => this.flush(), EDIT_DELAY_MS);
     });
+    this.textarea.addEventListener('blur', () => {
+      if (this.timer !== undefined) this.flush();
+    });
     this.textarea.addEventListener('keydown', (e) => {
       if (e.key === 'Tab') {
         e.preventDefault();
@@ -93,9 +97,10 @@ export class CodePanel {
   }
 
   render(opts: CodePanelOptions): void {
+    const switched = this.opts?.nodeKey !== opts.nodeKey;
     this.opts = opts;
     clearTimeout(this.timer);
-    if (this.textarea.value !== opts.code && document.activeElement !== this.textarea)
+    if (switched || (this.textarea.value !== opts.code && document.activeElement !== this.textarea))
       this.textarea.value = opts.code;
     this.reference.textContent = opts.reference;
     this.paramEditor.render(opts.params);
@@ -103,13 +108,18 @@ export class CodePanel {
   }
 
   setModified(modified: boolean): void {
-    this.status.textContent = modified ? 'Custom code' : 'Generator code (edit to customize)';
+    this.status.textContent = modified ? 'Custom code' : 'Generator code';
     this.status.classList.toggle('modified', modified);
     this.revertBtn.disabled = !modified;
   }
 
+  expandParam(nodeKey: string, key: string): void {
+    this.paramEditor.expand(nodeKey, key);
+  }
+
   private flush(): void {
     clearTimeout(this.timer);
+    this.timer = undefined;
     this.opts?.onChange(this.textarea.value);
   }
 }

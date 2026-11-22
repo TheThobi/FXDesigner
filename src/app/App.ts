@@ -10,7 +10,7 @@ import {
 } from '../engine/generator';
 import type { RenderTarget } from '../engine/gl/RenderTarget';
 import { ShaderCompileError } from '../engine/gl/ShaderProgram';
-import { inputsOf, outputsOf, type NodeValueType } from '../engine/nodes';
+import { inputsOf, outputsOf, type NodeChannel } from '../engine/nodes';
 import { upgradeLegacyPost } from '../engine/post/legacy';
 import {
   COLOR_MODE,
@@ -56,8 +56,17 @@ import { ParamPanel } from '../ui/ParamPanel';
 import { Timeline, TIMELINE_FPS, TIMELINE_SPEEDS } from '../ui/Timeline';
 import { toast } from '../ui/toast';
 import { Toolbar } from '../ui/Toolbar';
-import { Viewport, type GraphViewNode, type LinkDrop } from '../ui/Viewport';
+import {
+  NODE_WIDTH,
+  Viewport,
+  type GraphContextMenu,
+  type GraphViewNode,
+  type LinkDrop,
+} from '../ui/Viewport';
 import { openQuickAdd } from '../ui/QuickAddMenu';
+import { openContextMenu, type ContextMenuEntry } from '../ui/ContextMenu';
+import { openCommunity } from '../ui/CommunityDialog';
+import { Community } from './community';
 import { mostUsedNodes, recordNodeUsage } from './nodeUsage';
 import { debounce } from '../util/debounce';
 import { downloadBlob, pickFile } from '../util/download';
@@ -78,13 +87,30 @@ import {
 import { captureToDataUrl, flipChannels, renderFlipbook, renderPng, renderPng16 } from './exporter';
 import { Cloud } from './cloud';
 import { History } from './history';
-import { Library } from './library';
+import {
+  contentHash,
+  Library,
+  type PreviewFraming,
+  type PublishedLink,
+  type PublishState,
+} from './library';
+import {
+  composePreview,
+  DEFAULT_FRAMING,
+  openPreviewStudio,
+  type PreviewResult,
+  type PreviewSource,
+} from '../ui/PreviewStudio';
+import type { CurrentSystem } from '../ui/CommunityDialog';
 import { clearHash, loadSession, readHashDocument, saveSession, shareUrl } from './persistence';
 import {
   codeDiffers,
   createNode,
   customParamKey,
   effectiveGenerator,
+  editedBaseParams,
+  sanitizeBaseParamEdits,
+  type BaseParamEdit,
   sanitizeCustomParams,
   type CustomParamSpec,
   DEFAULT_RESOLUTION,
@@ -126,6 +152,10 @@ const RAMP_PRESETS: readonly Preset[] = GRADIENT_PRESETS.map((p) => ({
   values: {},
   ramp: p.value,
 }));
+/** User preset scopes shared by every node (generator presets use the generator id). */
+const USER_LOOK_SCOPE = '@look';
+const USER_COLOR_SCOPE = '@color';
+
 /** Displayed frames a simulation runs before its browser thumbnail is captured. */
 const SIM_THUMBNAIL_FRAME = 240;
 /** Adaptive preview: frame interval (ms) above which edits render at half size… */
@@ -234,7 +264,6 @@ export class App {
   /** GLSL view of the selected node (Code button of the Generator page). */
   private readonly codePanel = new CodePanel();
   private readonly codeBtn: HTMLButtonElement;
-  private codeOpen = false;
   /** Preset previewed live while the pointer rests on a gallery tile. */
   private hoverPreview: GraphNode | null = null;
   /** Preset gallery thumbnails, by preview content. */
@@ -261,7 +290,10 @@ export class App {
   private account: AccountButton | null = null;
   private systemId = '';
   /** Detected kind (grayscale / color) of each node's main output, for pins and links. */
-  private readonly valueTypes = new Map<string, NodeValueType>();
+  /** Nodes whose image has transparent pixels (their alpha pin is always shown). */
+  private readonly transparent = new Set<string>();
+  /** Channel shown in a node's preview while one of its channel pins is hovered. */
+  private pinPreview: { readonly id: string; readonly channel: NodeChannel } | null = null;
   private readonly typeChecks = new Map<
     string,
     { readonly version: number; readonly at: number }
@@ -290,6 +322,7 @@ export class App {
       this.layout.set('browser', false),
     );
     const viewport = dockPanel('viewport', 'Viewport', 'viewport', 'main');
+    const workspace = dockPanel('workspace', 'Workspace', 'tune', 'aside');
     const details = tabbedPanel('details', { text: 'Details', icon: 'details' }, [
       { id: 'generator', title: 'Generator', icon: 'tune' },
       { id: 'post', title: 'Post Process', icon: 'fx' },
@@ -317,6 +350,7 @@ export class App {
     const postEl = h('div');
     const colorEl = h('div');
     const generalEl = h('div');
+    workspace.body.append(generalEl);
     const outputEl = h('div');
     const animationEl = h('div');
     this.codeBtn = h(
@@ -326,7 +360,7 @@ export class App {
         class: 'btn btn-small code-toggle',
         title: 'Show the GLSL of this node; editing it makes the node custom',
         onclick: () => {
-          this.codeOpen = !this.codeOpen;
+          writeStorage(`ptm.codeView.${this.codeViewKey}`, this.codeOpen ? '0' : '1');
           this.renderCode();
         },
       },
@@ -354,7 +388,7 @@ export class App {
       h(
         'div',
         { class: 'page-intro-row' },
-        h('p', { class: 'page-intro', text: 'Settings shared by all nodes, and export maps.' }),
+        h('p', { class: 'page-intro', text: 'Output and animation settings for this node.' }),
         h(
           'button',
           {
@@ -366,7 +400,6 @@ export class App {
           'Reset all',
         ),
       ),
-      generalEl,
       animationEl,
       outputEl,
     );
@@ -390,6 +423,7 @@ export class App {
         { id: 'browser', title: 'Browser', icon: 'texture', element: browser.panel },
         { id: 'viewport', title: 'Viewport', icon: 'viewport', element: viewport.panel },
         { id: 'details', title: 'Details', icon: 'details', element: details.panel },
+        { id: 'workspace', title: 'Workspace', icon: 'tune', element: workspace.panel },
       ],
       this.layout,
       () => window.dispatchEvent(new Event('resize')),
@@ -412,8 +446,14 @@ export class App {
       onDelete: (id) => this.deleteNode(id),
       onTogglePost: (id) => this.setNodePost(id, !nodeById(this.state, id)?.postEnabled),
       onToggleFreeze: (id) => this.toggleFreeze(id),
+      onShuffleSeed: (id) => this.shuffleNodeSeed(id),
       onToggleCollapse: (id) => this.toggleCollapse(id),
       onLinkDrop: (drop) => this.quickAdd(drop),
+      onPinPreview: (id, channel) => {
+        this.pinPreview = id !== null && channel !== null ? { id, channel } : null;
+      },
+      onInsertReroute: (link, world) => this.insertReroute(link, world),
+      onContextMenu: (menu) => this.graphMenu(menu),
     });
     this.timeline = new Timeline({
       togglePlay: () => this.togglePlay(),
@@ -475,6 +515,7 @@ export class App {
         redo: () => this.redo(),
         openExport: () => void this.openExport(),
         openLibrary: () => this.openLibrary(),
+        openCommunity: () => this.openCommunity(),
         newSystem: () => this.newSystem(),
         renameSystem: () => void this.renameSystem(this.systemId),
         saveLibrary: () => this.saveLibraryFile(),
@@ -500,7 +541,7 @@ export class App {
     this.cloud.onState = () => this.updateAccount();
     this.cloud.onRemoteChange = (ids) => this.onRemoteLibraryChange(ids);
 
-    this.state = this.initialState();
+    this.state = this.withSingleOutput(this.initialState());
     this.renderer.gpu.workspaceAspect = this.state.aspect;
     this.viewport.setAspect(this.state.aspect);
     this.syncGraph();
@@ -561,6 +602,25 @@ export class App {
     return getGenerator(this.node.generator) ?? GENERATORS[0]!;
   }
 
+  /** The first connected Output node: once there is one, it is what the system exports. */
+  private get outputNode(): GraphNode | null {
+    return this.connectedOutput(this.state);
+  }
+
+  private connectedOutput(state: EditorState): GraphNode | null {
+    return (
+      state.nodes.find(
+        (n) =>
+          getGenerator(n.generator)?.role === 'output' && state.links.some((l) => l.to === n.id),
+      ) ?? null
+    );
+  }
+
+  /** What exports and the library thumbnail render: the connected Output, else the selection. */
+  private get exportNode(): GraphNode {
+    return this.outputNode ?? this.node;
+  }
+
   /** The selected node's generator with its custom parameters (Code view), if any. */
   private get nodeDef(): GeneratorDefinition {
     return effectiveGenerator(this.generator, this.node);
@@ -582,12 +642,16 @@ export class App {
     return documentFromState(this.state, getGenerator);
   }
 
-  /** A new graph: one default node. */
+  /** A new graph: the default node connected to an Output node. */
   private blankState(): EditorState {
     const def = getGenerator(DEFAULT_GENERATOR_ID) ?? GENERATORS[0]!;
+    const output = getGenerator('output')!;
     return {
-      nodes: [createNode(def, 'n1', 0, 0)],
-      links: [],
+      nodes: [
+        createNode(def, 'n1', 0, 0),
+        createNode(output, 'n2', Viewport.snap(NODE_WIDTH + 120), 0),
+      ],
+      links: [{ from: 'n1', to: 'n2', input: 'image' }],
       selectedId: 'n1',
       resolution: DEFAULT_RESOLUTION,
       seed: 1,
@@ -651,13 +715,13 @@ export class App {
       this.library.save(this.systemId, doc, withThumbnail ? this.systemThumbnail() : undefined);
   }
 
-  /** Small image of the selected node, for the library card. */
-  private systemThumbnail(): string | null {
-    const [w, hgt] = imageDims(112, this.state.aspect);
+  /** Small image of the exported node (Output, else the selection), for the library card. */
+  private systemThumbnail(size = 112): string | null {
+    const [w, hgt] = imageDims(size, this.state.aspect);
     let capture: Capture | null = null;
     try {
       capture = this.renderer.createCapture(w, hgt);
-      return captureToDataUrl(capture, this.chainFor(this.node.id, this.time, true));
+      return captureToDataUrl(capture, this.chainFor(this.exportNode.id, this.time, true));
     } catch {
       return null;
     } finally {
@@ -702,6 +766,35 @@ export class App {
         if (ok) this.library.removeFolder(id);
       },
       status: () => this.cloud.statusText(),
+      publishState: (id) => this.publishStateOf(id),
+      community: {
+        publish: (id) => {
+          this.openCommunity({ publish: true }, id);
+        },
+        view: (id) => {
+          const link = this.library.get(id)?.published;
+          if (link) this.openCommunity({ view: link.id });
+        },
+        edit: (id) => {
+          const link = this.library.get(id)?.published;
+          if (link) this.openCommunity({ edit: link.id });
+        },
+        unlink: async (id) => {
+          const entry = this.library.get(id);
+          if (!entry?.published) return;
+          const ok = await confirmDialog({
+            title: `Make "${entry.name}" local only?`,
+            message:
+              'It stays online in the community, but this system is not linked to it any more ' +
+              '(its changes can no longer be published as updates).',
+            confirmLabel: 'Unlink',
+          });
+          if (ok) {
+            this.library.setPublished(id, null);
+            this.updateToolbar();
+          }
+        },
+      },
       duplicate: (id) => {
         if (id === this.systemId) this.saveSystem(true);
         this.library.duplicate(id);
@@ -712,7 +805,10 @@ export class App {
         if (!entry) return;
         const ok = await confirmDialog({
           title: `Delete "${entry.name}"?`,
-          message: 'The system is removed from this browser. This cannot be undone.',
+          message: this.cloud.user
+            ? 'The system will be deleted from your synced library.'
+            : 'The system will be deleted from your local library.',
+          irreversible: true,
           confirmLabel: 'Delete',
         });
         if (!ok) return;
@@ -723,6 +819,271 @@ export class App {
         else this.newSystem(false);
       },
     });
+  }
+
+  private readonly community = new Community();
+
+  /**
+   * Publication state of library system `id`: local, published as is, or edited since. The
+   * open system is judged on its live graph (the autosave may not have run yet).
+   */
+  private publishStateOf(id: string): PublishState {
+    const link = this.library.get(id)?.published;
+    if (!link) return 'local';
+    if (id !== this.systemId) return this.library.publishState(id);
+    return contentHash(this.document()) === link.hash ? 'published' : 'modified';
+  }
+
+  private currentSystem(id: string, state: EditorState): CurrentSystem {
+    const entry = this.library.get(id);
+    return {
+      name: entry?.name ?? this.systemName,
+      state: this.publishStateOf(id),
+      link: entry?.published ?? null,
+      animated: this.animatedExport(state),
+    };
+  }
+
+  /**
+   * Frames of the exported node for the community preview: 16 over its loop when it moves
+   * (simulations step between frames, like a flipbook), else one.
+   */
+  private async previewSource(state: EditorState, renderer: Renderer): Promise<PreviewSource> {
+    const id = (this.connectedOutput(state) ?? selectedNode(state)).id;
+    const animated = this.animatedExport(state);
+    const count = animated ? 16 : 1;
+    const duration = this.exportLoopDuration(state);
+    const [w, hgt] = imageDims(384, state.aspect);
+    const sims = this.simulationsOf(id, state);
+    const steps = Math.max(1, Math.round((duration * SIM_FRAMES_PER_SECOND) / count));
+    const capture = renderer.createCapture(w, hgt);
+    const frames: HTMLCanvasElement[] = [];
+    try {
+      for (let i = 0; i < count; i++) {
+        if (i > 0)
+          for (let k = 0; k < steps; k++)
+            for (const { node, def } of sims)
+              if (node.frozenAt === null)
+                renderer.simulationFor(def, node.id).sim.step(node.params);
+        const chain = this.chainFor(id, (i / count) * duration, true, undefined, state);
+        const deadline = performance.now() + 10_000;
+        let pixels: ReturnType<Capture['render']>;
+        for (;;) {
+          try {
+            pixels = capture.render(chain);
+            break;
+          } catch (e) {
+            if (!(e instanceof ProgramPending) || performance.now() > deadline) throw e;
+            await new Promise((resolve) => setTimeout(resolve, 16));
+          }
+        }
+        const canvas = h('canvas', { width: w, height: hgt });
+        canvas.getContext('2d')!.putImageData(new ImageData(pixels, w, hgt), 0, 0);
+        frames.push(canvas);
+        // Yield now and then: the page stays responsive.
+        if (i % 4 === 3) await new Promise((r) => setTimeout(r, 0));
+      }
+    } finally {
+      capture.dispose();
+      if (renderer === this.renderer)
+        for (const { node } of sims) this.cacheOf(node.id).simVersion++;
+    }
+    return { frames, animated, frameMs: (duration * 1000) / count };
+  }
+
+  /** Images of a community version: framed like `framing`, or chosen in the preview editor. */
+  private async communityPreview(
+    interactive: boolean,
+    framing: PreviewFraming | undefined,
+    state: EditorState,
+    detached: boolean,
+  ): Promise<PreviewResult | null> {
+    const source = detached
+      ? await this.detachedPreviewSource(state)
+      : await this.previewSource(state, this.renderer);
+    return interactive
+      ? openPreviewStudio(source, framing ?? DEFAULT_FRAMING)
+      : composePreview(source, framing ?? DEFAULT_FRAMING);
+  }
+
+  private async detachedPreviewSource(state: EditorState): Promise<PreviewSource> {
+    const renderer = new Renderer(h('canvas'));
+    try {
+      renderer.gpu.workspaceAspect = state.aspect;
+      const id = (this.connectedOutput(state) ?? selectedNode(state)).id;
+      const urls = this.chainFor(id, 0, true, undefined, state).flatMap(({ req }) =>
+        req.generator.params.flatMap((def) => {
+          const value = req.params[def.key];
+          return def.type === 'image' && typeof value === 'string' ? [value] : [];
+        }),
+      );
+      await renderer.images.preload(urls);
+      return await this.previewSource(state, renderer);
+    } finally {
+      renderer.dispose();
+      renderer.gpu.gl.getExtension('WEBGL_lose_context')?.loseContext();
+    }
+  }
+
+  /** The open system's document as stored (what is published and hashed). */
+  private storedDocument(id: string): unknown {
+    if (id === this.systemId) this.saveSystem(true);
+    const document = this.library.load(id);
+    if (!document) throw new Error('This system is no longer in your library');
+    if (/"data:image\//i.test(JSON.stringify(document)))
+      throw new Error(
+        'Replace embedded images using “Use image URL…” on each Image node before publishing.',
+      );
+    return document;
+  }
+
+  private mediaOf(preview: PreviewResult, animated: boolean) {
+    return {
+      animated,
+      thumb: preview.thumb,
+      preview: animated ? preview.preview : null,
+      previewFrames: animated ? preview.previewFrames : 0,
+    };
+  }
+
+  private linkSystem(
+    systemId: string,
+    id: string,
+    version: number | null,
+    doc: unknown,
+    framing: PreviewFraming,
+  ): void {
+    const link: PublishedLink = { id, version, hash: contentHash(doc), framing };
+    // One library system per community system.
+    for (const e of this.library.list())
+      if (e.id !== systemId && e.published?.id === id) this.library.setPublished(e.id, null);
+    this.library.setPublished(systemId, link);
+    this.updateToolbar();
+  }
+
+  /** Library systems linked to a deleted community system become local. */
+  private forgetPublication(communityId: string): void {
+    for (const e of this.library.list())
+      if (e.published?.id === communityId) this.library.setPublished(e.id, null);
+    this.updateToolbar();
+  }
+
+  /** Community window: systems shared by everyone; publishing sends the open system. */
+  private openCommunity(
+    opts: { publish?: boolean; view?: string; edit?: string } = {},
+    systemId = this.systemId,
+  ): void {
+    this.saveSystem(true);
+    let savedState: EditorState | undefined;
+    let savedHash: string | undefined;
+    if (systemId !== this.systemId) {
+      try {
+        const doc = this.library.load(systemId);
+        savedState = applyDocument(parseDocument(doc, getGenerator));
+        savedHash = contentHash(doc);
+      } catch (e) {
+        toast(`Cannot preview this system: ${errorMessage(e)}`, 'error');
+        return;
+      }
+    }
+    const state = () => savedState ?? this.state;
+    const document = () => {
+      const doc = this.storedDocument(systemId);
+      if (savedHash !== undefined && savedHash !== contentHash(doc))
+        throw new Error('This system changed. Reopen publication to refresh the preview.');
+      return doc;
+    };
+    const community = this.community;
+    openCommunity(
+      {
+        community,
+        signedIn: () => this.cloud.user !== null,
+        signIn: () => this.account?.signIn(),
+        current: () => this.currentSystem(systemId, state()),
+        preview: (interactive, framing) =>
+          this.communityPreview(interactive, framing, state(), savedState !== undefined),
+        publishCurrent: async (fields, preview, animated) => {
+          const doc = document();
+          const r = await community.publish(fields, doc, this.mediaOf(preview, animated));
+          this.linkSystem(systemId, r.id, r.version, doc, preview.framing);
+          return r.id;
+        },
+        publishUpdate: async (preview, id, animated) => {
+          const target = id ?? this.library.get(systemId)?.published?.id;
+          if (!target) throw new Error('This system is not published');
+          const doc = document();
+          const version = await community.update(target, {}, doc, this.mediaOf(preview, animated));
+          this.linkSystem(systemId, target, version, doc, preview.framing);
+          return version;
+        },
+        canAnimate: (item) => {
+          try {
+            return this.animatedExport(applyDocument(parseDocument(item.document, getGenerator)));
+          } catch {
+            return item.animated;
+          }
+        },
+        editPublishedPreview: async (item, framing) => {
+          const state = applyDocument(parseDocument(item.document, getGenerator));
+          const previous = this.library.findPublished(item.id)?.published?.framing;
+          return openPreviewStudio(
+            await this.detachedPreviewSource(state),
+            framing ?? previous ?? DEFAULT_FRAMING,
+          );
+        },
+        editPublication: async (item, fields, animated, editedPreview) => {
+          if (editedPreview) {
+            await community.update(
+              item.id,
+              fields,
+              undefined,
+              this.mediaOf(editedPreview, animated),
+            );
+            const entry = this.library.findPublished(item.id);
+            if (entry?.published && entry.published.version === item.version)
+              this.library.setPublished(entry.id, {
+                ...entry.published,
+                framing: editedPreview.framing,
+              });
+          } else if (animated === item.animated) {
+            await community.update(item.id, fields);
+          } else if (!animated) {
+            await community.update(item.id, fields, undefined, {
+              animated: false,
+              preview: null,
+              previewFrames: 0,
+            });
+          } else {
+            const state = applyDocument(parseDocument(item.document, getGenerator));
+            const framing = this.library.findPublished(item.id)?.published?.framing;
+            const preview = composePreview(
+              await this.detachedPreviewSource(state),
+              framing ?? DEFAULT_FRAMING,
+            );
+            await community.update(item.id, fields, undefined, {
+              animated: true,
+              preview: preview.preview,
+              previewFrames: preview.previewFrames,
+            });
+          }
+        },
+        forget: (id) => this.forgetPublication(id),
+        copyToLibrary: (system) => {
+          try {
+            const doc = parseDocument(system.document, getGenerator);
+            this.saveSystem(true);
+            const entry = this.library.create(
+              system.name,
+              documentFromState(applyDocument(doc), getGenerator),
+            );
+            this.switchSystem(entry.id, false);
+          } catch (e) {
+            toast(`Cannot open this system: ${errorMessage(e)}`, 'error');
+          }
+        },
+      },
+      { ...opts, libraryPublish: savedState !== undefined },
+    );
   }
 
   private async renameSystem(id: string): Promise<void> {
@@ -797,14 +1158,36 @@ export class App {
   /** Replaces the whole graph by another document (no undo across documents). */
   private loadState(state: EditorState): void {
     this.history.clear();
-    this.valueTypes.clear();
+    this.transparent.clear();
     this.typeChecks.clear();
-    this.commit(state, { record: false });
+    this.commit(this.withSingleOutput(state), { record: false });
     this.shownKey = '';
     this.activateNode();
     this.resetAllSimulations(true);
     this.viewport.fit();
     this.updateToolbar();
+  }
+
+  private withSingleOutput(state: EditorState): EditorState {
+    const outputs = state.nodes.filter((node) => getGenerator(node.generator)?.role === 'output');
+    if (outputs.length > 1) {
+      const keep =
+        outputs.find((node) => state.links.some((link) => link.to === node.id)) ?? outputs[0]!;
+      for (const node of outputs) if (node !== keep) state = withoutNode(state, node.id);
+      return state;
+    }
+    if (outputs.length) return state;
+    const rightmost = state.nodes.reduce<GraphNode | undefined>(
+      (right, node) => (!right || node.x > right.x ? node : right),
+      undefined,
+    );
+    const output = createNode(
+      getGenerator('output')!,
+      newNodeId(state.nodes),
+      Viewport.snap((rightmost?.x ?? 0) + NODE_WIDTH + 120),
+      rightmost?.y ?? 0,
+    );
+    return { ...state, nodes: [...state.nodes, output] };
   }
 
   /** Single entry point for state changes (undo recording, UI sync, autosave). */
@@ -822,6 +1205,19 @@ export class App {
     }
     if (prev.aspect !== next.aspect) this.applyAspect();
     this.syncGraph();
+    if (prev.nodes !== next.nodes || prev.seed !== next.seed) {
+      for (const node of next.nodes) {
+        const old = nodeById(prev, node.id);
+        const def = getGenerator(node.generator);
+        if (
+          old?.generator === node.generator &&
+          def?.kind === 'simulation' &&
+          !def.seedless &&
+          (old.seed ?? prev.seed) !== (node.seed ?? next.seed)
+        )
+          this.resetSimulation(node);
+      }
+    }
     const key = `${this.node.id}:${this.node.generator}`;
     if (key !== this.shownKey) this.activateNode();
     if (this.loopPlayback) this.time = Math.min(this.time, this.loopDuration);
@@ -856,11 +1252,14 @@ export class App {
         y: n.y,
         postEnabled: n.postEnabled,
         frozen: n.frozenAt !== null,
+        seeded: n.seed !== undefined,
+        canShuffleSeed: this.nodeUsesSeed(n, def),
         inputs: inputsOf(def),
         outputs: outputsOf(def),
         failed: this.failed.has(n.id),
         collapsed: n.collapsed === true,
-        outputType: this.valueTypes.get(n.id) ?? null,
+        transparent: this.transparent.has(n.id),
+        role: def.role ?? null,
       };
     });
     this.viewport.setGraph(nodes, this.state.links, this.state.selectedId);
@@ -872,7 +1271,7 @@ export class App {
       this.nodeCaches.delete(id);
     }
     for (const id of this.failed.keys()) if (!ids.has(id)) this.failed.delete(id);
-    for (const id of this.valueTypes.keys()) if (!ids.has(id)) this.valueTypes.delete(id);
+    for (const id of this.transparent) if (!ids.has(id)) this.transparent.delete(id);
     for (const id of this.typeChecks.keys()) if (!ids.has(id)) this.typeChecks.delete(id);
     const sims = new Set(
       this.state.nodes
@@ -891,22 +1290,203 @@ export class App {
     this.paramPanel.setDisabled(off, 'Connect the matching input to use this setting');
   }
 
+  /** Selects node `id` ('' = none: the Details panel shows a hint). */
   private selectNode(id: string): void {
-    if (id === this.state.selectedId || !nodeById(this.state, id)) return;
+    if (id === this.state.selectedId || (id && !nodeById(this.state, id))) return;
     // Selection is not an undoable edit.
     this.commit({ ...this.state, selectedId: id }, { record: false });
+  }
+
+  /** Right-click menu of the graph: node, link or background actions. */
+  private graphMenu(menu: GraphContextMenu): void {
+    const { target, world, client } = menu;
+    const many = (n: number) => (n > 1 ? `${n} nodes` : 'node');
+    const paste: ContextMenuEntry = {
+      label: 'Paste',
+      icon: 'download',
+      shortcut: 'Ctrl+V',
+      disabled: !this.clipboard,
+      run: () => this.pasteNodes(world),
+    };
+    let entries: ContextMenuEntry[];
+    if (target.kind === 'nodes') {
+      const ids = target.ids;
+      const nodes = ids.map((id) => nodeById(this.state, id)).filter((n) => n !== undefined);
+      const all = ids.length >= this.state.nodes.length;
+      const collapsed = nodes.every((n) => n.collapsed === true);
+      const bypassed = nodes.every((n) => !n.postEnabled);
+      const frozen = nodes.every((n) => n.frozenAt !== null);
+      const patchAll = (patch: (n: GraphNode) => Partial<GraphNode>) =>
+        this.commit(nodes.reduce((s, n) => withNode(s, n.id, patch(n)), this.state));
+      entries = [
+        { label: 'Cut', shortcut: 'Ctrl+X', disabled: all, run: () => this.cutNodes(ids) },
+        { label: 'Copy', icon: 'layout', shortcut: 'Ctrl+C', run: () => this.copyNodes(ids) },
+        paste,
+        {
+          label: 'Duplicate',
+          shortcut: 'Ctrl+D',
+          run: () => {
+            this.copyNodes(ids, true);
+            this.pasteNodes([world[0] + 48, world[1] + 48]);
+          },
+        },
+        {
+          label: `Delete ${many(ids.length)}`,
+          icon: 'close',
+          shortcut: 'Del',
+          disabled: all,
+          run: () => this.deleteNodes(ids),
+        },
+        null,
+        {
+          label: collapsed ? 'Expand' : 'Collapse',
+          icon: 'expand',
+          run: () => patchAll(() => ({ collapsed: !collapsed })),
+        },
+        {
+          label: bypassed ? 'Enable Post Process' : 'Bypass Post Process',
+          icon: 'fx',
+          run: () => patchAll(() => ({ postEnabled: bypassed })),
+        },
+        {
+          label: frozen ? 'Unfreeze' : 'Freeze frame',
+          icon: 'snowflake',
+          run: () => patchAll(() => ({ frozenAt: frozen ? null : this.time })),
+        },
+        {
+          label: 'Disconnect',
+          disabled: !this.state.links.some((l) => ids.includes(l.from) || ids.includes(l.to)),
+          run: () =>
+            this.commit({
+              ...this.state,
+              links: this.state.links.filter((l) => !ids.includes(l.from) && !ids.includes(l.to)),
+            }),
+        },
+        null,
+        {
+          label: 'Frame selection',
+          icon: 'viewport',
+          shortcut: 'Shift+F',
+          run: () => this.viewport.frameSelected(),
+        },
+        {
+          label: 'Collapse into new system…',
+          icon: 'library',
+          run: () => void this.collapseIntoSystem(ids),
+        },
+      ];
+    } else if (target.kind === 'link') {
+      const { link } = target;
+      entries = [
+        {
+          label: 'Add reroute',
+          run: () => this.insertReroute(link, world),
+        },
+        {
+          label: 'Delete link',
+          icon: 'close',
+          shortcut: 'Del',
+          run: () => this.commit(withoutLink(this.state, link.to, link.input)),
+        },
+      ];
+    } else {
+      entries = [
+        {
+          label: 'Add node…',
+          icon: 'zoomIn',
+          run: () =>
+            openQuickAdd({
+              x: client[0],
+              y: client[1],
+              title: 'Add a node',
+              suggestions: mostUsedNodes(GENERATORS.filter((d) => !d.role)).map((d) => ({
+                id: d.id,
+                name: d.name,
+                label: CATEGORY_LABELS[d.category],
+              })),
+              all: GENERATORS.filter((d) => !d.role).map((d) => ({
+                id: d.id,
+                name: d.name,
+                label: CATEGORY_LABELS[d.category],
+              })),
+              onPick: (id) => this.addNode(id, [Viewport.snap(world[0]), Viewport.snap(world[1])]),
+            }),
+        },
+        paste,
+        null,
+        {
+          label: 'Fit all nodes',
+          icon: 'fit',
+          shortcut: 'F',
+          run: () => this.viewport.fit(),
+        },
+      ];
+    }
+    openContextMenu(client[0], client[1], entries);
+  }
+
+  /**
+   * Houdini's "Collapse into Subnet", as a library system: the nodes (and the links between
+   * them) move to a new system, ending in an Output node; the current one keeps the rest.
+   */
+  private async collapseIntoSystem(ids: readonly string[]): Promise<void> {
+    const set = new Set(ids);
+    const picked = this.state.nodes.filter((n) => set.has(n.id));
+    if (!picked.length) return;
+    const name = await promptDialog({
+      title: 'Collapse into new system',
+      label: 'Name',
+      value: `${this.systemName} part`,
+      confirmLabel: 'Create',
+    });
+    if (!name) return;
+    const links = this.state.links.filter((l) => set.has(l.from) && set.has(l.to));
+    const minX = Math.min(...picked.map((n) => n.x));
+    const minY = Math.min(...picked.map((n) => n.y));
+    const nodes: GraphNode[] = picked.map((n) => ({ ...n, x: n.x - minX, y: n.y - minY }));
+    const newLinks: GraphLink[] = [...links];
+    // End in an Output node: fed by the selected node if it is a sink, else by the last sink.
+    const isOutput = (n: GraphNode) => getGenerator(n.generator)?.role === 'output';
+    if (!nodes.some(isOutput)) {
+      const sinks = nodes.filter((n) => !isOutput(n) && !links.some((l) => l.from === n.id));
+      const last = sinks.find((n) => n.id === this.state.selectedId) ?? sinks[sinks.length - 1];
+      const outputDef = getGenerator('output');
+      if (last && outputDef) {
+        const id = newNodeId(nodes);
+        const right = Math.max(...nodes.map((n) => n.x));
+        nodes.push(createNode(outputDef, id, Viewport.snap(right + NODE_WIDTH + 120), last.y));
+        newLinks.push({ from: last.id, to: id, input: 'image' });
+      }
+    }
+    const selectedId = set.has(this.state.selectedId) ? this.state.selectedId : nodes[0]!.id;
+    const doc = documentFromState(
+      { ...this.state, nodes, links: newLinks, selectedId },
+      getGenerator,
+    );
+    const folder = this.library.get(this.systemId)?.folder ?? null;
+    const entry = this.library.create(name, doc, folder);
+    // Cut from this system (the last node always stays).
+    const moved = ids.length < this.state.nodes.length;
+    if (moved) this.deleteNodes(ids);
+    toast(
+      moved
+        ? `Moved ${picked.length} node${picked.length > 1 ? 's' : ''} to "${name}"`
+        : `Copied the graph to "${name}"`,
+      'info',
+      6000,
+      { label: 'Open', run: () => this.switchSystem(entry.id) },
+    );
   }
 
   /** Adds a node running `generatorId`, at `at` (graph units) or next to the selected node. */
   private addNode(generatorId: string, at?: [number, number]): void {
     const def = getGenerator(generatorId);
-    if (!def) return;
+    if (!def || def.role) return;
     const [x, y] = at ?? this.viewport.placementNear(this.state.selectedId);
     // New nodes start from the default look: one node's colors never leak into others.
     const node = createNode(def, newNodeId(this.state.nodes), x, y);
     recordNodeUsage(def.id);
     // A Custom Shader is written in code: show its Code view.
-    if (def.id === 'custom-shader') this.codeOpen = true;
     this.commit(withAddedNode(this.state, node));
   }
 
@@ -917,7 +1497,7 @@ export class App {
   private quickAdd(drop: LinkDrop): void {
     const fromOutput = drop.from !== undefined;
     // From an output the new node needs an input; from an input, any node with an output.
-    const candidates = GENERATORS.filter((d) => (fromOutput ? inputsOf(d).length > 0 : true));
+    const candidates = GENERATORS.filter((d) => !d.role && (!fromOutput || inputsOf(d).length > 0));
     const item = (d: GeneratorDefinition) => ({
       id: d.id,
       name: d.name,
@@ -969,7 +1549,22 @@ export class App {
       return;
     }
     let next = this.state;
-    for (const id of ids) next = withoutNode(next, id);
+    for (const id of ids) {
+      // Deleting a Reroute keeps the link it was bending.
+      const node = nodeById(next, id);
+      if (node && getGenerator(node.generator)?.role === 'output') continue;
+      const into = next.links.find((l) => l.to === id);
+      if (node && into && getGenerator(node.generator)?.role === 'reroute') {
+        const outs = next.links.filter((l) => l.from === id);
+        next = withoutNode(next, id);
+        for (const l of outs) {
+          const bridged: GraphLink = into.output
+            ? { from: into.from, to: l.to, input: l.input, output: into.output }
+            : { from: into.from, to: l.to, input: l.input };
+          next = withLink(next, bridged);
+        }
+      } else next = withoutNode(next, id);
+    }
     this.commit(next);
   }
 
@@ -979,8 +1574,15 @@ export class App {
    */
   private showMultiSelection(ids: readonly string[]): void {
     const el = this.multiInfo;
-    el.hidden = ids.length < 2;
+    el.hidden = ids.length === 1;
     if (el.hidden) return;
+    if (ids.length === 0) {
+      el.replaceChildren(
+        h('h2', { text: 'No node selected' }),
+        h('p', { class: 'description', text: 'Click a node to edit it.' }),
+      );
+      return;
+    }
     const items = ids.map((id) => {
       const node = nodeById(this.state, id);
       const def = node ? getGenerator(node.generator) : undefined;
@@ -1025,7 +1627,32 @@ export class App {
     this.commit(next);
   }
 
-  /** Freeze frame: the node keeps the image of the current time (simulations stop stepping). */
+  /** Splits a link with a Reroute dot at `world` (double-click on the link). */
+  private insertReroute(
+    link: { readonly to: string; readonly input: string },
+    world: readonly [number, number],
+  ): void {
+    const old = this.state.links.find((l) => l.to === link.to && l.input === link.input);
+    const def = getGenerator('reroute');
+    if (!old || !def) return;
+    const id = newNodeId(this.state.nodes);
+    const [x, y] = this.viewport.rerouteOrigin(world);
+    const node: GraphNode = { ...createNode(def, id, x, y), postEnabled: false };
+    const into: GraphLink = old.output
+      ? { from: old.from, to: id, input: 'image', output: old.output }
+      : { from: old.from, to: id, input: 'image' };
+    this.commit({
+      ...this.state,
+      nodes: [...this.state.nodes, node],
+      links: [
+        ...this.state.links.filter((l) => l !== old),
+        into,
+        { from: id, to: old.to, input: old.input },
+      ],
+    });
+  }
+
+  /** Collapses / expands a node card (its image is hidden). */
   private toggleCollapse(id: string): void {
     const node = nodeById(this.state, id);
     if (node) this.commit(withNode(this.state, id, { collapsed: !node.collapsed }));
@@ -1035,6 +1662,25 @@ export class App {
     const node = nodeById(this.state, id);
     if (!node) return;
     this.commit(withNode(this.state, id, { frozenAt: node.frozenAt === null ? this.time : null }));
+  }
+
+  private nodeUsesSeed(node: GraphNode, def: GeneratorDefinition): boolean {
+    if (def.kind === 'simulation') return !def.seedless;
+    const usesSeed = /\b(?:u_seed|hash\w*|latticeGradient|\w*Noise|cellPoint|voronoi\w*|fbm\w*)\b/;
+    return (
+      usesSeed.test(node.code ?? def.fragment) ||
+      (def.codeParam !== undefined && usesSeed.test(String(node.params[def.codeParam] ?? ''))) ||
+      def.passes?.some((pass) => usesSeed.test(pass.fragment)) === true
+    );
+  }
+
+  private shuffleNodeSeed(id: string): void {
+    const node = nodeById(this.state, id);
+    const def = node && getGenerator(node.generator);
+    if (!node || !def || !this.nodeUsesSeed(node, def)) return;
+    let seed = randomSeed();
+    if (seed === (node.seed ?? this.state.seed)) seed = (seed + 1) % (MAX_SEED + 1);
+    this.commit(withNode(this.state, id, { seed }));
   }
 
   /** Workspace aspect changed: sims are rebuilt with the new grid proportions. */
@@ -1051,6 +1697,7 @@ export class App {
 
   /** Swaps the selected node's generator (generator browser click). */
   private setNodeGenerator(id: string): void {
+    if (this.generator.role === 'output') return;
     const def = getGenerator(id);
     if (!def || id === this.node.generator) return;
     this.commit(withNodeGenerator(this.state, this.node.id, def, this.generator));
@@ -1124,6 +1771,16 @@ export class App {
       this.commit(this.withPost(values));
       this.syncPanels();
     };
+    const applyRamp = (preset: Preset) => {
+      if (!preset.ramp) return;
+      this.commit(
+        withNode(this.state, this.node.id, {
+          ramp: preset.ramp,
+          post: { ...this.post, colorMode: COLOR_MODE.gradient },
+        }),
+      );
+      this.syncPanels();
+    };
     const colorModeDef = POST_PROCESS_PARAMS.filter((d) => d.group === 'Color');
     const moduleDefs = POST_PROCESS_PARAMS.filter((d) => d.group !== 'Color');
 
@@ -1134,7 +1791,19 @@ export class App {
         title: 'Presets',
         presets: def.presets ?? [],
         userPresets: this.userPresets.list(def.id),
-        extras: [this.userPresetButton(def)],
+        userActions: this.userPresetActions(def.id),
+        extras: [
+          this.userPresetButton(
+            def.id,
+            def.name,
+            (node) => ({
+              values: node.params,
+              post: node.post,
+              ramp: node.ramp,
+            }),
+            (preset) => void this.applyPreset(preset),
+          ),
+        ],
         onPick: (preset) => void this.applyPreset(preset),
         // Simulations can't show a preset without running it: no live preview, no thumbnail.
         ...(def.kind === 'shader'
@@ -1159,16 +1828,17 @@ export class App {
         // Only gradient-map mode uses the ramp.
         visibleWhen: (v) => v.colorMode === COLOR_MODE.gradient,
         presets: RAMP_PRESETS,
-        onPick: (preset) => {
-          if (!preset.ramp) return;
-          this.commit(
-            withNode(this.state, this.node.id, {
-              ramp: preset.ramp,
-              post: { ...this.post, colorMode: COLOR_MODE.gradient },
-            }),
-          );
-          this.syncPanels();
-        },
+        userPresets: this.userPresets.list(USER_COLOR_SCOPE),
+        userActions: this.userPresetActions(USER_COLOR_SCOPE),
+        extras: [
+          this.userPresetButton(
+            USER_COLOR_SCOPE,
+            'color',
+            (node) => ({ values: {}, ramp: node.ramp }),
+            (preset) => applyRamp(preset),
+          ),
+        ],
+        onPick: (preset) => applyRamp(preset),
         onHover: (preset) => this.previewPreset('ramp', preset),
         thumbnail: (preset) => this.presetThumbnail('ramp', preset),
       },
@@ -1185,6 +1855,16 @@ export class App {
       gallery: {
         title: 'Looks',
         presets: POST_PRESETS,
+        userPresets: this.userPresets.list(USER_LOOK_SCOPE),
+        userActions: this.userPresetActions(USER_LOOK_SCOPE),
+        extras: [
+          this.userPresetButton(
+            USER_LOOK_SCOPE,
+            'look',
+            (node) => ({ values: {}, post: pickScoped(node.post) }),
+            (preset) => void this.applyPostPreset(preset),
+          ),
+        ],
         onPick: (preset) => void this.applyPostPreset(preset),
         onHover: (preset) => this.previewPreset('look', preset),
         thumbnail: (preset) => this.presetThumbnail('look', preset),
@@ -1244,7 +1924,6 @@ export class App {
       this.paramPanel,
       this.colorPanel,
       this.postPanel,
-      this.generalPanel,
       this.animationPanel,
       this.outputPanel,
     ];
@@ -1270,6 +1949,15 @@ export class App {
 
   // ---- Code view ----------------------------------------------------------------------------
 
+  private get codeViewKey(): string {
+    return `${this.systemId}:${this.node.id}:${this.node.generator}`;
+  }
+
+  private get codeOpen(): boolean {
+    const saved = readStorage(`ptm.codeView.${this.codeViewKey}`);
+    return saved === null ? this.generator.id === 'custom-shader' : saved === '1';
+  }
+
   /** Shows / hides the GLSL view of the selected node and fills it. */
   private renderCode(): void {
     const def = this.generator;
@@ -1284,18 +1972,23 @@ export class App {
     const code = node.code ?? def.fragment.replace(/\r\n?/g, '\n');
     const custom = node.customParams ?? [];
     this.codePanel.render({
+      nodeKey: this.codeViewKey,
       code,
       modified: node.code !== undefined && codeDiffers(node.code, def.fragment),
       reference: shaderReference(this.nodeDef as ShaderGenerator),
       params: {
+        nodeKey: this.codeViewKey,
         params: custom,
-        builtIn: def.params,
+        builtIn: editedBaseParams(def.params, node.baseParamEdits),
+        onBaseChange: (key, edit) => this.setBaseParam(key, edit),
         onAdd: (label) => {
           const taken = new Set([...def.params, ...custom].map((p) => p.key));
+          const key = customParamKey(label, taken);
+          this.codePanel.expandParam(this.codeViewKey, key);
           this.setCustomParams([
             ...custom,
             {
-              key: customParamKey(label, taken),
+              key,
               label,
               type: 'float',
               min: 0,
@@ -1310,6 +2003,32 @@ export class App {
       onChange: (text) => this.setNodeCode(text),
       onRevert: () => this.setNodeCode(null),
     });
+  }
+
+  private setBaseParam(key: string, edit: BaseParamEdit | null): void {
+    const def = this.generator;
+    if (def.kind !== 'shader' || def.codeParam) return;
+    const current = this.node;
+    const previous = this.nodeDef.params.find((param) => param.key === key);
+    const baseParamEdits = sanitizeBaseParamEdits(
+      { ...current.baseParamEdits, [key]: edit },
+      def.params,
+    );
+    const node = { ...current, baseParamEdits };
+    const schema = effectiveGenerator(def, node).params;
+    const updated = schema.find((param) => param.key === key);
+    const values = { ...current.params };
+    if (
+      updated &&
+      previous &&
+      (previous.type !== updated.type ||
+        (deepEqual(values[key], previous.default) && !deepEqual(previous.default, updated.default)))
+    )
+      values[key] = updated.default;
+    const params = sanitizeValues(schema, values);
+    this.commit(withNode(this.state, current.id, { baseParamEdits, params }));
+    this.renderPanels();
+    this.renderCode();
   }
 
   /**
@@ -1439,6 +2158,7 @@ export class App {
       node.postEnabled,
       node.code,
       node.customParams,
+      node.baseParamEdits,
       upstream,
       this.state.links,
       this.state.seed,
@@ -1521,47 +2241,62 @@ export class App {
 
   private readonly userPresets = new UserPresets();
 
-  private userPresetButton(def: GeneratorDefinition): HTMLElement {
+  /**
+   * "My presets" menu of a gallery. `scope` is a generator id (whole node settings) or a
+   * shared scope (Post Process looks, color ramps); `snapshot` picks what the preset keeps.
+   */
+  private userPresetButton(
+    scope: string,
+    what: string,
+    snapshot: (node: GraphNode) => Omit<Preset, 'name'>,
+    apply: (preset: Preset) => void,
+  ): HTMLElement {
     return userPresetMenu({
-      list: () => this.userPresets.list(def.id),
-      save: () => void this.saveUserPreset(def),
-      apply: (preset) => void this.applyPreset(preset),
-      rename: (preset) => void this.renameUserPreset(def, preset),
-      remove: (preset) => void this.removeUserPreset(def, preset),
+      list: () => this.userPresets.list(scope),
+      save: () => void this.saveUserPreset(scope, what, snapshot),
+      apply,
+      rename: (preset) => void this.renameUserPreset(scope, preset),
+      remove: (preset) => void this.removeUserPreset(scope, preset),
     });
   }
 
-  /** Saves the selected node's settings (params, look, ramp) as a user preset. */
-  private async saveUserPreset(def: GeneratorDefinition): Promise<void> {
+  private userPresetActions(scope: string) {
+    return {
+      rename: (preset: Preset) => void this.renameUserPreset(scope, preset),
+      remove: (preset: Preset) => void this.removeUserPreset(scope, preset),
+    };
+  }
+
+  /** Saves part of the selected node's settings as a user preset of `scope`. */
+  private async saveUserPreset(
+    scope: string,
+    what: string,
+    snapshot: (node: GraphNode) => Omit<Preset, 'name'>,
+  ): Promise<void> {
     const node = this.node;
     const name = await promptDialog({
-      title: `Save a ${def.name} preset`,
+      title: `Save a ${what} preset`,
       label: 'Name',
-      value: `My ${def.name} ${this.userPresets.list(def.id).length + 1}`,
+      value: `My ${what} ${this.userPresets.list(scope).length + 1}`,
       confirmLabel: 'Save',
     });
     if (!name) return;
-    const exists = this.userPresets.list(def.id).some((p) => p.name === name);
+    const exists = this.userPresets.list(scope).some((p) => p.name === name);
     if (
       exists &&
       !(await confirmDialog({
         title: `Replace "${name}"?`,
-        message: 'A preset with this name already exists for this generator.',
+        message: 'A preset with this name already exists.',
         confirmLabel: 'Replace',
       }))
     )
       return;
-    this.userPresets.save(def.id, {
-      name,
-      values: node.params,
-      post: node.post,
-      ramp: node.ramp,
-    });
+    this.userPresets.save(scope, { name, ...snapshot(node) });
     this.renderPanels();
     toast(`Saved preset "${name}"`);
   }
 
-  private async renameUserPreset(def: GeneratorDefinition, preset: Preset): Promise<void> {
+  private async renameUserPreset(scope: string, preset: Preset): Promise<void> {
     const name = await promptDialog({
       title: 'Rename preset',
       label: 'Name',
@@ -1569,18 +2304,19 @@ export class App {
       confirmLabel: 'Rename',
     });
     if (!name) return;
-    this.userPresets.rename(def.id, preset.name, name);
+    this.userPresets.rename(scope, preset.name, name);
     this.renderPanels();
   }
 
-  private async removeUserPreset(def: GeneratorDefinition, preset: Preset): Promise<void> {
+  private async removeUserPreset(scope: string, preset: Preset): Promise<void> {
     const ok = await confirmDialog({
       title: `Delete "${preset.name}"?`,
-      message: 'The preset is removed from your library (this cannot be undone).',
+      message: 'The preset will be removed from your library.',
+      irreversible: true,
       confirmLabel: 'Delete',
     });
     if (!ok) return;
-    this.userPresets.remove(def.id, preset.name);
+    this.userPresets.remove(scope, preset.name);
     this.renderPanels();
   }
 
@@ -1697,7 +2433,9 @@ export class App {
     const def = getGenerator(node.generator);
     if (def?.kind !== 'simulation') return;
     try {
-      this.renderer.simulationFor(def, node.id).sim.reset(node.params, this.state.seed);
+      this.renderer
+        .simulationFor(def, node.id)
+        .sim.reset(node.params, node.seed ?? this.state.seed);
       const cache = this.cacheOf(node.id);
       cache.simFrames = 0;
       cache.simVersion++;
@@ -1714,7 +2452,7 @@ export class App {
   private liveSim(node: GraphNode, def: SimulationGenerator): Simulation {
     const { sim, created } = this.renderer.simulationFor(def, node.id);
     if (created) {
-      sim.reset(node.params, this.state.seed);
+      sim.reset(node.params, node.seed ?? this.state.seed);
       const cache = this.cacheOf(node.id);
       cache.simFrames = 0;
       cache.simVersion++;
@@ -1954,9 +2692,13 @@ export class App {
   // ---- Toolbar actions ----------------------------------------------------------------------
 
   private setSeed(seed: number): void {
-    this.commit({ ...this.state, seed: clamp(Math.round(seed), 0, MAX_SEED) });
+    const nodes = this.state.nodes.map((node) => {
+      if (node.seed === undefined) return node;
+      const { seed: _seed, ...inherited } = node;
+      return inherited;
+    });
+    this.commit({ ...this.state, nodes, seed: clamp(Math.round(seed), 0, MAX_SEED) });
     this.generalPanel.setValues(this.globalValues());
-    this.resetAllSimulations();
   }
 
   private setViewTiles(n: number): void {
@@ -1988,6 +2730,7 @@ export class App {
   private updateToolbar(): void {
     this.toolbar.update({
       systemName: this.systemName,
+      publishState: this.publishStateOf(this.systemId),
       viewTiles: this.viewTiles,
       canUndo: this.history.canUndo,
       canRedo: this.history.canRedo,
@@ -1997,13 +2740,20 @@ export class App {
   // ---- Requests -----------------------------------------------------------------------------
 
   /** The frame request of `node` (inputs are resolved by the caller). */
-  private requestFor(node: GraphNode, time: number, forExport: boolean): FrameRequest {
+  private requestFor(
+    node: GraphNode,
+    time: number,
+    forExport: boolean,
+    seed = this.state.seed,
+  ): FrameRequest {
     const base = getGenerator(node.generator) ?? GENERATORS[0]!;
     // Custom parameters are uniforms of the node's own program (code path).
     const def = effectiveGenerator(base, node);
     const code =
       node.code ??
-      (base.kind === 'shader' && node.customParams?.length ? base.fragment : undefined);
+      (base.kind === 'shader' && (node.customParams?.length || node.baseParamEdits)
+        ? base.fragment
+        : undefined);
     const overrides = forExport ? def.exportOverrides : undefined;
     return {
       ...(code !== undefined ? { code } : {}),
@@ -2012,7 +2762,7 @@ export class App {
       post: node.post,
       ramp: node.ramp,
       time: node.frozenAt ?? time,
-      seed: this.state.seed,
+      seed: node.seed ?? seed,
       key: node.id,
       postEnabled: node.postEnabled,
     };
@@ -2022,38 +2772,51 @@ export class App {
    * `id` and everything it depends on, as a capture chain (offscreen renders, exports);
    * `replace` stands in for the node of the same id (preset previews).
    */
-  private chainFor(id: string, time: number, forExport: boolean, replace?: GraphNode): ChainStep[] {
-    const order = evaluationOrder(this.state, id).map((n) =>
+  private chainFor(
+    id: string,
+    time: number,
+    forExport: boolean,
+    replace?: GraphNode,
+    state = this.state,
+  ): ChainStep[] {
+    const order = evaluationOrder(state, id).map((n) =>
       replace && n.id === replace.id ? replace : n,
     );
     const index = new Map(order.map((n, i) => [n.id, i]));
     return order.map((node) => {
       const links: Record<string, ChainInput> = {};
-      for (const [input, link] of Object.entries(inputLinks(this.state.links, node.id))) {
+      for (const [input, link] of Object.entries(inputLinks(state.links, node.id))) {
         const step = index.get(link.from);
         if (step !== undefined) links[input] = { step, output: link.output };
       }
-      return { req: this.requestFor(node, time, forExport), links };
+      return { req: this.requestFor(node, time, forExport, state.seed), links };
     });
   }
 
   private fileBase(): string {
-    return `${this.generator.id}-s${this.state.seed}`;
+    const def = getGenerator(this.exportNode.generator) ?? this.generator;
+    return `${def.id}-s${this.state.seed}`;
   }
 
   /** Pixel blocks per side when the Pixelate module asks for a native-resolution export. */
   private nativePixelSize(): number | null {
-    const p = this.post;
-    return this.node.postEnabled && p.pixelateOn === true && p.pixelExport === true
+    const node = this.exportNode;
+    const p = node.post;
+    return node.postEnabled && p.pixelateOn === true && p.pixelExport === true
       ? getNumber(p, 'pixelate')
       : null;
   }
 
   // ---- Import / export ----------------------------------------------------------------------
 
-  /** Whether the selected node changes over time (itself or something it depends on). */
+  /** Whether the exported node changes over time (itself or something it depends on). */
   private get selectionAnimated(): boolean {
-    return evaluationOrder(this.state, this.node.id).some((n) => {
+    return this.animatedExport(this.state);
+  }
+
+  private animatedExport(state: EditorState): boolean {
+    const id = (this.connectedOutput(state) ?? selectedNode(state)).id;
+    return evaluationOrder(state, id).some((n) => {
       const def = getGenerator(n.generator);
       return def !== undefined && (def.animated || def.kind === 'simulation');
     });
@@ -2061,7 +2824,8 @@ export class App {
 
   /** Export window: every export kind, then that kind's own settings / download. */
   private async openExport(): Promise<void> {
-    const def = this.generator;
+    const output = this.outputNode;
+    const def = getGenerator(this.exportNode.generator) ?? this.generator;
     const [w, hgt] = imageDims(this.nativePixelSize() ?? this.state.resolution, this.state.aspect);
     const [ew, eh] = imageDims(this.state.resolution, this.state.aspect);
     const count = this.state.nodes.length;
@@ -2106,10 +2870,13 @@ export class App {
         description: 'Copied to the clipboard',
       },
     ];
-    const kind = await askExport(`${this.systemName} · selected: ${def.name}`, [
-      { label: 'Selected node', choices: selected },
-      { label: 'Whole graph', choices: graph },
-    ]);
+    const kind = await askExport(
+      `${this.systemName} · ${output ? 'Output' : `selected: ${def.name}`}`,
+      [
+        { label: output ? 'Output' : 'Selected node', choices: selected },
+        { label: 'Whole graph', choices: graph },
+      ],
+    );
     if (kind === 'png') await this.exportPng();
     else if (kind === 'maps') await this.exportMaps();
     else if (kind === 'flipbook') await this.exportFlipbook();
@@ -2157,7 +2924,7 @@ export class App {
       const [w, h] = imageDims(size, this.state.aspect);
       const blob = await renderPng(
         this.renderer,
-        this.chainFor(this.node.id, this.time, true),
+        this.chainFor(this.exportNode.id, this.time, true),
         w,
         h,
       );
@@ -2193,8 +2960,8 @@ export class App {
 
   /** Export window: choose and tune the color / normal / height maps, preview, export. */
   private async exportMaps(): Promise<void> {
-    const id = this.node.id;
-    const post = this.post;
+    const id = this.exportNode.id;
+    const post = this.exportNode.post;
     const aspect = this.state.aspect;
     const [pw, ph] = imageDims(160, aspect);
     let capture: Capture | null = null;
@@ -2270,10 +3037,28 @@ export class App {
     }
   }
 
+  /**
+   * Loop length offered for a flipbook: the exported node's or, through Output / Reroute
+   * pass-throughs, the loop of the node feeding them.
+   */
+  private exportLoopDuration(state = this.state): number {
+    let node = this.connectedOutput(state) ?? selectedNode(state);
+    for (let i = 0; i < 32 && getGenerator(node.generator)?.role; i++) {
+      const link = state.links.find((l) => l.to === node.id);
+      const from = link ? nodeById(state, link.from) : undefined;
+      if (!from) break;
+      node = from;
+    }
+    return getNumber(node.post, 'loopDuration', 4);
+  }
+
   /** Simulation nodes `id` depends on (they advance together during a flipbook). */
-  private simulationsOf(id: string): { node: GraphNode; def: SimulationGenerator }[] {
+  private simulationsOf(
+    id: string,
+    state = this.state,
+  ): { node: GraphNode; def: SimulationGenerator }[] {
     const out: { node: GraphNode; def: SimulationGenerator }[] = [];
-    for (const node of evaluationOrder(this.state, id)) {
+    for (const node of evaluationOrder(state, id)) {
       const def = getGenerator(node.generator);
       if (def?.kind === 'simulation') out.push({ node, def });
     }
@@ -2281,13 +3066,13 @@ export class App {
   }
 
   private async exportFlipbook(): Promise<void> {
-    const def = this.generator;
-    const id = this.node.id;
+    const id = this.exportNode.id;
     const sims = this.simulationsOf(id);
+    const simulated = sims.length > 0;
     const choice = await askFlipbookOptions(
-      def.kind === 'simulation',
+      simulated,
       this.renderer.gpu.caps.maxTextureSize,
-      { duration: this.loopDuration },
+      { duration: this.exportLoopDuration() },
       (s) => imageDims(s, this.state.aspect),
     );
     const native = this.nativePixelSize();
@@ -2310,9 +3095,10 @@ export class App {
       }
       const frame = imageDims(opts.frameSize, this.state.aspect);
       const blob = await renderFlipbook(this.renderer, opts, frame, (i) => {
-        if (def.kind === 'simulation') {
+        if (simulated) {
           if (i > 0) for (let k = 0; k < opts.stepsBetweenFrames; k++) stepAll();
-          return this.chainFor(id, this.time, true);
+          // Simulations advance by steps; animated nodes after them follow the clock.
+          return this.chainFor(id, opts.startTime + (i / count) * opts.duration, true);
         }
         // Frames cover [0, duration): with a seamless loop of the same duration, the sheet
         // loops perfectly.
@@ -2455,8 +3241,10 @@ export class App {
       node.ramp,
       node.postEnabled,
       node.code,
+      node.customParams,
+      node.baseParamEdits,
       this.assetVersion,
-      this.state.seed,
+      node.seed ?? this.state.seed,
       size,
       time,
       sim,
@@ -2480,19 +3268,29 @@ export class App {
       if (this.failed.has(node.id)) continue;
       const cache = this.cacheOf(node.id);
       const rect = rects.get(node.id);
+      // Reroutes have no image on the graph: they pass on a full-quality copy.
+      const reroute = getGenerator(node.generator)?.role === 'reroute';
       const size =
         node.id === this.state.selectedId
           ? selectedSize
-          : clamp(
-              nextPow2((rect?.width ?? MIN_NODE_SIZE) * this.viewTiles),
-              MIN_NODE_SIZE,
-              Math.min(full, MAX_UNSELECTED_SIZE),
-            );
+          : reroute
+            ? Math.min(full, MAX_UNSELECTED_SIZE)
+            : clamp(
+                nextPow2((rect?.width ?? MIN_NODE_SIZE) * this.viewTiles),
+                MIN_NODE_SIZE,
+                Math.min(full, MAX_UNSELECTED_SIZE),
+              );
       const signature = this.signature(node, size, cache);
       if (signature === cache.signature) continue;
       const inputs: Record<string, RenderTarget> = {};
       for (const [input, link] of Object.entries(inputLinks(this.state.links, node.id))) {
-        const out = this.nodeCaches.get(link.from)?.targets.outputFor(link.output);
+        const upstream = this.nodeCaches.get(link.from);
+        const fromNode = nodeById(this.state, link.from);
+        const fromDef = fromNode ? getGenerator(fromNode.generator) : undefined;
+        const out =
+          upstream && fromDef
+            ? this.renderer.outputOf(fromDef, upstream.targets, link.output)
+            : undefined;
         if (out) inputs[input] = out;
       }
       const [width, height] = imageDims(size, this.state.aspect);
@@ -2520,26 +3318,28 @@ export class App {
       const texture = this.nodeCaches.get(node.id)?.targets.output?.texture;
       if (!rect || !texture) continue;
       const selected = node.id === this.state.selectedId;
+      const preview = this.pinPreview?.id === node.id ? this.pinPreview.channel : undefined;
       items.push({
         texture,
         ...rect,
         tiles: this.viewTiles,
         nearest: selected && magnified,
         dim: 0,
+        ...(preview !== undefined ? { channel: preview } : {}),
       });
     }
     const { width, height } = this.viewport.canvasSize();
     this.renderer.display(items, width, height);
-    this.detectValueTypes();
+    this.detectTransparency();
     this.viewport.setRenderSize(imageDims(selectedSize, this.state.aspect)[0]);
   }
 
   /**
-   * Tells grayscale from color node outputs (pin and link colors) by reading back a tiny
-   * resampling of the image. A node is checked again when its image changed, at most twice a
-   * second, and a couple of nodes per frame.
+   * Finds the nodes with transparent pixels (their alpha pin stays visible) by reading back a
+   * tiny resampling of the image. A node is checked again when its image changed, at most twice
+   * a second, and a couple of nodes per frame.
    */
-  private detectValueTypes(): void {
+  private detectTransparency(): void {
     const now = performance.now();
     let budget = 2;
     let changed = false;
@@ -2552,9 +3352,10 @@ export class App {
       if (last && (last.version === cache.version || now - last.at < 500)) continue;
       budget--;
       this.typeChecks.set(node.id, { version: cache.version, at: now });
-      const type: NodeValueType = this.renderer.isGrayscale(texture) ? 'gray' : 'color';
-      if (this.valueTypes.get(node.id) !== type) {
-        this.valueTypes.set(node.id, type);
+      const transparent = this.renderer.isTransparent(texture);
+      if (this.transparent.has(node.id) !== transparent) {
+        if (transparent) this.transparent.add(node.id);
+        else this.transparent.delete(node.id);
         changed = true;
       }
     }
@@ -2738,6 +3539,8 @@ export class App {
         this.duplicateNode();
       } else if (mod && e.key.toLowerCase() === 'c' && !window.getSelection()?.toString()) {
         this.copyNodes();
+      } else if (mod && e.key.toLowerCase() === 'x' && !window.getSelection()?.toString()) {
+        this.cutNodes();
       } else if (mod && e.key.toLowerCase() === 'v' && this.clipboard) {
         e.preventDefault();
         this.pasteNodes();
@@ -2761,29 +3564,44 @@ export class App {
     canvas.addEventListener('webglcontextrestored', () => window.location.reload());
   }
 
-  /** Ctrl+D: copy of the selected node (settings included), next to it. */
   /** Ctrl+C: the selected nodes and the links between them (in-app clipboard). */
-  private copyNodes(): void {
-    const ids = new Set(this.viewport.selectedIds());
-    const nodes = this.state.nodes.filter((n) => ids.has(n.id));
-    if (!nodes.length) return;
+  private copyNodes(ids: readonly string[] = this.viewport.selectedIds(), quiet = false): void {
+    const set = new Set(ids);
+    const nodes = this.state.nodes.filter(
+      (n) => set.has(n.id) && getGenerator(n.generator)?.role !== 'output',
+    );
+    if (!nodes.length) {
+      if (quiet) this.clipboard = null;
+      return;
+    }
+    const copied = new Set(nodes.map((node) => node.id));
     this.clipboard = {
       nodes,
-      links: this.state.links.filter((l) => ids.has(l.from) && ids.has(l.to)),
+      links: this.state.links.filter((l) => copied.has(l.from) && copied.has(l.to)),
     };
-    toast(`Copied ${nodes.length} node${nodes.length > 1 ? 's' : ''}`);
+    if (!quiet) toast(`Copied ${nodes.length} node${nodes.length > 1 ? 's' : ''}`);
+  }
+
+  /** Ctrl+X: copies the selected nodes, then deletes them. */
+  private cutNodes(ids: readonly string[] = this.viewport.selectedIds()): void {
+    if (ids.length >= this.state.nodes.length) {
+      toast('The last node cannot be cut', 'error');
+      return;
+    }
+    this.copyNodes(ids, true);
+    this.deleteNodes(ids);
   }
 
   /**
-   * Ctrl+V: copies of the clipboard nodes (settings and inner links kept) under the pointer,
-   * or offset from the originals; they become the selection.
+   * Ctrl+V: copies of the clipboard nodes (settings and inner links kept) at `at` (graph
+   * units), under the pointer, or offset from the originals; they become the selection.
    */
-  private pasteNodes(): void {
+  private pasteNodes(target?: readonly [number, number]): void {
     const clip = this.clipboard;
     if (!clip?.nodes.length) return;
     const minX = Math.min(...clip.nodes.map((n) => n.x));
     const minY = Math.min(...clip.nodes.map((n) => n.y));
-    const at = this.viewport.pointerWorld();
+    const at = target ?? this.viewport.pointerWorld();
     const dx = at ? Math.round((at[0] - minX) / 24) * 24 : 48;
     const dy = at ? Math.round((at[1] - minY) / 24) * 24 : 48;
     const ids = new Map<string, string>();
@@ -2796,7 +3614,12 @@ export class App {
     const links = clip.links.map((l) => ({ ...l, from: ids.get(l.from)!, to: ids.get(l.to)! }));
     const pasted = [...ids.values()];
     const primary = pasted[pasted.length - 1]!;
-    this.commit({ ...this.state, nodes, links: [...this.state.links, ...links], selectedId: primary });
+    this.commit({
+      ...this.state,
+      nodes,
+      links: [...this.state.links, ...links],
+      selectedId: primary,
+    });
     this.viewport.selectMany(pasted, primary);
   }
 
@@ -2804,6 +3627,7 @@ export class App {
 
   private duplicateNode(): void {
     const source = this.node;
+    if (getGenerator(source.generator)?.role === 'output') return;
     const [x, y] = this.viewport.placementNear(source.id);
     const copy: GraphNode = { ...source, id: newNodeId(this.state.nodes), x, y };
     this.commit(withAddedNode(this.state, copy));

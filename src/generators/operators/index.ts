@@ -18,9 +18,11 @@ import distanceJumpFrag from './distance-jump.glsl?raw';
 import distanceSeedFrag from './distance-seed.glsl?raw';
 import distanceFrag from './distance.glsl?raw';
 import edgesFrag from './edges.glsl?raw';
+import edgeFadeFrag from './edge-fade.glsl?raw';
 import levelsFrag from './levels.glsl?raw';
 import maskFrag from './mask.glsl?raw';
 import packFrag from './pack.glsl?raw';
+import passthroughFrag from './passthrough.glsl?raw';
 import slopeBlurFrag from './slope-blur.glsl?raw';
 import transformFrag from './transform.glsl?raw';
 import unpackFrag from './unpack.glsl?raw';
@@ -71,6 +73,8 @@ function operator(spec: {
   category?: 'operator' | 'animation';
   animated?: boolean;
   defaultPost?: ParamValues;
+  role?: 'output' | 'reroute';
+  startCollapsed?: boolean;
 }): ShaderGenerator {
   return {
     kind: 'shader',
@@ -91,7 +95,7 @@ export const blendOp = operator({
   inputs: [
     input('foreground', 'Foreground', 'Image blended on top.', '#e8e8e8'),
     input('background', 'Background', 'Image underneath.', '#a0a0a0'),
-    input('mask', 'Mask', 'Brightness limits where the foreground shows.', '#9be86a', 'gray'),
+    input('mask', 'Mask', 'Brightness limits where the foreground shows.', '#9be86a', 'float'),
   ],
   params: [
     param.select('mode', 'Mode', BLEND_MODES, 0),
@@ -112,7 +116,7 @@ export const maskOp = operator({
   name: 'Mask',
   description: 'Cuts the Image with a Mask (luminance, alpha or red), with levels and invert.',
   fragment: maskFrag,
-  inputs: [IMAGE, input('mask', 'Mask', 'White keeps, black removes.', '#9be86a', 'gray')],
+  inputs: [IMAGE, input('mask', 'Mask', 'White keeps, black removes.', '#9be86a', 'float')],
   params: [
     param.select('channel', 'Mask channel', ['Luminance', 'Alpha', 'Red'], 0),
     param.float('low', 'Low', 0, 0, 1),
@@ -242,7 +246,7 @@ export const slopeBlurOp = operator({
     'Smears the Image along the slopes of another image (Substance slope blur): painterly ' +
     'strokes, eroded or swollen edges.',
   fragment: slopeBlurFrag,
-  inputs: [IMAGE, input('slope', 'Slope', 'Its gradients steer the blur.', '#5ad0ff', 'gray')],
+  inputs: [IMAGE, input('slope', 'Slope', 'Its gradients steer the blur.', '#5ad0ff', 'float')],
   params: [
     param.select('mode', 'Mode', ['Blur', 'Min (erode)', 'Max (grow)'], 0),
     param.float('intensity', 'Intensity', 12, 0, 64, { unit: 'px' }),
@@ -261,8 +265,7 @@ export const distanceOp = operator({
   id: 'op-distance',
   name: 'Distance',
   description:
-    'Exact distance field of the shapes of a mask (Substance-like): gradients around or ' +
-    'inside shapes, bevels, signed fields; a Source spreads its colors from the shapes.',
+    'Distance fields inside or around a mask. An optional Source spreads colors from the shapes.',
   fragment: distanceFrag,
   passes: [
     { label: 'seed', fragment: distanceSeedFrag, precise: true },
@@ -284,7 +287,7 @@ export const distanceOp = operator({
       'Mask',
       'White shapes to measure from (brightness > threshold).',
       '#9be86a',
-      'gray',
+      'float',
     ),
     {
       ...input('source', 'Source', 'Optional: its colors spread from the shapes.', '#ffb347'),
@@ -365,10 +368,13 @@ export const packOp = operator({
     'source colors).',
   fragment: packFrag,
   inputs: [
-    input('red', 'Red', 'Stored in R.', '#ff6b6b', 'gray'),
-    input('green', 'Green', 'Stored in G.', '#6bff8a', 'gray'),
-    input('blue', 'Blue', 'Stored in B.', '#6bb5ff', 'gray'),
-    input('alpha', 'Alpha', 'Stored in A (opaque when unconnected).', '#e8e8e8', 'gray'),
+    { ...input('red', 'Red', 'Stored in R.', '#ff6b6b', 'float'), preview: 0 },
+    { ...input('green', 'Green', 'Stored in G.', '#6bff8a', 'float'), preview: 1 },
+    { ...input('blue', 'Blue', 'Stored in B.', '#6bb5ff', 'float'), preview: 2 },
+    {
+      ...input('alpha', 'Alpha', 'Stored in A (opaque when unconnected).', '#e8e8e8', 'float'),
+      preview: 3,
+    },
   ],
   params: [
     param.bool('preview', 'Opaque preview', false, {
@@ -378,12 +384,34 @@ export const packOp = operator({
   presets: [{ name: 'Packed', values: {} }],
 });
 
+export const outputOp = operator({
+  id: 'output',
+  name: 'Output',
+  description:
+    'Chooses what to export and show in the library. Falls back to the selected node when unconnected.',
+  fragment: passthroughFrag,
+  role: 'output',
+  startCollapsed: true,
+  inputs: [input('image', 'Image', 'The image to export.', '#e8e8e8')],
+  params: [],
+  presets: [{ name: 'Output', values: {} }],
+});
+
+export const rerouteOp = operator({
+  id: 'reroute',
+  name: 'Reroute',
+  description: 'A dot that bends links (double-click a link to add one).',
+  fragment: passthroughFrag,
+  role: 'reroute',
+  inputs: [input('image', 'In', 'Passed through.', '#e8e8e8')],
+  params: [],
+  presets: [{ name: 'Reroute', values: {} }],
+});
+
 export const customOp = operator({
   id: 'op-custom',
   name: 'Custom Code',
-  description:
-    'Your own GLSL per pixel: edit `vec4 v` (starts as input A). Available: a(uv), b(uv), ' +
-    'c(uv), uv, t (seconds), px (one pixel), noise helpers (fbm, gradientNoise, voronoi…).',
+  description: 'Apply your own GLSL to up to three inputs. The starting color is input A.',
   fragment: customFrag,
   codeParam: 'code',
   inputs: [
@@ -444,9 +472,7 @@ export const hueShiftOp = animation({
 export const colorCycleOp = animation({
   id: 'op-color-cycle',
   name: 'Color Cycle',
-  description:
-    'Palette cycling: brightness scrolls through this node’s color ramp over time (lava, ' +
-    'water, energy, neon) without redrawing anything.',
+  description: 'Scrolls image brightness through the color ramp over time.',
   fragment: colorCycleFrag,
   // The node's own ramp (Post Process gradient map) is the palette.
   defaultPost: { colorMode: 1, alphaMode: 3 },
@@ -520,8 +546,7 @@ export const dissolveOp = animation({
   id: 'op-dissolve',
   name: 'Dissolve',
   description:
-    'The image burns away (and back) over time through a threshold on the Pattern input, with ' +
-    'a glowing edge. Without a pattern: a left-to-right wipe.',
+    'Dissolves along a pattern with a glowing edge. Without a pattern, wipes left to right.',
   fragment: dissolveFrag,
   inputs: [
     IMAGE,
@@ -530,7 +555,7 @@ export const dissolveOp = animation({
       'Pattern',
       'Dark parts go first (noise, gradient, Distance…).',
       '#c08cff',
-      'gray',
+      'float',
     ),
   ],
   params: [
@@ -556,7 +581,33 @@ export const ANIMATION_OPERATORS: readonly ShaderGenerator[] = [
   dissolveOp,
 ];
 
+export const edgeFadeOp = operator({
+  id: 'op-edge-fade',
+  name: 'Edge Feather',
+  description: 'Fade selected image edges with separate widths. A width of zero skips that edge.',
+  fragment: edgeFadeFrag,
+  inputs: [IMAGE],
+  params: [
+    param.float('left', 'Left width', 0.12, 0, 0.5, { group: 'Edges', limit: [0, 1] }),
+    param.float('right', 'Right width', 0.12, 0, 0.5, { group: 'Edges', limit: [0, 1] }),
+    param.float('top', 'Top width', 0.12, 0, 0.5, { group: 'Edges', limit: [0, 1] }),
+    param.float('bottom', 'Bottom width', 0.12, 0, 0.5, { group: 'Edges', limit: [0, 1] }),
+    param.select('curve', 'Curve', ['Linear', 'Smooth', 'Slow rise', 'Fast rise'], 1),
+    param.select('corners', 'Corners', ['Strongest edge', 'Multiply'], 1),
+    param.select('channels', 'Affect', ['Alpha', 'Color', 'Color and alpha'], 0),
+    param.float('inset', 'Clear edge fraction', 0, 0, 0.95, { limit: [0, 0.99] }),
+    param.float('amount', 'Amount', 1, 0, 1, { limit: [0, 1] }),
+  ],
+  presets: [
+    { name: 'Soft border', values: {} },
+    { name: 'Dissolve upward', values: { left: 0, right: 0, bottom: 0, top: 0.35 } },
+    { name: 'Feathered sides', values: { top: 0, bottom: 0, left: 0.23, right: 0.23 } },
+  ],
+});
+
 export const OPERATORS: readonly ShaderGenerator[] = [
+  outputOp,
+  rerouteOp,
   blendOp,
   maskOp,
   levelsOp,
@@ -566,6 +617,7 @@ export const OPERATORS: readonly ShaderGenerator[] = [
   slopeBlurOp,
   distanceOp,
   edgesOp,
+  edgeFadeOp,
   unpackOp,
   packOp,
   customOp,

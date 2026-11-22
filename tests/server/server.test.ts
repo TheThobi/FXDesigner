@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { likePattern, normalizeTags, orderBy, parsePublishInput } from '../../server/src/community';
+import { parsePublished } from '../../server/src/library';
 import { applyDevOverrides, loadConfig } from '../../server/src/config';
 import { parseCookies, Router, serializeCookie } from '../../server/src/http';
 import {
@@ -103,5 +105,49 @@ describe('local development overrides', () => {
     // The deployment's DATABASE_URL would win over the local PG* settings: dropped.
     expect(dev.DATABASE_URL).toBeUndefined();
     expect(dev.PUBLIC_URL).toBe('http://localhost:5173');
+  });
+});
+
+describe('community', () => {
+  it('normalizes tags', () => {
+    expect(normalizeTags('Fire, Loop!, loop,  big smoke ')).toEqual(['fire', 'loop', 'big-smoke']);
+    expect(normalizeTags(['a', 3, 'a', 'b'])).toEqual(['a', 'b']);
+    expect(normalizeTags(Array.from({ length: 20 }, (_, i) => `t${i}`))).toHaveLength(8);
+    expect(normalizeTags(null)).toEqual([]);
+  });
+
+  it('validates publications', () => {
+    expect(
+      parsePublishInput({ name: ' Ring ', category: 'fire', tags: 'a', description: 3 }),
+    ).toEqual({ name: 'Ring', category: 'fire', tags: ['a'], description: '' });
+    expect(() => parsePublishInput({ name: '', category: 'fire' })).toThrow();
+    expect(() => parsePublishInput({ name: 'x', category: 'nope' })).toThrow();
+    // Edits only carry the changed fields.
+    expect(parsePublishInput({ description: 'new' }, true)).toEqual({ description: 'new' });
+  });
+
+  it('keeps a valid publication link of a library system only', () => {
+    expect(JSON.parse(parsePublished({ id: 'abcdef012345', version: 2, hash: 'x' })!)).toEqual({
+      id: 'abcdef012345',
+      version: 2,
+      hash: 'x',
+    });
+    expect(parsePublished({ id: '../x', version: 2, hash: 'x' })).toBeNull();
+    expect(parsePublished({ id: 'abcdef012345', version: '2', hash: 'x' })).toBeNull();
+    expect(parsePublished(null)).toBeNull();
+    expect(JSON.parse(parsePublished({ id: 'abcdef012345', hash: 'x' })!)).toEqual({
+      id: 'abcdef012345',
+      version: null,
+      hash: 'x',
+    });
+    expect(parsePublished({ id: 'abcdef012345', version: -1, hash: 'x' })).toBeNull();
+    expect(parsePublished({ id: 'abcdef012345', version: 1, hash: 'x'.repeat(5000) })).toBeNull();
+  });
+
+  it('escapes search patterns and whitelists sorts', () => {
+    expect(likePattern('50%_a\\b')).toBe('%50\\%\\_a\\\\b%');
+    expect(orderBy('new')).toContain('created_at');
+    expect(orderBy('popular')).toContain('subscribers');
+    expect(orderBy('; DROP TABLE users')).toContain('recent');
   });
 });

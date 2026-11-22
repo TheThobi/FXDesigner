@@ -1,6 +1,8 @@
 /**
- * User preset library: named snapshots of a node's settings (params, Post Process look, ramp), per generator, kept in localStorage. Values are re-validated when applied
- * (`App.applyPreset` sanitizes everything), so stale entries after a schema change are safe.
+ * User preset library, kept in localStorage: named snapshots of a node's settings (params,
+ * Post Process look, ramp) per generator id, plus shared scopes ('@look' Post Process looks,
+ * '@color' ramps). Values are re-validated when applied (presets are sanitized like built-in
+ * ones), so stale entries after a schema change are safe.
  */
 import { sanitizeGradient } from '../params/gradient';
 import type { ParamValues, Preset } from '../params/types';

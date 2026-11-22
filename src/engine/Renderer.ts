@@ -31,6 +31,7 @@ import {
   uniformName,
 } from './shaderBuilder';
 import { gradientParams, imageParams, paramUniforms } from './uniforms';
+import { outputDef, type NodeChannel } from './nodes';
 
 /** Thrown while user GLSL is still compiling in the background: try again next frame. */
 export class ProgramPending extends Error {
@@ -75,6 +76,8 @@ export interface DisplayItem {
   readonly tiles: number;
   readonly nearest: boolean;
   readonly dim: number;
+  /** Shows one channel of the image (hovered channel pin); absent = the image itself. */
+  readonly channel?: NodeChannel;
 }
 
 /** Offscreen renderer at a fixed size, reusable for many frames (exports, thumbnails). */
@@ -146,11 +149,6 @@ export class NodeTargets {
     return this.targets.get('output');
   }
 
-  /** Output `key` (a channel output) or the main output, valid after a render. */
-  outputFor(key?: string): RenderTarget | undefined {
-    return key ? this.targets.get(`out:${key}`) : this.output;
-  }
-
   dispose(): void {
     for (const t of this.targets.values()) t.dispose();
     this.targets.clear();
@@ -220,11 +218,12 @@ export class Renderer {
   ): ShaderProgram {
     // A node converted to code: its GLSL replaces the generator's main fragment. Its params
     // may be custom too, so their declarations are part of the program's identity.
-    if (nodeCode !== undefined && !pass && !def.codeParam) {
-      const key = `${def.id}\nnode\n${uniformDeclarations(def.params)}\n${nodeCode}`;
+    if (nodeCode !== undefined && !def.codeParam) {
+      const fragment = pass?.fragment ?? nodeCode;
+      const key = `${def.id}\nnode\n${pass?.label ?? ''}\n${uniformDeclarations(def.params)}\n${fragment}`;
       return this.codeProgram(
         key,
-        () => buildGeneratorShader({ ...def, fragment: nodeCode }),
+        () => buildGeneratorShader({ ...def, fragment }, '', pass),
         def.id,
       );
     }
@@ -334,33 +333,40 @@ export class Renderer {
       this.gpu.bindTarget(out);
       this.gpu.drawFullscreen();
     }
-    // Channel outputs (Unpack RGBA…), read by downstream nodes linked to them.
-    for (const o of req.generator.outputs ?? []) {
-      this.channelProgram.use().set('u_channel', o.channel).texture('u_source', out.texture, 0);
-      this.gpu.bindTarget(targets.get(`out:${o.key}`, width, height));
-      this.gpu.drawFullscreen();
-    }
     return out;
   }
 
   /**
-   * True when a node image is grayscale (R = G = B wherever it is not transparent), judged on
+   * Output `key` of a rendered node (main output when absent): channel outputs (RGB, R, G, B,
+   * A, Unpack RGBA's…) are extracted from its image on demand, when a link reads them.
+   */
+  outputOf(
+    def: GeneratorDefinition,
+    targets: NodeTargets,
+    key: string | undefined,
+  ): RenderTarget | undefined {
+    const out = targets.output;
+    const o = outputDef(def, key);
+    if (!out || !o) return key === undefined ? out : undefined;
+    const dst = targets.get(`out:${o.key}`, out.width, out.height);
+    this.channelProgram.use().set('u_channel', o.channel).texture('u_source', out.texture, 0);
+    this.gpu.bindTarget(dst);
+    this.gpu.drawFullscreen();
+    return dst;
+  }
+
+  /**
+   * True when a node image has (partly) transparent pixels, judged on
    * a 16×16 resampling read back from the GPU (cheap, but a sync point: call sparingly).
    */
-  isGrayscale(texture: WebGLTexture): boolean {
+  isTransparent(texture: WebGLTexture): boolean {
     this.probe ??= this.gpu.createTarget({ width: 16, height: 16, format: 'rgba8' });
     this.copyProgram.use().texture('u_source', texture, 0);
     this.gpu.bindTarget(this.probe);
     this.gpu.drawFullscreen();
     const px = this.gpu.readPixels(this.probe);
-    for (let i = 0; i < px.length; i += 4) {
-      if (px[i + 3]! < 8) continue;
-      const r = px[i]!;
-      const g = px[i + 1]!;
-      const b = px[i + 2]!;
-      if (Math.abs(r - g) > 3 || Math.abs(g - b) > 3 || Math.abs(r - b) > 3) return false;
-    }
-    return true;
+    for (let i = 3; i < px.length; i += 4) if (px[i]! < 250) return true;
+    return false;
   }
 
   /** Draws node images into their cards on the canvas (resized to `width`×`height`). */
@@ -390,6 +396,7 @@ export class Renderer {
         .set('u_nearest', item.nearest)
         .set('u_checker', 8 * dpr)
         .set('u_dim', item.dim)
+        .set('u_channel', item.channel ?? -1)
         .texture('u_source', item.texture, 0);
       this.gpu.drawFullscreen();
     }
@@ -411,7 +418,11 @@ export class Renderer {
         pool[i] ??= this.createTargets();
         const inputs: Record<string, RenderTarget> = {};
         for (const [key, link] of Object.entries(step.links)) {
-          const upstream = link.step < i ? pool[link.step]?.outputFor(link.output) : undefined;
+          const from = pool[link.step];
+          const upstream =
+            link.step < i && from
+              ? this.outputOf(chain[link.step]!.req.generator, from, link.output)
+              : undefined;
           if (upstream) inputs[key] = upstream;
         }
         const req = { ...step.req, inputs };

@@ -3,7 +3,7 @@ import { h } from './dom';
 import { icon, type IconName } from './icons';
 import type { Layout, LayoutPart } from './Layout';
 
-export type PanelId = 'browser' | 'details' | 'viewport';
+export type PanelId = 'browser' | 'details' | 'viewport' | 'workspace';
 
 export interface DockPanelSpec {
   readonly id: PanelId;
@@ -35,7 +35,7 @@ const STORAGE_KEY = 'ptm.ui.dock.v2';
 const DRAG_THRESHOLD = 6;
 /** Edge band (fraction of a stack) that splits instead of stacking. */
 const EDGE = 0.28;
-const PANELS: readonly PanelId[] = ['browser', 'details', 'viewport'];
+const PANELS: readonly PanelId[] = ['browser', 'details', 'viewport', 'workspace'];
 
 function defaultLayout(): Split {
   return {
@@ -44,7 +44,7 @@ function defaultLayout(): Split {
     children: [
       { kind: 'stack', panels: ['browser'], active: 'browser' },
       { kind: 'stack', panels: ['viewport'], active: 'viewport' },
-      { kind: 'stack', panels: ['details'], active: 'details' },
+      { kind: 'stack', panels: ['details', 'workspace'], active: 'details' },
     ],
     sizes: [0.2, 0.55, 0.25],
   };
@@ -98,15 +98,14 @@ export function parseDockLayout(raw: unknown): Split | null {
 /**
  * Unreal-like docking: the editor is a tree of splits and tab stacks. Drag any tab onto a
  * panel: its center stacks the tab there, its edges split the panel (left, right, top,
- * bottom). Splitters resize neighbours. Panels hidden from the Layout menu leave the tree and
- * come back next to where they were. The arrangement is persisted.
+ * bottom). Splitters resize neighbours. Panels hidden from the Layout menu stay in the tree
+ * (only not drawn: the viewport takes the room), so they come back at the same place and
+ * size, in any order. The arrangement is persisted.
  */
 export class DockManager {
   private root: Split;
   private readonly specs = new Map<PanelId, DockPanelSpec>();
   private readonly hint: HTMLElement;
-  /** Where hidden panels were (a panel to come back next to). */
-  private readonly homes = new Map<PanelId, PanelId>();
 
   constructor(
     private readonly container: HTMLElement,
@@ -130,27 +129,27 @@ export class DockManager {
 
   /** Re-applies the Layout menu (hidden panels) and redraws. */
   refresh(): void {
+    // Layouts saved by older versions dropped hidden panels: put them back by the viewport.
     for (const id of PANELS) {
-      if (id === 'viewport') continue;
-      const visible = this.layout.isVisible(id as LayoutPart);
-      const stack = this.find(id);
-      if (!visible && stack) {
-        const other = stack.panels.find((p) => p !== id) ?? this.neighbourPanel(stack);
-        if (other) this.homes.set(id, other);
-        this.removePanel(id);
-      } else if (visible && !stack) {
-        const home = this.homes.get(id);
-        const target = home && home !== 'viewport' ? this.find(home) : null;
-        if (target) {
-          target.panels.push(id);
-          target.active = id;
-        } else {
-          // Next to the viewport: browser on the left, details on the right.
-          this.insertBeside(this.find('viewport')!, id, id === 'browser' ? 'left' : 'right');
-        }
-      }
+      if (id === 'workspace') continue;
+      if (!this.find(id))
+        this.insertBeside(this.find('viewport')!, id, id === 'browser' ? 'left' : 'right');
     }
+    if (!this.find('workspace')) this.find('details')?.panels.push('workspace');
     this.render();
+  }
+
+  /** Panels hidden from the Layout menu (the viewport never is). */
+  private visible(id: PanelId): boolean {
+    if (id === 'workspace') return this.layout.isVisible('details');
+    return id === 'viewport' || this.layout.isVisible(id as LayoutPart);
+  }
+
+  /** Whether anything of `node` is drawn. */
+  private shown(node: DockNode): boolean {
+    return node.kind === 'stack'
+      ? node.panels.some((p) => this.visible(p))
+      : node.children.some((c) => this.shown(c));
   }
 
   /** Back to the default arrangement (Layout → Reset). */
@@ -182,16 +181,6 @@ export class DockManager {
     return null;
   }
 
-  /** A panel of the stack's nearest neighbour (where a hidden panel comes back next to). */
-  private neighbourPanel(stack: Stack): PanelId | null {
-    const parent = this.parentOf(stack);
-    const sib = parent?.children.find((c) => c !== stack);
-    if (!sib) return null;
-    let n: DockNode = sib;
-    while (n.kind === 'split') n = n.children[0]!;
-    return n.active;
-  }
-
   private removePanel(id: PanelId): void {
     const stack = this.find(id);
     if (!stack) return;
@@ -210,6 +199,7 @@ export class DockManager {
     const i = parent.children.indexOf(node);
     parent.children.splice(i, 1);
     parent.sizes.splice(i, 1);
+    if (parent.sizes.length) normalize(parent);
     if (parent.children.length !== 1) return;
     const remaining = parent.children[0]!;
     if (parent === this.root) {
@@ -220,7 +210,7 @@ export class DockManager {
     grand.children[grand.children.indexOf(parent)] = remaining;
   }
 
-  /** Puts panel `id` in a new stack on `side` of `target`. */
+  /** Puts panel `id` in a new stack on `side` of `target` (half of the target's room). */
   private insertBeside(target: Stack, id: PanelId, side: Exclude<Zone, 'center'>): void {
     const dir = side === 'left' || side === 'right' ? 'row' : 'column';
     const fresh: Stack = { kind: 'stack', panels: [id], active: id };
@@ -232,14 +222,16 @@ export class DockManager {
       parent.sizes[index] = size;
       parent.children.splice(index + (after ? 1 : 0), 0, fresh);
       parent.sizes.splice(index + (after ? 1 : 0), 0, size);
+      normalize(parent);
       return;
     }
     // Wrap the target in a split of the other direction.
+    const share = 0.35;
     const wrap: Split = {
       kind: 'split',
       dir,
       children: after ? [target, fresh] : [fresh, target],
-      sizes: after ? [0.65, 0.35] : [0.35, 0.65],
+      sizes: after ? [1 - share, share] : [share, 1 - share],
     };
     if (index >= 0) parent.children[index] = wrap;
   }
@@ -276,11 +268,20 @@ export class DockManager {
   private renderNode(node: DockNode): HTMLElement {
     if (node.kind === 'stack') return this.renderStack(node);
     const el = h('div', { class: `dock-split ${node.dir}` });
+    // Keep saved sizes intact; only the viewport receives hidden siblings' space.
+    const viewport = node.children.findIndex((child) => this.find('viewport', child));
+    const released = node.children.reduce(
+      (sum, child, i) => sum + (this.shown(child) ? 0 : (node.sizes[i] ?? 1)),
+      0,
+    );
+    let prev: { index: number; el: HTMLElement } | null = null;
     node.children.forEach((child, i) => {
-      if (i > 0) el.append(this.splitter(node, i - 1, el));
+      if (!this.shown(child)) return;
       const childEl = this.renderNode(child);
-      childEl.style.flex = `${node.sizes[i] ?? 1} 1 0`;
+      childEl.style.flex = `${(node.sizes[i] ?? 1) + (i === viewport ? released : 0)} 1 0`;
+      if (prev) el.append(this.splitter(node, [prev.index, i], [prev.el, childEl], el));
       el.append(childEl);
+      prev = { index: i, el: childEl };
     });
     return el;
   }
@@ -289,23 +290,26 @@ export class DockManager {
     const tabs = h('div', { class: 'panel-tabs dock-tabs', role: 'tablist' });
     const body = h('div', { class: 'dock-body' });
     const el = h('div', { class: 'dock-stack' }, tabs, body);
-    for (const id of stack.panels) {
+    const panels = stack.panels.filter((p) => this.visible(p));
+    const active = panels.includes(stack.active) ? stack.active : panels[0];
+    for (const id of panels) {
       const spec = this.specs.get(id)!;
-      tabs.append(this.tab(stack, spec));
-      spec.element.hidden = id !== stack.active;
+      tabs.append(this.tab(stack, spec, active));
+      spec.element.hidden = id !== active;
       body.append(spec.element);
     }
     stacks.set(el, stack);
     return el;
   }
 
-  private tab(stack: Stack, spec: DockPanelSpec): HTMLElement {
-    const closable = spec.id !== 'viewport';
+  private tab(stack: Stack, spec: DockPanelSpec, active: PanelId | undefined): HTMLElement {
+    const closable = spec.id !== 'viewport' && spec.id !== 'workspace';
     const tab = h(
       'div',
       {
-        class: `panel-tab dock-tab${spec.id === stack.active ? ' active' : ''}`,
+        class: `panel-tab dock-tab${spec.id === active ? ' active' : ''}`,
         role: 'tab',
+        'aria-selected': String(spec.id === active),
         'data-panel': spec.id,
         title: `${spec.title} · drag onto a panel: center to stack, edges to split`,
       },
@@ -336,8 +340,13 @@ export class DockManager {
     return tab;
   }
 
-  /** Drag between two children of a split: moves their boundary. */
-  private splitter(split: Split, index: number, container: HTMLElement): HTMLElement {
+  /** Drag between two drawn children of a split (`pair`: their indices): moves their boundary. */
+  private splitter(
+    split: Split,
+    pair: readonly [number, number],
+    els: readonly [HTMLElement, HTMLElement],
+    container: HTMLElement,
+  ): HTMLElement {
     const el = h('div', {
       class: `dock-splitter ${split.dir}`,
       role: 'separator',
@@ -353,19 +362,28 @@ export class DockManager {
       const total = (horizontal ? rect.width : rect.height) || 1;
       const sum = split.sizes.reduce((a, b) => a + b, 0);
       const start = horizontal ? e.clientX : e.clientY;
-      const a0 = split.sizes[index]!;
-      const b0 = split.sizes[index + 1]!;
-      const min = (140 / total) * sum;
-      const kids = [...container.children].filter(
+      const [ia, ib] = pair;
+      const a0 = split.sizes[ia]!;
+      const b0 = split.sizes[ib]!;
+      const displayedA = parseFloat(els[0].style.flexGrow);
+      const displayedB = parseFloat(els[1].style.flexGrow);
+      // Sizes are relative to the drawn children only.
+      const drawn = [...container.children].filter(
         (c): c is HTMLElement => !c.classList.contains('dock-splitter'),
       );
+      const shownSum =
+        drawn.reduce((acc, c) => acc + (parseFloat(c.style.flexGrow) || 0), 0) || sum;
+      const min = (140 / total) * shownSum;
       const move = (ev: PointerEvent) => {
-        const delta = (((horizontal ? ev.clientX : ev.clientY) - start) / total) * sum;
-        const a = Math.max(min, Math.min(a0 + b0 - min, a0 + delta));
-        split.sizes[index] = a;
-        split.sizes[index + 1] = a0 + b0 - a;
-        kids[index]!.style.flex = `${a} 1 0`;
-        kids[index + 1]!.style.flex = `${a0 + b0 - a} 1 0`;
+        const delta = (((horizontal ? ev.clientX : ev.clientY) - start) / total) * shownSum;
+        // Resize the saved shares by the same delta, without persisting borrowed space.
+        const lower = Math.max(min - displayedA, 0.05 * sum - a0);
+        const upper = Math.min(displayedB - min, b0 - 0.05 * sum);
+        const change = Math.max(lower, Math.min(upper, delta));
+        split.sizes[ia] = a0 + change;
+        split.sizes[ib] = b0 - change;
+        els[0].style.flex = `${displayedA + change} 1 0`;
+        els[1].style.flex = `${displayedB - change} 1 0`;
         window.dispatchEvent(new Event('resize'));
       };
       const up = () => {
@@ -452,6 +470,15 @@ export class DockManager {
     });
     this.hint.dataset.zone = t.zone;
   }
+}
+
+/** Sizes sum to 1, none below 5 % (no panel ends up crushed). */
+function normalize(split: Split): void {
+  const min = 0.05;
+  let sum = split.sizes.reduce((a, b) => a + b, 0) || 1;
+  split.sizes = split.sizes.map((s) => Math.max(min, s / sum));
+  sum = split.sizes.reduce((a, b) => a + b, 0);
+  split.sizes = split.sizes.map((s) => s / sum);
 }
 
 interface DropTarget {

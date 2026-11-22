@@ -63,7 +63,10 @@ export function sanitizeValue(
     case 'gradient':
       return sanitizeGradient(raw) ?? fallback;
     case 'image':
-      return typeof raw === 'string' && (raw === '' || isImageDataUrl(raw)) ? raw : fallback;
+      return typeof raw === 'string' &&
+        (raw === '' || isImageDataUrl(raw) || isExternalImageUrl(raw))
+        ? raw
+        : fallback;
   }
 }
 
@@ -118,6 +121,16 @@ export function isValidIdentifier(key: string): boolean {
 
 /** Max length of an image data URL (~3 MB of base64). */
 export const MAX_IMAGE_DATA_URL = 3_000_000;
+
+export function isExternalImageUrl(value: string): boolean {
+  if (value.length > 2048 || /[\s"<>\\]/.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
 
 /** Base64 PNG / JPEG / WebP data URL within the size limit. */
 export function isImageDataUrl(value: string): boolean {

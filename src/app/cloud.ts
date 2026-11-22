@@ -5,7 +5,7 @@
  * reconciliation runs at sign-in and when the tab regains focus: last write wins by
  * `updated`, deletions travel as tombstones.
  */
-import type { Library, LibraryChange, SystemEntry } from './library';
+import type { Library, LibraryChange, PublishedLink, SystemEntry } from './library';
 
 export interface AccountUser {
   readonly id: string;
@@ -27,6 +27,7 @@ interface RemoteSystem {
   readonly folder: string | null;
   readonly updated: number;
   readonly thumb: string | null;
+  readonly published?: PublishedLink | null;
 }
 
 interface RemoteLibrary {
@@ -48,7 +49,7 @@ const PUSH_DELAY_MS = 1500;
 /** Relative to the page: works when the app is served under a sub-path. */
 const API = 'api/';
 
-async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(API + path, {
     credentials: 'same-origin',
     ...init,
@@ -143,7 +144,7 @@ export class Cloud {
     if (this.syncing) return `Syncing with ${this.user.pseudo}…`;
     if (this.problem) return `Not synced: ${this.problem}`;
     if (this.pending.size) return 'Changes waiting to sync';
-    return `Synced with ${this.user.pseudo}’s account`;
+    return 'Synced with account';
   }
 
   /** Pushes waiting changes now. */
@@ -204,12 +205,17 @@ export class Cloud {
         const full = await call<RemoteSystem & { document: unknown }>(
           `library/systems/${encodeURIComponent(s.id)}`,
         );
+        // The user may have edited or published while this request was in flight.
+        const latest = lib.get(s.id);
+        if (local && !latest) continue;
+        if (latest && latest.updated >= full.updated) continue;
         const entry: SystemEntry = {
           id: full.id,
           name: full.name,
           folder: full.folder,
           updated: full.updated,
           thumb: full.thumb,
+          published: full.published,
         };
         lib.applyRemoteSystem(entry, full.document);
         changed.push(s.id);

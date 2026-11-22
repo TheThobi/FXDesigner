@@ -20,14 +20,14 @@ const INPUTS: readonly NodeInputDef[] = [
     label: 'Emitter',
     description: 'Bright areas of this input emit smoke (e.g. a shape, text or glow node).',
     color: '#ffb347',
-    value: 'gray',
+    value: 'float',
   },
   {
     key: 'flow',
     label: 'Flow',
     description: 'Flowmap (RG around 0.5) pushing the fluid, e.g. the Flowmap Painter.',
     color: '#ff6fd0',
-    value: 'color',
+    value: 'vec2',
   },
 ];
 
@@ -90,9 +90,7 @@ export const smokeFire: SimulationGenerator = {
   name: 'Smoke & Fire',
   category: 'simulation',
   description:
-    'FluidNinja-style smoke solver: emitters, buoyancy, vorticity confinement, turbulence. ' +
-    'Feed shapes into its Emitter input or a flowmap into Flow; outputs density with alpha or ' +
-    'motion vectors for flipbooks.',
+    'Smoke with optional emitter and flow inputs. Outputs density with alpha or motion vectors.',
   animated: true,
   params: PARAMS,
   inputs: INPUTS,

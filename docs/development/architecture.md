@@ -27,9 +27,20 @@ The editor state is a **graph of generator nodes** (`app/state.ts`: `EditorState
 Post Process values, color ramp, a Post Process bypass (`postEnabled`, the wand on the card),
 and a freeze frame (`frozenAt`: the time the node is frozen at; frozen simulations stop
 stepping).
-The selected node is the one shown in the Details panel, driven by the timeline and exported
-(with everything it depends on). Clicking a generator in the browser swaps the selected node's
-generator (look and ramp kept); double-click or drag-and-drop adds a node.
+The selected node is the one shown in the Details panel and driven by the timeline; clicking
+the background selects nothing (`selectedId` = '', the Details panel shows a hint and code that
+needs a node falls back to the first one). Exports and the library thumbnail render the first
+connected **Output** node (`role: 'output'`, a pass-through that new systems start with,
+`startCollapsed`), else the selected node (`App.exportNode`), with everything it depends on.
+**Reroute** nodes (`role: 'reroute'`, double-click a link or its right-click menu) are small
+pass-through pills that bend links: input pin left, output pin right, the middle moves it;
+deleting one reconnects its link. Right-click opens a context menu (`ui/ContextMenu.ts`, also
+inside modal dialogs): in the graph (`App.graphMenu`) cut / copy / paste / duplicate / delete,
+collapse, bypass, freeze, disconnect, frame and **Collapse into new system** (the nodes and their
+inner links move to a new library system ending in an Output node, Houdini's "Collapse into
+Subnet"); also on library cards and the library background, browser tiles and preset tiles.
+Clicking a generator in the browser swaps the selected node's generator (look and ramp kept);
+double-click or drag-and-drop adds a node.
 
 **Generators and operators.** Generators create images; **operators** (`generators/operators/`,
 browser tab "Operators", category `operator`) transform or combine them: Blend (modes, opacity,
@@ -54,17 +65,23 @@ targets (coordinates, distances). The Renderer ping-pongs them in the node's `No
 Used by Distance (seed + jump flood, log2 steps covering Max distance) and the Blur (H + V
 passes per level, each level doubling sigma; variances add up to the requested radius).
 
-**Channel outputs.** A generator declaring `outputs` (`NodeOutputDef`: key, label, channel) has
-one output pin per channel instead of the main one; links then carry `output`. After the node's
-output, the Renderer writes each channel as an opaque grayscale target (`out:<key>`,
-`NodeTargets.outputFor`). Used by Unpack RGBA.
+**Channel outputs.** Every node has its main RGBA output plus the standard outputs
+(`STANDARD_OUTPUTS`: `rgb` opaque colors, `r`, `g`, `b`, `a` opaque grayscale); a generator
+declaring `outputs` (`NodeOutputDef`: key, label, channel) has those instead (Unpack RGBA). Links
+name the output in `output`. `Renderer.outputOf` extracts a channel from the node image when a
+link reads it (`out:<key>` target). On the graph the channel pins appear on hover / selection;
+linked ones and the A pin of transparent images (`ImageTraits.transparent`) always show; slots
+are fixed so links never move. Hovering a channel pin (or a Pack RGBA input, `NodeInputDef.preview`)
+shows that channel in the node's preview (`DisplayItem.channel`).
 
-**Value types.** An input may declare the value it reads (`NodeInputDef.value`: `'gray'` for
-masks, patterns, seeds; `'color'` for flow vectors; absent = any image). Outputs are not
-declared: App detects them (`App.detectValueTypes` → `Renderer.isGrayscale`, a 16×16 read-back
-of the node image, re-checked when the image changes, at most twice a second per node). Pins
-and links are colored by type; a link whose source type differs from the input's is drawn as a
-gradient. Channel outputs are grayscale.
+**Value types.** Pins and links are colored by value type with Unity Shader Graph's colors
+(`VALUE_COLORS`): `float` light blue, `vec2` light green, `vec3` (RGB) yellow, `vec4` (RGBA)
+pink. Outputs are typed by pin (`channelType`: RGBA vec4, RGB vec3, a channel float); a reroute
+carries its source's type. An input may declare what it reads (`NodeInputDef.value`: `'float'`
+for masks, patterns, seeds; `'vec2'` for flow vectors; absent = any image, colored like its
+link). A link whose source type differs from the input's is drawn as a gradient. App still reads
+back a 16×16 copy of each image (`Renderer.isTransparent`) to keep the A pin of transparent
+images visible.
 
 ## Rendering pipeline
 
@@ -76,13 +93,15 @@ exports:  Capture.render(chain) renders the selected node and its upstream nodes
 ```
 
 **Imported images** (`image` params, e.g. the Image node) are downscaled to 1024 px WebP data
-URLs on import and decoded asynchronously (`gl/ImageTextures.ts`); when one becomes ready,
-`App.assetVersion` changes every node signature so they re-render once.
+URLs on import. They can also be linked with a direct HTTPS image URL that allows anonymous
+CORS. Both sources are decoded asynchronously (`gl/ImageTextures.ts`); when one becomes
+ready, `App.assetVersion` changes every node signature so they re-render once. Community
+publications accept linked images in the graph and reject embedded data URLs.
 
 **User presets** (`app/userPresets.ts`): named snapshots of a node (params, post, ramp,
 adjustments) per generator in localStorage, listed under "My presets" in the preset menu.
 
-**Workspace aspect** (Output tab): images are `imageDims(size, aspect)` (size = long side).
+**Workspace aspect** (Workspace tab): images are `imageDims(size, aspect)` (size = long side).
 Shader generators get `u_uvScale` / `u_centerScale`: `layout: 'centered'` generators (default
 when the fragment calls `centered()`) keep uv in [0,1] and `centered()` is aspect-corrected;
 `'tiled'` ones repeat a whole number of times along the long axis (seamless, never stretched).
@@ -298,6 +317,14 @@ the API:
   Login / registration are rate limited per IP and per login.
 - `library.ts`: folders and systems (document as jsonb + thumbnail) per user, last write wins
   by `updated`, deletions as tombstones; size and count limits.
+- `community.ts`: systems shared by their authors (`community_systems`: name, description,
+  category from `COMMUNITY_CATEGORIES`, tags, thumbnail, document, version, copy count) and
+  subscriptions. Anyone lists (`?scope=all|subscribed|mine&sort=trending|popular|new&category=&q=`)
+  and reads; signed-in users publish (rate limited), edit their own (a new document bumps the
+  version), delete, subscribe. Trending = subscriptions of the last 7 days. Systems are
+  `animated` or static (`?kind=`); animated ones carry a hover strip (`preview`,
+  `preview_frames` frames side by side, `GET /api/community/:id/preview`). Library systems
+  store their publication link (`systems.published`, see below).
 - Writes require `Content-Type: application/json` and, when present, an `Origin` equal to
   `PUBLIC_URL` (CSRF). `db.ts` holds the ordered `MIGRATIONS`, applied at startup under an
   advisory lock.
@@ -306,6 +333,19 @@ Client side, `app/cloud.ts` checks `/api/health` (no server = no account UI), re
 session, pushes every local library change (debounced, `Library.onChange`) and reconciles the
 whole library at sign-in and on window focus (`applyRemote*` methods write server data
 without echoing it back). `ui/AccountUI.ts` is the toolbar button and sign-in window.
+`app/community.ts` + `ui/CommunityDialog.ts` are the Community window (Discover / Subscribed /
+My systems, detail, publish and edit forms); copies go into the library (`App.openCommunity`)
+and their versions are remembered locally to flag updates of subscribed systems. The publish
+and edit forms suggest existing tags by match and number of systems using them
+(`GET /api/community/tags`).
+A library system you published keeps a link (`SystemEntry.published`: community id, version,
+`contentHash` of the published document, preview framing), synced with the account. Its state
+is `local`, `published` (same hash) or `modified` (`Library.publishState`; the open system is
+judged on its live graph): badges on library cards and next to the system name, a Library
+filter (All / Local / Published), and the community button (Publish · Up to date · Publish
+update). Previews are rendered by `App.previewSource` (16 frames over the loop, simulations
+stepped, or 1 frame) and framed in `ui/PreviewStudio.ts` (zoom, pan, poster frame,
+background); updates reuse the last framing.
 Deployment: [deployment/server.md](../deployment/server.md) (`deploy/autoupdate`: build next to the live
 version, swap on success, health check and rollback).
 
@@ -319,15 +359,17 @@ a uniform width, unlike F2 − F1.
 ## UI
 
 Unreal Engine 5-inspired (design tokens at the top of `styles/main.css`; neutral chrome, a flat
-violet `--accent` for a few active states, orange `--select` for the graph selection). Panels are docked by `ui/Dock.ts`: a persisted tree of
+coral `--accent` for a few active states, orange `--select` for the graph selection). Panels are docked by `ui/Dock.ts`: a persisted tree of
 splits (rows / columns with relative sizes and splitters) and tab stacks; dragging a tab onto
 a stack's center adds it there, onto an edge splits that stack (`insertBeside`); panels hidden
-from the Layout menu leave the tree and come back next to where they were. Docked panels built
+from the Layout menu stay in the tree and return at their saved position and size. Hidden
+siblings' space goes to the viewport branch rather than enlarging the other panels. Docked panels built
 with `ui/Panel.ts#dockPanel`, Content-Browser tiles with a category color stripe (simulation
 thumbnails are captured from the live preview after 240 frames and cached in localStorage),
 Details panel with three pages switched by a full-width segmented control (like the browser's
-Generators / Operators) — Generator / Post Process / Output (`ui/Panel.ts#tabbedPanel`;
-seed and export size are `GLOBAL_PARAMS` in the Output tab) — shared search, per-row reset
+Generators / Operators) — Generator / Post Process / Output (`ui/Panel.ts#tabbedPanel`). The
+Workspace tab beside Details holds `GLOBAL_PARAMS`: seed, export size and aspect. A node with
+its own shuffled seed overrides the workspace seed. Details has shared search, per-row reset
 arrows (compared with the generator's own defaults) and modified-value badges on tabs, Unreal-style numeric fields (`ui/controls/number.ts`: drag to scrub, Shift = fine,
 click to type; typed values may exceed the slider up to `numericLimits`), viewport overlay
 toolbar and the Stats bar (bottom, hidden by default). `ParamPanel` renders a **preset

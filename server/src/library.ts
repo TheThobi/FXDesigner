@@ -20,6 +20,25 @@ function name(raw: unknown): string {
   return raw.trim().slice(0, 64);
 }
 
+/**
+ * Community publication of a library system (`{ id, version, hash, framing? }`), kept small;
+ * null when the system is local only.
+ */
+export function parsePublished(raw: unknown): string | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const p = raw as Record<string, unknown>;
+  if (typeof p.id !== 'string' || !/^[a-z0-9]{8,32}$/.test(p.id)) return null;
+  if (typeof p.hash !== 'string') return null;
+  if (
+    p.version !== null &&
+    p.version !== undefined &&
+    (typeof p.version !== 'number' || !Number.isSafeInteger(p.version) || p.version < 1)
+  )
+    return null;
+  const json = JSON.stringify({ ...p, version: p.version ?? null });
+  return json.length <= 2048 ? json : null;
+}
+
 function stamp(raw: unknown): number {
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0)
     throw new HttpError(400, 'Invalid date');
@@ -36,9 +55,10 @@ export function libraryRoutes(router: Router, db: Db, auth: Auth): void {
     const user = await auth.requireUser(req);
     const [folders, systems, tombstones] = await Promise.all([
       db.query('SELECT id, name, updated FROM folders WHERE user_id = $1', [user.id]),
-      db.query('SELECT id, name, folder, updated, thumb FROM systems WHERE user_id = $1', [
-        user.id,
-      ]),
+      db.query(
+        'SELECT id, name, folder, updated, thumb, published FROM systems WHERE user_id = $1',
+        [user.id],
+      ),
       db.query('SELECT kind, id, deleted FROM tombstones WHERE user_id = $1', [user.id]),
     ]);
     const num = (r: Record<string, unknown>, k: string) => Number(r[k]);
@@ -52,7 +72,7 @@ export function libraryRoutes(router: Router, db: Db, auth: Auth): void {
   router.add('GET', '/api/library/systems/:id', async (req, res) => {
     const user = await auth.requireUser(req);
     const { rows } = await db.query(
-      'SELECT id, name, folder, updated, thumb, document FROM systems WHERE user_id = $1 AND id = $2',
+      'SELECT id, name, folder, updated, thumb, published, document FROM systems WHERE user_id = $1 AND id = $2',
       [user.id, id(req.params.id)],
     );
     if (!rows[0]) throw new HttpError(404, 'No such system');
@@ -84,13 +104,24 @@ export function libraryRoutes(router: Router, db: Db, auth: Auth): void {
       throw new HttpError(403, `At most ${MAX_SYSTEMS} systems per account`);
     // Last write wins: an older copy never overwrites a newer one.
     const { rowCount } = await db.query(
-      `INSERT INTO systems (user_id, id, name, folder, updated, thumb, document)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+      `INSERT INTO systems (user_id, id, name, folder, updated, thumb, document, published)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
        ON CONFLICT (user_id, id) DO UPDATE
          SET name = EXCLUDED.name, folder = EXCLUDED.folder, updated = EXCLUDED.updated,
-             thumb = EXCLUDED.thumb, document = EXCLUDED.document
+             thumb = EXCLUDED.thumb, document = EXCLUDED.document,
+             published = CASE WHEN $9 THEN EXCLUDED.published ELSE systems.published END
        WHERE systems.updated <= EXCLUDED.updated`,
-      [user.id, sid, name(body.name), folder, updated, thumb, doc],
+      [
+        user.id,
+        sid,
+        name(body.name),
+        folder,
+        updated,
+        thumb,
+        doc,
+        parsePublished(body.published),
+        Object.hasOwn(body, 'published'),
+      ],
     );
     await db.query("DELETE FROM tombstones WHERE user_id = $1 AND kind = 'system' AND id = $2", [
       user.id,

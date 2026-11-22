@@ -46,10 +46,9 @@ export const causticsSimulation: SimulationGenerator = {
   id: 'caustics-sim',
   name: 'Water Caustics',
   category: 'simulation',
-  description:
-    'Simulated water surface (rain, wind, your brush) refracting light onto the floor: real, ' +
-    'seamless caustics. Paint to drop ripples.',
+  description: 'Seamless caustics from simulated water. Paint to add ripples.',
   animated: true,
+  defaultPost: { alphaMode: 1 },
   params: PARAMS,
   create: (gpu) => new CausticsSimulation(gpu, PARAMS),
   presets: [
@@ -73,5 +72,4 @@ export const causticsSimulation: SimulationGenerator = {
     },
     { name: 'Calm swell', values: { rain: 0, wind: 0.7, windScale: 2, depth: 2.2 } },
   ],
-  featuredPreset: 'Pool floor',
 };

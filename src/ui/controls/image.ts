@@ -1,7 +1,8 @@
 import type { ImageParam, ParamValue } from '../../params/types';
-import { isImageDataUrl } from '../../params/values';
+import { isExternalImageUrl, isImageDataUrl } from '../../params/values';
 import { pickFile } from '../../util/download';
 import { h } from '../dom';
+import { promptDialog } from '../ConfirmDialog';
 import { toast } from '../toast';
 import type { ChangeHandler, Control } from './types';
 
@@ -50,11 +51,41 @@ export function imageControl(
     text: 'Load image…',
     onclick: () => void pickFile('image/*').then(load),
   });
+  const linkBtn = h('button', {
+    type: 'button',
+    class: 'btn btn-small',
+    text: 'Use image URL…',
+    onclick: async () => {
+      const url = await promptDialog({
+        title: 'Use a linked image',
+        label: 'Direct HTTPS image URL (CORS enabled)',
+        value: isExternalImageUrl(value) ? value : '',
+        maxLength: 2048,
+        confirmLabel: 'Use URL',
+      });
+      if (!url) return;
+      if (!isExternalImageUrl(url)) {
+        toast('Enter a direct HTTPS image URL', 'error');
+        return;
+      }
+      const image = new Image();
+      image.crossOrigin = 'anonymous';
+      image.referrerPolicy = 'no-referrer';
+      image.src = url;
+      try {
+        await image.decode();
+        if (!element.isConnected) return;
+        set(url);
+      } catch {
+        toast('Could not load this image. Use a public image URL that allows CORS.', 'error');
+      }
+    },
+  });
   const element = h(
     'div',
     { class: 'control-image' },
     thumb,
-    h('div', { class: 'image-actions' }, loadBtn, clearBtn, info),
+    h('div', { class: 'image-actions' }, loadBtn, linkBtn, clearBtn, info),
   );
   element.addEventListener('dragover', (e) => {
     if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
@@ -71,7 +102,11 @@ export function imageControl(
     thumb.style.backgroundImage = value ? `url("${value}")` : '';
     thumb.classList.toggle('empty', !value);
     clearBtn.disabled = !value;
-    info.textContent = value ? `${Math.round((value.length * 3) / 4 / 1024)} KB` : 'No image';
+    info.textContent = isExternalImageUrl(value)
+      ? 'Linked image'
+      : value
+        ? `${Math.round((value.length * 3) / 4 / 1024)} KB`
+        : 'No image';
   }
 
   function set(v: string): void {

@@ -76,7 +76,7 @@ const RD_INPUTS: readonly NodeInputDef[] = [
     label: 'Seed',
     description: 'Bright areas of this input seed the simulation (restarts it when connected).',
     color: '#ffd166',
-    value: 'gray',
+    value: 'float',
   },
   {
     key: 'map',
@@ -85,7 +85,7 @@ const RD_INPUTS: readonly NodeInputDef[] = [
       'Brightness varies feed / kill across the image (± the spreads below), blending ' +
       'several patterns in one texture. Replaces the f/k variation mode.',
     color: '#c08cff',
-    value: 'gray',
+    value: 'float',
   },
 ];
 
