@@ -41,3 +41,16 @@ export function isEditingText(): boolean {
     return !['range', 'checkbox', 'button', 'color'].includes(el.type);
   return (el as HTMLElement).isContentEditable;
 }
+
+/**
+ * True only while text is being typed (text fields, text areas): Delete / Backspace must edit
+ * the text. A focused dropdown, checkbox or slider does not count.
+ */
+export function isTypingText(): boolean {
+  const el = document.activeElement;
+  if (!el) return false;
+  if (el instanceof HTMLTextAreaElement) return true;
+  if (el instanceof HTMLInputElement)
+    return !['range', 'checkbox', 'radio', 'button', 'color', 'file'].includes(el.type);
+  return (el as HTMLElement).isContentEditable;
+}

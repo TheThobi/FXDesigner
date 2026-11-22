@@ -24,15 +24,31 @@ export const smoke: ShaderGenerator = {
   defaultPost: { alphaMode: 1 },
   presets: [
     {
-      name: 'Toon smoke',
+      name: 'Simple puff',
       values: { detail: 0.5, octaves: 3 },
-      post: { colorMode: 1, posterize: 3, gradient: GRADIENTS.lavender, outline: 0.8 },
+      ramp: GRADIENTS.lavender,
     },
     {
       name: 'Thick plume',
       values: { radius: 0.9, softness: 0.4, density: 1.6, detail: 0.9, turbulence: 0.8 },
     },
     { name: 'Haze', values: { radius: 1.1, softness: 1, density: 0.6, detail: 0.4 } },
+    {
+      name: 'Wispy',
+      values: {
+        radius: 0.7,
+        softness: 0.9,
+        density: 0.8,
+        detail: 1,
+        turbulence: 1.4,
+        scale: 6,
+        octaves: 7,
+      },
+    },
+    {
+      name: 'Dense ball',
+      values: { radius: 0.6, softness: 0.15, density: 2, detail: 0.6, turbulence: 0.2, octaves: 4 },
+    },
   ],
   featuredPreset: 'Thick plume',
 };

@@ -32,6 +32,18 @@ export const ring: ShaderGenerator = {
     },
     { name: 'Wobbly portal', values: { thickness: 0.08, glow: 0.3, distortion: 0.6, speed: 1.5 } },
     { name: 'Shockwave band', values: { radius: 0.8, thickness: 0.25, glow: 0.6 } },
+    {
+      name: 'Thin targeting',
+      values: {
+        radius: 0.5,
+        thickness: 0.01,
+        glow: 0.1,
+        segments: 4,
+        gap: 0.6,
+        rotationSpeed: -0.3,
+      },
+    },
+    { name: 'Fat donut', values: { radius: 0.5, thickness: 0.4, glow: 0 } },
   ],
   featuredPreset: 'Dashed rune ring',
 };

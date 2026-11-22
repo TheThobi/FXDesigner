@@ -11,8 +11,12 @@ vec2 rotate2d(vec2 p, float a) {
   return vec2(c * p.x - s * p.y, s * p.x + c * p.y);
 }
 
-// uv in [0,1] -> centered coordinates in [-1,1].
-vec2 centered(vec2 uv) { return uv * 2.0 - 1.0; }
+// Aspect correction of centered(): set by generator main() for non-square workspaces (the
+// long axis extends beyond [-1, 1] so centered shapes stay round). 1 elsewhere.
+vec2 g_centerScale = vec2(1.0);
+
+// uv in [0,1] -> centered coordinates in [-1,1] (along the short axis).
+vec2 centered(vec2 uv) { return (uv * 2.0 - 1.0) * g_centerScale; }
 
 float luminance(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 

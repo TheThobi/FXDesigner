@@ -28,7 +28,13 @@ void main() {
 
   float f = u_feed;
   float k = u_kill;
-  if (u_mapMode == 1) {
+  if (u_has_map) {
+    // f/k map from an image (Karl Sims): its brightness picks the regime, ±spread.
+    vec4 m = texture(u_in_map, v_uv);
+    float l = luminance(m.rgb) * m.a * 2.0 - 1.0;
+    f += u_feedSpread * l;
+    k += u_killSpread * l;
+  } else if (u_mapMode == 1) {
     f += u_feedSpread * (v_uv.x * 2.0 - 1.0);
     k += u_killSpread * (v_uv.y * 2.0 - 1.0);
   } else if (u_mapMode == 2) {

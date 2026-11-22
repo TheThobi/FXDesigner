@@ -1,0 +1,19 @@
+# FX Designer
+
+> Browser-based procedural effect-texture designer (WebGL2, TypeScript, Vite, no UI
+> framework). Users build node graphs of GPU generators, operators and simulations and export
+> textures, maps and flipbooks for games.
+
+Read in this order:
+
+- [AGENTS.md](AGENTS.md): commands, conventions and rules for changing the code.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): layers, node graph, rendering pipeline,
+  documents, UI.
+- [docs/AUTHORING.md](docs/AUTHORING.md): step-by-step recipes for new generators, operators
+  and simulations, with a prompt template.
+- [docs/NODES.md](docs/NODES.md): generated reference of every node (params as uniforms,
+  ranges, inputs, presets). Source of each node: `src/generators/**/<id>.ts` + `.glsl`.
+
+Key facts: a shader generator is `vec4 generate(vec2 uv)` returning grayscale (the Post
+Process colorizes it); params become `u_<key>` uniforms; generator ids and param keys are
+persisted (rename = migration in `src/app/document.ts`).

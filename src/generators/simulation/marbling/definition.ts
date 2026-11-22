@@ -1,3 +1,4 @@
+import type { NodeInputDef } from '../../../engine/nodes';
 import type { SimulationGenerator } from '../../../engine/generator';
 import { GridSimulation } from '../../../engine/simulation/GridSimulation';
 import { param } from '../../../params/define';
@@ -25,6 +26,16 @@ const PARAMS: readonly ParamDef[] = [
   param.brushSize(0.02),
 ];
 
+const SEED_INPUTS: readonly NodeInputDef[] = [
+  {
+    key: 'seed',
+    label: 'Seed',
+    description: 'Bright areas of this input seed the ink pattern (restarts it when connected).',
+    color: '#ffd166',
+    value: 'gray',
+  },
+];
+
 export const marbling: SimulationGenerator = {
   kind: 'simulation',
   id: 'marbling',
@@ -34,7 +45,15 @@ export const marbling: SimulationGenerator = {
     'Paper marbling (ebru / suminagashi): ink bands swirled by a flow field. Paint drops ink. Seamless.',
   animated: true,
   params: PARAMS,
-  create: (gpu) => new GridSimulation(gpu, 'marbling', PARAMS, { seed, step, render }),
+  inputs: SEED_INPUTS,
+  create: (gpu) =>
+    new GridSimulation(gpu, 'marbling', PARAMS, {
+      seed,
+      step,
+      render,
+      inputs: SEED_INPUTS,
+      reseedInputs: ['seed'],
+    }),
   presets: [
     { name: 'Ebru swirls', values: { pattern: 0, bands: 6, flow: 0, scale: 2, strength: 1 } },
     { name: 'Combed', values: { pattern: 0, bands: 10, flow: 1, scale: 3, strength: 1.5 } },

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Procedural effect-texture generator (WebGL2, TypeScript, Vite, no UI framework). Static site,
+FX Designer: procedural effect-texture generator (WebGL2, TypeScript, Vite, no UI framework). Static site,
 deployed as an nginx container on an OpenMediaVault NAS. Read `docs/ARCHITECTURE.md` first.
 
 ## Commands
@@ -27,16 +27,59 @@ Local Node on the dev machine is too old (v12): use Docker via `make` (`make che
 - Stylized looks are often just presets with `post` overrides (posterize/outline/halftone).
 - Art direction: "stylized" means Silksong / Dead Cells-like game textures, NOT toon/comic VFX
   and NOT procedural "hand-painted" templates (rejected: looked like 2010 WoW). Painterly
-  smoothing = slope blur. Generators share one color ramp; don't add per-generator ramps.
+  smoothing = slope blur. Each node has one color ramp (Post Process); presets set it with
+  `Preset.ramp`, never with a per-generator ramp param or a `post.gradient`.
 - Post stages are modules with a `toggle` bool; presets may use the legacy shorthand
-  (`posterize: 4`) which `upgradeLegacyPost` converts. Documents are v2 (shared `ramp`).
+  (`posterize: 4`) which `upgradeLegacyPost` converts. Documents are v4 (node graph).
 - Time: generators read the global `u_time` (set in main, not a uniform). Seamless loop and
   timeline duration are per-generator post values (`TIME_PARAMS`). Simulations should
   implement `snapshot/restore` for timeline keyframes.
 - Grid simulation passes get `u_gridSize`; never use `stateSize()` in a seed pass (1×1 there).
   Multi-pass solvers: `step: [{ label, source, repeat }]`.
-- Post look scope: `SCOPED_POST_PARAMS` follow global/local scope (`state.ts#postOf`); output,
-  color mode and animation values are always per generator. Data generators: `dataOutput`.
+- Node graph (`app/state.ts`): the viewport shows every node as a card; the selected node is
+  edited, timed and exported. Every node has its own params / post / ramp / `postEnabled` /
+  `frozenAt`. Combining / transforming images is an **operator** node's job (Blend, Mask,
+  Warp, Levels…, `generators/operators/`); never add engine-side inputs or per-node modules
+  for it. Inputs are declared by the generator (`inputs`, sampled as `u_in_<key>` /
+  `u_has_<key>`).
+  Simulations live per node: get them with `App.liveSim()` (a new instance must be reset).
+  Data generators: `dataOutput`.
+- Non-square workspaces: shader generators are laid out `centered` (shapes stay round) or
+  `tiled` (whole repeats); the default comes from calling `centered()`, override with
+  `ShaderGenerator.layout`. Simulations size grids with `gpu.gridDims()`, never assume square.
+- Multi-pass operators: `ShaderGenerator.passes` (read the previous one as `u_prev`; `precise`
+  for data such as jump-flood coordinates). Channel outputs: `outputs` (links carry `output`).
+  Settings tied to an input go in `NodeInputDef.params` (greyed out while unconnected).
+- Sampling: derive tap counts from the radius (smooth at any size) instead of exposing a
+  samples param; large Gaussian radii use multi-level passes (see the Blur operator).
+- Custom GLSL: `ShaderGenerator.codeParam` (the Custom Code operator); the USER_CODE marker
+  must appear only once in the fragment (comments included).
+- No mode enum whose values use different params: every param must matter in every mode. If
+  modes need different settings, make separate generators (Surface Wear became Brushed Metal,
+  Scratches and Cracked Glass).
+- Animation operators: category `animation` (`isOperator()` covers both), `animated: true`,
+  they read `u_time`; Color Cycle outputs a value colored by the node's own ramp.
+- Browser categories (`GeneratorCategory`): fire, light (light & magic), impact, water,
+  particle (sprites), noise, material, pattern, simulation, operator, animation. Categories are
+  not persisted (ids are): regroup freely, keep CSS `--cat-<id>` colors in sync.
+- Generator presets set generator params only; Post Process looks are separate (a preset's own
+  `post` / `ramp` is offered from a toast, never applied silently).
+- Inputs reading one channel declare `value: 'gray'` (masks, patterns, seeds); outputs are
+  detected (grayscale vs color) and color pins / links.
+- No native HTML drag & drop in the UI: use pointer events (the browser cancels the pointer
+  stream when it starts its own drag).
+- `docs/NODES.md` is generated from the registry: after changing a node run `npm run docs`
+  (a unit test fails otherwise). How to write nodes: `docs/AUTHORING.md`.
+- Slider ranges (min / max) should be generous; typed values may go to `numericLimits`
+  (`limit` overrides it for unsafe params such as loop counts).
+- Keep UI text short: no explanatory paragraphs where a label or tooltip does the job.
+- Generator presets describe shapes only: no stylizing `post` overrides (toon, halftone,
+  pixel… are Post Process looks in `POST_PRESETS`); a preset `ramp` / data `colorMode` is
+  offered to the user, not applied.
+- Server (`server/src`, Node ESM, `tsconfig.server.json`): imports end in `.js`; no framework,
+  only `pg`. Secrets only in `.env` (never committed; `.env.example` is the template). Schema
+  changes: append to `MIGRATIONS` in `server/src/db.ts`, never edit an applied one. Library
+  sync is last-write-wins by `updated` with tombstones (`src/app/cloud.ts`).
 - Every generator should have several presets (named by the look, not by other generators)
   and a `featuredPreset` (browser thumbnail).
 - Fast e2e iteration: `PW_BASE_URL=http://localhost:5173` runs Playwright against the dev

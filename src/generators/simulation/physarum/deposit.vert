@@ -3,12 +3,15 @@
 precision highp float;
 precision highp int;
 uniform sampler2D u_agents;
+uniform int u_species;
 out vec2 v_uv; // consumed by the shared simulation fragment prelude
+flat out int v_species;
 
 void main() {
   int res = textureSize(u_agents, 0).x;
   vec2 pos = texelFetch(u_agents, ivec2(gl_VertexID % res, gl_VertexID / res), 0).xy;
   v_uv = pos;
+  v_species = gl_VertexID % max(u_species, 1);
   gl_Position = vec4(pos * 2.0 - 1.0, 0.0, 1.0);
   gl_PointSize = 1.0;
 }

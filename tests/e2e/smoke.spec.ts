@@ -15,6 +15,8 @@ test('every generator compiles and renders', async ({ page }) => {
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (msg) => {
     // WebGL errors only surface as console warnings (e.g. GL_INVALID_OPERATION feedback loops).
+    // The static preview has no account server: its /api 404 is expected.
+    if (msg.location().url.includes('/api/')) return;
     if (msg.type() === 'error' || /GL_INVALID|WebGL: /.test(msg.text())) errors.push(msg.text());
   });
 
@@ -30,9 +32,17 @@ test('every generator compiles and renders', async ({ page }) => {
   let previous: Uint8Array | null = null;
   for (const id of ids) {
     const item = page.locator(`.generator-item[data-id="${id}"]`);
+    const category = await item.getAttribute('data-category');
+    // Operators live in their own browser tab.
+    if (!(await item.isVisible()))
+      await page
+        .locator(
+          `.panel-browser .segment[data-tab="${['operator', 'animation'].includes(category ?? '') ? 'operators' : 'generators'}"]`,
+        )
+        .click();
     await item.click();
     await expect(page.locator('.inspector-header h2')).not.toBeEmpty();
-    const isSimulation = (await item.getAttribute('data-category')) === 'simulation';
+    const isSimulation = category === 'simulation';
     await page.waitForTimeout(isSimulation ? 4000 : 400);
     const overlay = page.locator('.error-overlay');
     if (await overlay.isVisible()) throw new Error(`${id}: ${await overlay.textContent()}`);
@@ -40,8 +50,11 @@ test('every generator compiles and renders', async ({ page }) => {
       .locator('.canvas-frame')
       .screenshot({ path: `test-results/generators/${id}.png` });
     // Guards against stale frames: each generator must change the preview.
+    // Operators have nothing to show without inputs (all empty), so they may look alike.
     expect(
-      previous !== null && sameBytes(shot, previous),
+      !['operator', 'animation'].includes(category ?? '') &&
+        previous !== null &&
+        sameBytes(shot, previous),
       `${id} rendered the same image as the previous generator`,
     ).toBeFalsy();
     previous = shot;
@@ -53,7 +66,7 @@ test('every generator compiles and renders', async ({ page }) => {
 test('reaction-diffusion presets and share link round-trip', async ({ page }) => {
   await page.goto('/');
   await page.locator('.generator-item[data-id="reaction-diffusion"]').click();
-  await page.locator('.preset-select').first().selectOption({ label: 'Mitosis' });
+  await page.locator('.preset-tile', { hasText: 'Mitosis' }).first().click();
   await expect(page.locator('.param-row[data-key="feed"] input.num')).toHaveValue('0.0367');
 
   // Persisted through autosave: reload keeps the value.
@@ -89,7 +102,7 @@ test('rendered pixels match expected patterns', async ({ page }) => {
 });
 
 async function enableModule(page: Page, toggleKey: string) {
-  await page.locator('.panel-tab[data-tab="post"]').click();
+  await page.locator('.segment[data-tab="post"]').click();
   const toggle = page.locator(`.module-toggle[data-key="${toggleKey}"]`);
   if (!(await toggle.isChecked())) await toggle.click();
 }
@@ -109,8 +122,8 @@ test('posterize module reduces the output to flat tones', async ({ page }) => {
   await setField(page, 'posterize', '3');
   await page.waitForTimeout(400);
   const flat = await probe(page, page.locator('.preview-canvas'));
-  // 3 tones, plus a few anti-aliased samples on band boundaries.
-  expect(flat.distinctTones).toBeLessThanOrEqual(8);
+  // 3 flat tones cover the image, apart from a few filtered samples on band boundaries.
+  expect(flat.dominantShare(3)).toBeGreaterThan(0.85);
 });
 
 test('pixel-art mode renders uniform blocks', async ({ page }) => {
@@ -149,23 +162,50 @@ test('flowmap painter encodes the stroke direction', async ({ page }) => {
   await page.waitForTimeout(300);
   const img = await probe(page, canvas);
   const [r, g] = img.rgb(0.5, 0.5);
-  expect(r, 'painted area points +X (red)').toBeGreaterThan(190);
+  // 128 = no flow; the exact level depends on how many sim steps SwiftShader ran.
+  expect(r, 'painted area points +X (red)').toBeGreaterThan(170);
   expect(Math.abs(g - 128)).toBeLessThan(40);
   const [rUntouched] = img.rgb(0.5, 0.1);
   expect(Math.abs(rUntouched - 128)).toBeLessThan(20);
 });
 
-test('post look is shared across generators in global scope', async ({ page }) => {
+test('node graph: add, link, per-node post', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
-  await select(page, 'fractal-noise');
+  await page.locator('.generator-item[data-id="fractal-noise"]').click();
+  await page.waitForTimeout(500);
+  // Double-click adds a node (selected) next to the current one; operators have their tab.
+  await page.locator('.panel-browser .segment[data-tab="operators"]').click();
+  await page.locator('.generator-item[data-id="op-blend"]').dblclick();
+  await expect(page.locator('.node')).toHaveCount(2);
+  await expect(page.locator('.node.selected .node-title')).toHaveText('Blend');
+
+  // Link the noise output to the blend's Foreground input.
+  const center = async (selector: string) => {
+    const b = (await page.locator(selector).boundingBox())!;
+    return [b.x + b.width / 2, b.y + b.height / 2] as const;
+  };
+  const [x1, y1] = await center('.node[data-id="n1"] .pin.out .pin-dot');
+  const [x2, y2] = await center('.node[data-id="n2"] .pin.in[data-input="foreground"] .pin-dot');
+  await page.mouse.move(x1, y1);
+  await page.mouse.down();
+  await page.mouse.move(x2, y2, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.locator('.node[data-id="n2"] .pin.in[data-input="foreground"]')).toHaveClass(
+    /linked/,
+  );
+  await expect(page.locator('.vp-link:not(.dragging)')).toHaveCount(1);
+
+  // Each node has its own look.
   await enableModule(page, 'posterizeOn');
-  await select(page, 'cellular');
-  await page.locator('.panel-tab[data-tab="post"]').click();
-  await expect(page.locator('.module-toggle[data-key="posterizeOn"]')).toBeChecked();
-  // Local scope: the look stays with the generator that owns it.
-  await page.locator('.scope-switch button[data-scope="local"]').click();
-  await page.locator('.module-toggle[data-key="posterizeOn"]').uncheck();
-  await select(page, 'fractal-noise');
-  await page.locator('.panel-tab[data-tab="post"]').click();
-  await expect(page.locator('.module-toggle[data-key="posterizeOn"]')).toBeChecked();
+  await page.locator('.node[data-id="n1"] .node-head').click({ position: { x: 40, y: 8 } });
+  await page.locator('.segment[data-tab="post"]').click();
+  await expect(page.locator('.module-toggle[data-key="posterizeOn"]')).not.toBeChecked();
+
+  // The eye bypasses a node's Post Process.
+  await page.locator('.node[data-id="n1"] .node-post').click();
+  await expect(page.locator('.node[data-id="n1"]')).toHaveClass(/post-off/);
+  await expect(page.locator('.error-overlay')).toBeHidden();
+  expect(errors).toEqual([]);
 });

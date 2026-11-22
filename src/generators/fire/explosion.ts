@@ -23,14 +23,9 @@ export const explosion: ShaderGenerator = {
   defaultPost: { alphaMode: 1 },
   presets: [
     {
-      name: 'Cartoon blast',
+      name: 'Puffy blast',
       values: { turbulence: 1.1, octaves: 3 },
-      post: { posterize: 4, gradient: GRADIENTS.saffron, outline: 1, outlineWidth: 2 },
-    },
-    {
-      name: 'Comic halftone blast',
-      values: { octaves: 4 },
-      post: { posterize: 0, halftone: 40, gradient: GRADIENTS.redHot },
+      ramp: GRADIENTS.saffron,
     },
     { name: 'Fireball', values: { radius: 0.8, turbulence: 1.2, falloff: 1.2, coreHeat: 1 } },
     {

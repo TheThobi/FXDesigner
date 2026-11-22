@@ -25,7 +25,7 @@ export const slash: ShaderGenerator = {
   kind: 'shader',
   id: 'slash',
   name: 'Slash',
-  category: 'stylized',
+  category: 'impact',
   description: 'Anime sword-trail crescent with streaks and a hot edge.',
   animated: true,
   fragment: slashFrag,
@@ -45,9 +45,9 @@ export const slash: ShaderGenerator = {
   presets: [
     { name: 'Clean slash', values: { streakAmount: 0.2, falloff: 2.5 } },
     {
-      name: 'Toon slash',
+      name: 'Clean slash',
       values: { streakAmount: 0.3 },
-      post: { posterize: 3, gradient: GRADIENTS.saffron },
+      ramp: GRADIENTS.saffron,
     },
     { name: 'Wide swing', values: { arc: 300, thickness: 0.5, taper: 1.5 } },
     {
@@ -70,7 +70,7 @@ export const speedLines: ShaderGenerator = {
   kind: 'shader',
   id: 'speed-lines',
   name: 'Speed Lines',
-  category: 'stylized',
+  category: 'impact',
   description: 'Manga focus lines or scrolling speed streaks.',
   animated: true,
   fragment: speedLinesFrag,
@@ -108,6 +108,26 @@ export const speedLines: ShaderGenerator = {
         randomness: 0.3,
       },
     },
+    {
+      name: 'Manga impact',
+      values: {
+        mode: 0,
+        count: 320,
+        width: 0.15,
+        density: 1,
+        randomness: 1,
+        innerRadius: 0.9,
+        taperLength: 0.3,
+      },
+    },
+    {
+      name: 'Rain streaks',
+      values: { mode: 1, count: 220, width: 0.08, streakLength: 0.25, randomness: 1, rate: 26 },
+    },
+    {
+      name: 'Off-center rush',
+      values: { mode: 0, count: 140, center: [0.5, -0.4], innerRadius: 0.4, taperLength: 0.9 },
+    },
   ],
   featuredPreset: 'Focus burst',
 };
@@ -116,7 +136,7 @@ export const comicBurst: ShaderGenerator = {
   kind: 'shader',
   id: 'comic-burst',
   name: 'Comic Burst',
-  category: 'stylized',
+  category: 'impact',
   description: '"KAPOW" impact star with ink outline; line-boil animation.',
   animated: true,
   fragment: comicBurstFrag,
@@ -148,6 +168,22 @@ export const comicBurst: ShaderGenerator = {
       name: 'Badge',
       values: { spikes: 16, inner: 0.9, randomness: 0, layers: false, outlineWidth: 0.03, boil: 0 },
     },
+    {
+      name: 'Explosion cloud',
+      values: {
+        spikes: 12,
+        inner: 0.7,
+        randomness: 1,
+        size: 1,
+        layers: true,
+        innerScale: 0.8,
+        boil: 12,
+      },
+    },
+    {
+      name: 'Thin spikes',
+      values: { spikes: 36, inner: 0.3, randomness: 0.4, outlineWidth: 0.02, layers: false },
+    },
   ],
   featuredPreset: 'Soft bloom',
 };
@@ -156,7 +192,7 @@ export const toonCloud: ShaderGenerator = {
   kind: 'shader',
   id: 'toon-cloud',
   name: 'Toon Cloud',
-  category: 'stylized',
+  category: 'fire',
   description: 'Cel-shaded cloud / smoke puff with outline. Alpha = silhouette.',
   animated: true,
   fragment: toonCloudFrag,
@@ -180,9 +216,28 @@ export const toonCloud: ShaderGenerator = {
     {
       name: 'Smoke puff',
       values: { puffs: 6, flatBottom: false, squash: 1 },
-      post: { gradient: GRADIENTS.linear },
+      ramp: GRADIENTS.linear,
     },
     { name: 'Dust cloud', values: { puffs: 10, flatBottom: true, squash: 0.45, spread: 0.7 } },
+    {
+      name: 'Storm cloud',
+      values: {
+        puffs: 11,
+        puffSize: 0.45,
+        spread: 0.75,
+        squash: 0.5,
+        shadowOffset: 0.25,
+        outlineWidth: 0.03,
+      },
+    },
+    {
+      name: 'Tiny puff',
+      values: { puffs: 4, puffSize: 0.25, spread: 0.25, squash: 0.9, flatBottom: false, boil: 10 },
+    },
+    {
+      name: 'Flat-shaded',
+      values: { puffs: 7, blend: 0.2, shadowOffset: 0.05, highlightOffset: 0, outlineWidth: 0 },
+    },
   ],
   featuredPreset: 'Fluffy cloud',
 };
@@ -191,7 +246,7 @@ export const hexShield: ShaderGenerator = {
   kind: 'shader',
   id: 'hex-shield',
   name: 'Hex Shield',
-  category: 'stylized',
+  category: 'light',
   description: 'Sci-fi energy shield: hex grid, fresnel rim, pulsing cells, impact wave.',
   animated: true,
   fragment: hexShieldFrag,
@@ -221,6 +276,22 @@ export const hexShield: ShaderGenerator = {
       name: 'Scanning grid',
       values: { scale: 20, lineWidth: 0.02, dome: false, wave: 1.6, waveSpeed: 1.2, scroll: 0.5 },
     },
+    {
+      name: 'Bubble barrier',
+      values: {
+        scale: 16,
+        lineWidth: 0.02,
+        dome: true,
+        fresnelPower: 5,
+        rim: 1.6,
+        cellGlow: 0.2,
+        wave: 0.4,
+      },
+    },
+    {
+      name: 'Pulsing hive',
+      values: { scale: 5, lineWidth: 0.2, dome: false, cellGlow: 1.8, pulseSpeed: 6, wave: 0 },
+    },
   ],
   featuredPreset: 'Force field',
 };
@@ -229,7 +300,7 @@ export const vortex: ShaderGenerator = {
   kind: 'shader',
   id: 'vortex',
   name: 'Vortex',
-  category: 'stylized',
+  category: 'light',
   description: 'Portal / whirlpool spiral with noisy arms.',
   animated: true,
   fragment: vortexFrag,
@@ -248,14 +319,14 @@ export const vortex: ShaderGenerator = {
   defaultPost: { alphaMode: LUMINANCE_ALPHA },
   presets: [
     {
-      name: 'Toon portal',
+      name: 'Smooth portal',
       values: { noise: 0.2, sharpness: 1 },
-      post: { posterize: 4, gradient: GRADIENTS.amethyst, outline: 0.7 },
+      ramp: GRADIENTS.amethyst,
     },
     {
       name: 'Whirlpool',
       values: { arms: 5, twist: 5, hole: 0.05 },
-      post: { gradient: GRADIENTS.azure, posterize: 4 },
+      ramp: GRADIENTS.azure,
     },
     {
       name: 'Galaxy',
@@ -270,14 +341,14 @@ export const vortex: ShaderGenerator = {
       values: { arms: 4, twist: 2, noise: 1, noiseScale: 8, hole: 0.2, speed: 0.4 },
     },
   ],
-  featuredPreset: 'Toon portal',
+  featuredPreset: 'Smooth portal',
 };
 
 export const toonWater: ShaderGenerator = {
   kind: 'shader',
   id: 'toon-water',
   name: 'Toon Water',
-  category: 'stylized',
+  category: 'water',
   description: 'Stylized water with crisp foam lines (Wind-Waker-like look). Seamless.',
   animated: true,
   fragment: toonWaterFrag,
@@ -310,7 +381,7 @@ export const sparkles: ShaderGenerator = {
   kind: 'shader',
   id: 'sparkles',
   name: 'Sparkles',
-  category: 'stylized',
+  category: 'light',
   description: 'Field of twinkling 4-point stars. Seamless; loops at integer speeds.',
   animated: true,
   fragment: sparklesFrag,
@@ -339,6 +410,22 @@ export const sparkles: ShaderGenerator = {
       name: 'Snow glitter',
       values: { cells: 24, density: 0.5, size: 0.2, glow: 0.3, randomRotation: 1, twinkle: 0.4 },
     },
+    {
+      name: 'Rotating gems',
+      values: { cells: 5, density: 0.6, size: 0.9, randomRotation: 1, glow: 0.4, twinkle: 0.3 },
+    },
+    {
+      name: 'Dense shimmer',
+      values: {
+        cells: 32,
+        density: 1,
+        size: 0.15,
+        sizeVariation: 1,
+        glow: 1.5,
+        twinkle: 1,
+        speed: 2,
+      },
+    },
   ],
   featuredPreset: 'Stardust',
 };
@@ -347,7 +434,7 @@ export const smear: ShaderGenerator = {
   kind: 'shader',
   id: 'smear',
   name: 'Smear Frame',
-  category: 'stylized',
+  category: 'impact',
   description: 'Dry-brush smear arc as in animation smear frames: solid head, bristle tail.',
   animated: true,
   fragment: smearFrag,
@@ -366,6 +453,14 @@ export const smear: ShaderGenerator = {
     { name: 'Brush swipe', values: { thickness: 0.6, lines: 7, breakup: 0.8 } },
     { name: 'Fine bristles', values: { lines: 24, breakup: 0.9, taper: 1.5 } },
     { name: 'Heavy smear', values: { thickness: 0.85, arc: 140, lines: 5, breakup: 0.4 } },
+    {
+      name: 'Full spin',
+      values: { arc: 340, thickness: 0.35, lines: 12, breakup: 0.6, speed: 1.5 },
+    },
+    {
+      name: 'Quick flick',
+      values: { radius: 0.8, thickness: 0.3, arc: 70, taper: 2.5, lines: 4, breakup: 0.3 },
+    },
   ],
   featuredPreset: 'Brush swipe',
 };
@@ -374,7 +469,7 @@ export const hookFlame: ShaderGenerator = {
   kind: 'shader',
   id: 'hook-flame',
   name: 'Hook Flames',
-  category: 'stylized',
+  category: 'fire',
   description: 'Anime fire with curling hooked tongues, outline band and bright core (3 tones).',
   animated: true,
   fragment: hookFlameFrag,
@@ -385,6 +480,9 @@ export const hookFlame: ShaderGenerator = {
     param.float('hook', 'Hook curl', 0.7, 0, 2),
     param.float('core', 'Core threshold', 0.55, 0.1, 0.9),
     param.float('outline', 'Outline band', 0.08, 0, 0.3),
+    param.float('offset', 'Vertical offset', 0, -0.5, 0.5, {
+      description: 'Moves the flame up (positive) or down; it never touches the image edges.',
+    }),
     param.speed(1, 4),
   ],
   defaultPost: { alphaMode: SOURCE_ALPHA },
@@ -392,6 +490,18 @@ export const hookFlame: ShaderGenerator = {
     { name: 'Campfire', values: { width: 0.6, tongues: 5, hook: 0.6 } },
     { name: 'Tall blaze', values: { width: 0.35, height: 1.1, tongues: 3, hook: 1.2 } },
     { name: 'Wild hooks', values: { tongues: 8, hook: 1.8, core: 0.4, speed: 1.6 } },
+    {
+      name: 'Candle',
+      values: { width: 0.2, height: 0.7, tongues: 1, hook: 0.3, core: 0.7, outline: 0.05 },
+    },
+    {
+      name: 'Wall of fire',
+      values: { width: 1, height: 0.8, tongues: 12, hook: 0.9, core: 0.45, speed: 1.3 },
+    },
+    {
+      name: 'Leaning blaze',
+      values: { width: 0.5, tongues: 4, hook: 1.4, offset: 0.35, outline: 0.15 },
+    },
   ],
   featuredPreset: 'Wild hooks',
 };
@@ -400,7 +510,7 @@ export const bubbles: ShaderGenerator = {
   kind: 'shader',
   id: 'bubbles',
   name: 'Bubbles',
-  category: 'stylized',
+  category: 'water',
   description: 'Seamless field of rising bubbles with rims and crescent highlights.',
   animated: true,
   fragment: bubblesFrag,
@@ -413,6 +523,7 @@ export const bubbles: ShaderGenerator = {
     param.float('highlight', 'Highlight', 0.8, 0, 1),
     param.speed(0.3, 2),
   ],
+  defaultPost: { alphaMode: SOURCE_ALPHA },
   presets: [
     { name: 'Fizz', values: { cells: 10, size: 0.4, density: 0.8, rim: 0.25 } },
     { name: 'Big soap', values: { cells: 3, size: 0.9, rim: 0.08, highlight: 1 } },
@@ -425,7 +536,7 @@ export const shockwave: ShaderGenerator = {
   kind: 'shader',
   id: 'shockwave',
   name: 'Shockwave',
-  category: 'stylized',
+  category: 'impact',
   description: 'Expanding ring with a sharp front and debris chunks thrown outward.',
   animated: true,
   fragment: shockwaveFrag,

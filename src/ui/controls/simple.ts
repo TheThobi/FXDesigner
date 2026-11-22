@@ -1,3 +1,4 @@
+import { openColorPicker } from './colorPicker';
 import type {
   BoolParam,
   ColorParam,
@@ -28,13 +29,36 @@ export function colorControl(
   initial: ParamValue,
   onChange: ChangeHandler,
 ): Control {
-  const input = h('input', { type: 'color', 'aria-label': def.label });
-  input.value = typeof initial === 'string' ? initial : def.default;
-  input.addEventListener('input', () => onChange(input.value));
+  let value = typeof initial === 'string' ? initial : def.default;
+  const label = h('span', { class: 'gradient-swatch-label' });
+  const swatch = h('button', {
+    type: 'button',
+    class: 'gradient-swatch',
+    'aria-label': def.label,
+    title: 'Pick a color',
+  });
+  const show = (v: string) => {
+    value = v;
+    swatch.style.setProperty('--c', v);
+    swatch.style.setProperty('--a', '1');
+    label.textContent = v.toUpperCase();
+  };
+  swatch.addEventListener('click', () =>
+    openColorPicker(
+      swatch,
+      { color: value, alpha: 1 },
+      (c) => {
+        show(c.color);
+        onChange(c.color);
+      },
+      { alpha: false },
+    ),
+  );
+  show(value);
   return {
-    element: input,
+    element: h('div', { class: 'gradient-swatch-wrap color-control' }, swatch, label),
     setValue: (v) => {
-      if (typeof v === 'string') input.value = v;
+      if (typeof v === 'string') show(v);
     },
   };
 }
@@ -60,11 +84,28 @@ export function selectControl(
 }
 
 export function textControl(def: TextParam, initial: ParamValue, onChange: ChangeHandler): Control {
-  const input = h('input', {
-    type: 'text',
-    maxLength: def.maxLength ?? 256,
-    'aria-label': def.label,
-  });
+  const input = def.multiline
+    ? h('textarea', {
+        class: 'code-input',
+        rows: 5,
+        spellcheck: false,
+        maxLength: def.maxLength ?? 256,
+        'aria-label': def.label,
+        title: 'Ctrl+Enter or click outside to apply',
+      })
+    : h('input', {
+        type: 'text',
+        maxLength: def.maxLength ?? 256,
+        'aria-label': def.label,
+      });
+  if (input instanceof HTMLTextAreaElement) {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        onChange(input.value);
+      }
+    });
+  }
   input.value = typeof initial === 'string' ? initial : def.default;
   // Commit on change (blur/enter) rather than per keystroke: text often triggers resets.
   input.addEventListener('change', () => onChange(input.value));

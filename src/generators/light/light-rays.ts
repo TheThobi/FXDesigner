@@ -36,6 +36,30 @@ export const lightRays: ShaderGenerator = {
     },
     { name: 'Starburst', values: { count: 64, detail: 2, sharpness: 8, length: 1, core: 0.4 } },
     { name: 'Soft fan', values: { count: 6, detail: 1, sharpness: 1.2, length: 1.4, falloff: 2 } },
+    {
+      name: 'Spotlight cone',
+      values: {
+        count: 3,
+        detail: 2,
+        sharpness: 0.8,
+        length: 1.8,
+        falloff: 0.8,
+        core: 0,
+        center: [0, 1],
+      },
+    },
+    {
+      name: 'Shimmering crown',
+      values: {
+        count: 40,
+        detail: 5,
+        sharpness: 4,
+        length: 0.7,
+        falloff: 3,
+        core: 0.6,
+        speed: 1.2,
+      },
+    },
   ],
   featuredPreset: 'Starburst',
 };

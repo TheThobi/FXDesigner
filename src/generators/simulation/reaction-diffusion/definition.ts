@@ -1,3 +1,4 @@
+import type { NodeInputDef } from '../../../engine/nodes';
 import type { SimulationGenerator } from '../../../engine/generator';
 import { param } from '../../../params/define';
 import { GridSimulation } from '../../../engine/simulation/GridSimulation';
@@ -19,7 +20,9 @@ const PARAMS: readonly ParamDef[] = [
 
   param.select('mapMode', 'f/k variation', ['None', 'Gradient (f→X, k→Y)', 'Radial'], 0, {
     group: 'Spatial variation',
-    description: 'Vary feed/kill across the image to blend several regimes (Karl Sims "map").',
+    description:
+      'Vary feed/kill across the image to blend several regimes (Karl Sims "map"). The ' +
+      'f/k map input replaces it with any image.',
   }),
   param.float('feedSpread', 'Feed spread', 0.02, 0, 0.06, {
     step: 0.0001,
@@ -67,6 +70,25 @@ const PARAMS: readonly ParamDef[] = [
   param.float('relief', 'Relief', 1, 0, 4, { group: 'Display' }),
 ];
 
+const RD_INPUTS: readonly NodeInputDef[] = [
+  {
+    key: 'seed',
+    label: 'Seed',
+    description: 'Bright areas of this input seed the simulation (restarts it when connected).',
+    color: '#ffd166',
+    value: 'gray',
+  },
+  {
+    key: 'map',
+    label: 'f/k map',
+    description:
+      'Brightness varies feed / kill across the image (± the spreads below), blending ' +
+      'several patterns in one texture. Replaces the f/k variation mode.',
+    color: '#c08cff',
+    value: 'gray',
+  },
+];
+
 export const reactionDiffusion: SimulationGenerator = {
   kind: 'simulation',
   id: 'reaction-diffusion',
@@ -75,9 +97,12 @@ export const reactionDiffusion: SimulationGenerator = {
   description:
     'Gray-Scott model (see karlsims.com/rd.html). Paint with the mouse: left adds B, right/shift erases. Seamless.',
   animated: true,
+  inputs: RD_INPUTS,
   create: (gpu) =>
     new GridSimulation(gpu, 'reaction-diffusion', PARAMS, {
       seed,
+      inputs: RD_INPUTS,
+      reseedInputs: ['seed'],
       step,
       render,
       seedImage: (params, size) =>

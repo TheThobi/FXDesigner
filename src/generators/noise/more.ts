@@ -33,9 +33,16 @@ export const gabor: ShaderGenerator = {
     {
       name: 'Hatching',
       values: { frequency: 2.5, bandwidth: 2.2, isotropy: 0.08, angle: 45 },
-      post: { posterize: 3 },
     },
     { name: 'Isotropic', values: { isotropy: 1, frequency: 1.5 } },
+    {
+      name: 'Wood fibers',
+      values: { scale: 6, impulses: 14, frequency: 6, bandwidth: 1.2, angle: 90, gain: 2.2 },
+    },
+    {
+      name: 'Fingerprint',
+      values: { scale: 4, impulses: 16, frequency: 2, bandwidth: 3, isotropy: 0.6, gain: 3 },
+    },
   ],
   featuredPreset: 'Hatching',
 };
@@ -60,9 +67,9 @@ export const flowStrokes: ShaderGenerator = {
 
   presets: [
     {
-      name: 'Van Gogh sky',
+      name: 'Swirling sky',
       values: { flowScale: 2, density: 60, length: 0.1 },
-      post: { gradient: GRADIENTS.lagoon, posterize: 6 },
+      ramp: GRADIENTS.lagoon,
     },
     { name: 'Wind streaks', values: { flowScale: 1, density: 90, length: 0.2 } },
     { name: 'Fur', values: { flowScale: 4, density: 180, length: 0.03, steps: 8, contrast: 3 } },
@@ -71,7 +78,7 @@ export const flowStrokes: ShaderGenerator = {
       values: { flowScale: 1, density: 40, length: 0.2, steps: 28, contrast: 2 },
     },
   ],
-  featuredPreset: 'Van Gogh sky',
+  featuredPreset: 'Swirling sky',
 };
 
 export const veins: ShaderGenerator = {
@@ -103,12 +110,12 @@ export const veins: ShaderGenerator = {
     {
       name: 'Wood grain',
       values: { pattern: 1, bands: 30, distortion: 3, sharpness: 2 },
-      post: { gradient: GRADIENTS.gold },
+      ramp: GRADIENTS.gold,
     },
     {
       name: 'Agate',
       values: { pattern: 2, bands: 10, sharpness: 2 },
-      post: { gradient: GRADIENTS.sunset },
+      ramp: GRADIENTS.sunset,
     },
     { name: 'Tree rings tight', values: { pattern: 1, bands: 24, distortion: 1.2, sharpness: 6 } },
     {
@@ -123,7 +130,7 @@ export const ripples: ShaderGenerator = {
   kind: 'shader',
   id: 'ripples',
   name: 'Ripples',
-  category: 'noise',
+  category: 'water',
   description: 'Interference of circular waves. Seamless; loops at integer speeds.',
   animated: true,
   fragment: ripplesFrag,
@@ -153,7 +160,7 @@ export const facets: ShaderGenerator = {
   kind: 'shader',
   id: 'facets',
   name: 'Facets',
-  category: 'noise',
+  category: 'material',
   description: 'Shattered Voronoi planes: chiselled facets for rocks and crystals. Seamless.',
   animated: false,
   fragment: facetsFrag,
@@ -167,9 +174,9 @@ export const facets: ShaderGenerator = {
   ],
   presets: [
     {
-      name: 'Painted crystal',
+      name: 'Cracked facets',
       values: { slope: 1.2, crackWidth: 0.02 },
-      post: { gradient: GRADIENTS.amethyst, lighting: 2, bands: 3, edgeHighlight: 0.8 },
+      ramp: GRADIENTS.amethyst,
     },
     { name: 'Low-poly', values: { scale: 5, slope: 1.4, variation: 0.3, crackWidth: 0 } },
     {
@@ -177,7 +184,7 @@ export const facets: ShaderGenerator = {
       values: { scale: 8, slope: 0.4, variation: 0.9, crackWidth: 0.08, crackDarkness: 1 },
     },
   ],
-  featuredPreset: 'Painted crystal',
+  featuredPreset: 'Cracked facets',
 };
 
 export const splatter: ShaderGenerator = {

@@ -2,6 +2,7 @@ import type { Simulation, SimulationPointer, SimulationSnapshot } from '../../..
 import type { GpuContext } from '../../../engine/gl/GpuContext';
 import type { PingPong, RenderTarget } from '../../../engine/gl/RenderTarget';
 import type { ShaderProgram } from '../../../engine/gl/ShaderProgram';
+import type { NodeInputDef } from '../../../engine/nodes';
 import { buildSimulationShader } from '../../../engine/shaderBuilder';
 import { paramUniforms } from '../../../engine/uniforms';
 import type { ParamDef, ParamValues } from '../../../params/types';
@@ -37,14 +38,20 @@ export class PhysarumSimulation implements Simulation {
   private pointer: SimulationPointer | null = null;
   private frame = 0;
   private seed = 0;
+  /** Connected node inputs (food), null when unconnected. */
+  private inputs: Readonly<Record<string, WebGLTexture | null>> = {};
 
   constructor(
     private readonly gpu: GpuContext,
     private readonly defs: readonly ParamDef[],
+    private readonly inputDefs: readonly NodeInputDef[] = [],
   ) {
     const build = (src: string, pass: string) =>
-      gpu.createProgram(buildSimulationShader(defs, src, `physarum/${pass}`), `physarum/${pass}`);
-    const depositFragment = buildSimulationShader(defs, depositFrag, 'physarum/deposit');
+      gpu.createProgram(
+        buildSimulationShader(defs, src, `physarum/${pass}`, inputDefs),
+        `physarum/${pass}`,
+      );
+    const depositFragment = buildSimulationShader(defs, depositFrag, 'physarum/deposit', inputDefs);
     this.programs = {
       seed: build(agentsSeed, 'seed'),
       step: build(agentsStep, 'step'),
@@ -57,7 +64,7 @@ export class PhysarumSimulation implements Simulation {
   reset(params: ParamValues, seed: number): void {
     const { gpu } = this;
     const agentRes = getNumber(params, 'agentCount', 256);
-    const size = getNumber(params, 'simResolution', 512);
+    const [width, height] = gpu.gridDims(getNumber(params, 'simResolution', 512));
     if (!this.agents || this.agents.width !== agentRes) {
       this.agents?.dispose();
       this.agents = gpu.createPingPong({
@@ -67,11 +74,11 @@ export class PhysarumSimulation implements Simulation {
         filter: 'nearest',
       });
     }
-    if (!this.trail || this.trail.width !== size) {
+    if (!this.trail || this.trail.width !== width || this.trail.height !== height) {
       this.trail?.dispose();
       this.trail = gpu.createPingPong({
-        width: size,
-        height: size,
+        width,
+        height,
         format: gpu.imageFormat,
         filter: 'linear',
         wrap: 'repeat',
@@ -137,7 +144,7 @@ export class PhysarumSimulation implements Simulation {
     const { agents, trail, gpu } = this;
     if (s.owner !== this || !s.copies || !agents || !trail) return;
     const [a, t] = s.copies;
-    if (a.width !== agents.width || t.width !== trail.width) return;
+    if (a.width !== agents.width || t.width !== trail.width || t.height !== trail.height) return;
     gpu.copyTarget(a, agents.read);
     gpu.copyTarget(t, trail.read);
     this.frame = s.frame ?? 0;
@@ -147,16 +154,31 @@ export class PhysarumSimulation implements Simulation {
     this.pointer = pointer;
   }
 
+  setInputs(inputs: Readonly<Record<string, WebGLTexture | null>>): void {
+    this.inputs = inputs;
+  }
+
   dispose(): void {
     this.agents?.dispose();
     this.trail?.dispose();
     for (const p of Object.values(this.programs)) p.dispose();
   }
 
-  /** Common uniforms; unused samplers (u_state, u_seedTexture) point at the blank texture. */
+  /**
+   * Common uniforms; unused samplers (u_state, u_seedTexture, unconnected inputs) point at the
+   * blank texture.
+   */
   private bind(program: ShaderProgram, params: ParamValues): ShaderProgram {
     const brush = this.pointer;
     const blank = this.gpu.blankTexture;
+    let unit = 4;
+    for (const input of this.inputDefs) {
+      const texture = this.inputs[input.key] ?? null;
+      program
+        .use()
+        .set(`u_has_${input.key}`, texture !== null)
+        .texture(`u_in_${input.key}`, texture ?? blank, unit++);
+    }
     return program
       .use()
       .setAll(paramUniforms(this.defs, params))

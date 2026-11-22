@@ -12,6 +12,7 @@ import type {
   SelectOption,
   SelectParam,
   TextParam,
+  ImageParam,
   Vec2,
   Vec2Param,
 } from './types';
@@ -20,9 +21,10 @@ type Extra = {
   group?: string;
   description?: string;
   resetOnChange?: boolean;
+  visibleWhen?: (values: Readonly<Record<string, unknown>>) => boolean;
 };
 
-type NumberExtra = Extra & { unit?: string };
+type NumberExtra = Extra & { unit?: string; limit?: readonly [number, number] };
 
 export const param = {
   float: (
@@ -115,11 +117,20 @@ export const param = {
     extra: Extra & { step?: number } = {},
   ): Vec2Param => ({ type: 'vec2', key, label, default: def, min, max, ...extra }),
 
+  /** Imported picture (data URL), empty by default. */
+  image: (key: string, label: string, extra: Extra = {}): ImageParam => ({
+    type: 'image',
+    key,
+    label,
+    default: '',
+    ...extra,
+  }),
+
   text: (
     key: string,
     label: string,
     def: string,
-    extra: Extra & { maxLength?: number } = {},
+    extra: Extra & { maxLength?: number; multiline?: boolean } = {},
   ): TextParam => ({
     type: 'text',
     key,

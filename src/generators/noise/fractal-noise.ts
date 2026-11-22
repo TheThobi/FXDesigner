@@ -38,9 +38,9 @@ export const fractalNoise: ShaderGenerator = {
   ],
   presets: [
     {
-      name: 'Dithered clouds',
+      name: 'Fine clouds',
       values: { noiseType: 0, octaves: 6 },
-      post: { posterize: 4, dither: true, pixelate: 128, gradient: GRADIENTS.glacier },
+      ramp: GRADIENTS.glacier,
     },
 
     { name: 'Clouds', values: { noiseType: 0, scale: 3, octaves: 7, gain: 0.5 } },

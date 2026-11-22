@@ -1,7 +1,20 @@
 import { isHexColor, normalizeHex } from '../util/color';
 import { clamp } from '../util/math';
 import { sanitizeGradient, type GradientValue } from './gradient';
-import type { ParamDef, ParamValue, ParamValues, Vec2 } from './types';
+import type { FloatParam, IntParam, ParamDef, ParamValue, ParamValues, Vec2 } from './types';
+
+/**
+ * Range a numeric value may take when typed by hand or loaded: `def.limit`, else the slider
+ * range widened above max (floats: up to 4× the range, ints: 2×) and below a negative min.
+ * A min >= 0 stays a hard floor (counts, sizes and radii must not go negative).
+ */
+export function numericLimits(def: FloatParam | IntParam): readonly [number, number] {
+  if (def.limit) return def.limit;
+  const range = def.max - def.min;
+  const extra = def.type === 'int' ? range : range * 3;
+  const round = (v: number) => Number(v.toPrecision(6));
+  return [def.min < 0 ? round(def.min - extra) : def.min, round(def.max + extra)];
+}
 
 export function defaultValues(defs: readonly ParamDef[]): Record<string, ParamValue> {
   const out: Record<string, ParamValue> = {};
@@ -18,11 +31,13 @@ export function sanitizeValue(
   switch (def.type) {
     case 'float': {
       const n = typeof raw === 'number' ? raw : Number.NaN;
-      return Number.isFinite(n) ? clamp(n, def.min, def.max) : fallback;
+      const [lo, hi] = numericLimits(def);
+      return Number.isFinite(n) ? clamp(n, lo, hi) : fallback;
     }
     case 'int': {
       const n = typeof raw === 'number' ? raw : Number.NaN;
-      return Number.isFinite(n) ? clamp(Math.round(n), def.min, def.max) : fallback;
+      const [lo, hi] = numericLimits(def);
+      return Number.isFinite(n) ? clamp(Math.round(n), lo, hi) : fallback;
     }
     case 'bool':
       return typeof raw === 'boolean' ? raw : fallback;
@@ -47,6 +62,8 @@ export function sanitizeValue(
       return typeof raw === 'string' ? raw.slice(0, def.maxLength ?? 256) : fallback;
     case 'gradient':
       return sanitizeGradient(raw) ?? fallback;
+    case 'image':
+      return typeof raw === 'string' && (raw === '' || isImageDataUrl(raw)) ? raw : fallback;
   }
 }
 
@@ -97,4 +114,15 @@ export function getGradient(values: ParamValues, key: string): GradientValue | n
 
 export function isValidIdentifier(key: string): boolean {
   return /^[A-Za-z][A-Za-z0-9]*$/.test(key);
+}
+
+/** Max length of an image data URL (~3 MB of base64). */
+export const MAX_IMAGE_DATA_URL = 3_000_000;
+
+/** Base64 PNG / JPEG / WebP data URL within the size limit. */
+export function isImageDataUrl(value: string): boolean {
+  return (
+    value.length <= MAX_IMAGE_DATA_URL &&
+    /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(value)
+  );
 }

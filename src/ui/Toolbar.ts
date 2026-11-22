@@ -4,25 +4,28 @@ import { LAYOUT_PARTS, type Layout } from './Layout';
 import { attachPopover } from './popover';
 
 export interface ToolbarState {
-  readonly playing: boolean;
-  readonly animated: boolean;
-  readonly resolution: number;
+  /** Name of the current system (library). */
+  readonly systemName: string;
   readonly viewTiles: number;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
 }
 
 export interface ToolbarActions {
-  togglePlay(): void;
-  restart(): void;
   setViewTiles(n: number): void;
   undo(): void;
   redo(): void;
-  exportPng(): void;
-  exportFlipbook(): void;
-  share(): void;
+  /** Opens the export window (every export kind). */
+  openExport(): void;
+  openLibrary(): void;
+  newSystem(): void;
+  renameSystem(): void;
   saveFile(): void;
   loadFile(): void;
+  /** Downloads every system of the library as one file. */
+  saveLibrary(): void;
+  /** Adds the systems of a library file. */
+  loadLibrary(): void;
 }
 
 function toolButton(
@@ -41,16 +44,15 @@ function toolButton(
 }
 
 /**
- * Main toolbar (file, history, export) and the viewport overlay toolbar (play controls,
- * tiling preview), both driven by the same state. Seed and export size live in the Output tab.
+ * Main toolbar (file, history, export) and the viewport overlay toolbar (tiling preview).
+ * Playback controls live in the timeline. Seed and export size live in the Output tab.
  */
 export class Toolbar {
-  private readonly playBtn: HTMLButtonElement;
   private readonly tilesSelect: HTMLSelectElement;
-  private readonly undoBtn: HTMLButtonElement;
-  private readonly redoBtn: HTMLButtonElement;
-  private readonly exportBtn: HTMLButtonElement;
-  private readonly flipbookBtn: HTMLButtonElement;
+  private readonly systemLabel: HTMLButtonElement;
+  /** Filled by the app with the account control (right side, before Layout). */
+  readonly accountSlot: HTMLElement;
+  private state: ToolbarState = { systemName: '', viewTiles: 1, canUndo: false, canRedo: false };
 
   constructor(
     mainBar: HTMLElement,
@@ -58,16 +60,6 @@ export class Toolbar {
     actions: ToolbarActions,
     layout: Layout,
   ) {
-    this.playBtn = h('button', {
-      class: 'vp-btn play',
-      title: 'Play / pause (Space)',
-      onclick: () => actions.togglePlay(),
-    });
-    const restart = h(
-      'button',
-      { class: 'vp-btn', title: 'Restart time / simulation', onclick: () => actions.restart() },
-      icon('restart', 16),
-    );
     this.tilesSelect = h(
       'select',
       {
@@ -83,53 +75,112 @@ export class Toolbar {
       actions.setViewTiles(Number(this.tilesSelect.value)),
     );
 
-    this.undoBtn = toolButton('undo', '', 'Undo (Ctrl+Z)', () => actions.undo());
-    this.redoBtn = toolButton('redo', '', 'Redo (Ctrl+Shift+Z)', () => actions.redo());
-    this.exportBtn = toolButton('download', 'Export PNG', '', () => actions.exportPng(), 'primary');
-    this.flipbookBtn = toolButton('film', 'Flipbook', 'Export an animated sprite sheet', () =>
-      actions.exportFlipbook(),
+    const exportBtn = toolButton(
+      'download',
+      'Export',
+      'Export: image, texture maps, flipbook, every node, document or share link',
+      () => actions.openExport(),
+      'primary',
     );
+    this.accountSlot = h('div', { class: 'account-slot' });
+    this.systemLabel = h('button', {
+      class: 'system-name',
+      title: 'Current system · click to rename',
+      onclick: () => actions.renameSystem(),
+    });
 
     mainBar.append(
-      h(
-        'div',
-        { class: 'brand' },
-        h('span', { class: 'logo' }),
-        h('span', { text: 'Procedural Texture Maker' }),
-      ),
+      h('div', { class: 'brand' }, logo(), h('span', { text: 'FX Designer' })),
       h(
         'div',
         { class: 'tool-group' },
-        toolButton('open', 'Open', 'Open a .json document', () => actions.loadFile()),
-        toolButton('save', 'Save', 'Save as .json document', () => actions.saveFile()),
-        toolButton('link', 'Share', 'Copy a URL containing the current settings', () =>
-          actions.share(),
+        fileMenu(actions, () => this.state),
+        toolButton('library', 'Library', 'Your systems: open, create, rename, duplicate', () =>
+          actions.openLibrary(),
         ),
       ),
-      h('div', { class: 'tool-group' }, this.undoBtn, this.redoBtn),
+      this.systemLabel,
       h('div', { class: 'spacer' }),
+      this.accountSlot,
       layoutMenu(layout),
-      h('div', { class: 'tool-group' }, this.exportBtn, this.flipbookBtn),
+      h('div', { class: 'tool-group' }, exportBtn),
     );
 
-    viewportBar.append(
-      h('div', { class: 'vp-group' }, this.playBtn, restart),
-      h('div', { class: 'vp-group' }, icon('grid', 14), this.tilesSelect),
-    );
+    viewportBar.append(h('div', { class: 'vp-group' }, icon('grid', 14), this.tilesSelect));
   }
 
   update(state: ToolbarState): void {
-    this.playBtn.replaceChildren(icon(state.playing ? 'pause' : 'play', 16));
-    this.playBtn.classList.toggle('playing', state.playing);
-    this.playBtn.disabled = !state.animated;
+    this.state = state;
     this.tilesSelect.value = String(state.viewTiles);
-    this.undoBtn.disabled = !state.canUndo;
-    this.redoBtn.disabled = !state.canRedo;
-    this.flipbookBtn.disabled = !state.animated;
-    this.exportBtn.title = `Export a ${state.resolution}×${state.resolution} PNG (size in the Output tab)`;
-    const label = this.exportBtn.querySelector('.label');
-    if (label) label.textContent = `Export PNG · ${state.resolution}`;
+    this.systemLabel.textContent = state.systemName;
   }
+}
+
+/**
+ * App logo: a four-point spark (the effects) in a rounded tile, warm to violet like the
+ * category colors. Inline SVG (unique gradient id).
+ */
+function logo(): HTMLElement {
+  const span = h('span', { class: 'logo', 'aria-hidden': 'true' });
+  span.innerHTML =
+    '<svg viewBox="0 0 24 24" width="22" height="22">' +
+    '<defs><linearGradient id="fxd-logo-grad" x1="0" y1="1" x2="1" y2="0">' +
+    '<stop offset="0" stop-color="#ff8a2a"/><stop offset=".5" stop-color="#ef4f8f"/>' +
+    '<stop offset="1" stop-color="#9a6bff"/></linearGradient></defs>' +
+    '<rect x="1" y="1" width="22" height="22" rx="6" fill="#18181c" stroke="url(#fxd-logo-grad)" stroke-width="1.4"/>' +
+    '<path d="M12 4.2c.6 4.9 2.9 7.2 7.8 7.8-4.9.6-7.2 2.9-7.8 7.8-.6-4.9-2.9-7.2-7.8-7.8 4.9-.6 7.2-2.9 7.8-7.8z" fill="url(#fxd-logo-grad)"/>' +
+    '<circle cx="12" cy="12" r="1.5" fill="#fff4e8"/>' +
+    '<circle cx="18.2" cy="5.8" r="1" fill="#ffd0a0"/></svg>';
+  return span;
+}
+
+/** "File" dropdown: systems, documents, history and library files. */
+function fileMenu(actions: ToolbarActions, state: () => ToolbarState): HTMLElement {
+  const button = toolButton(
+    'open',
+    'File',
+    'New, open, save, undo / redo, library files',
+    () => undefined,
+  );
+  const panel = h('div', { class: 'menu-panel', role: 'menu' });
+  const root = h('div', { class: 'menu-root' }, button, panel);
+  const item = (
+    iconName: IconName | null,
+    label: string,
+    run: () => void,
+    shortcut = '',
+    disabled = false,
+  ) =>
+    h(
+      'button',
+      {
+        class: 'menu-item',
+        role: 'menuitem',
+        disabled,
+        onclick: () => {
+          popover.close();
+          run();
+        },
+      },
+      h('span', { class: 'menu-check' }, iconName ? icon(iconName, 14) : null),
+      h('span', { text: label }),
+      shortcut ? h('kbd', { text: shortcut }) : null,
+    );
+  const popover = attachPopover(root, button, panel, () => {
+    const s = state();
+    panel.replaceChildren(
+      item('zoomIn', 'New system', () => actions.newSystem()),
+      item('open', 'Open document…', () => actions.loadFile()),
+      item('save', 'Save document', () => actions.saveFile()),
+      h('div', { class: 'menu-sep' }),
+      item('undo', 'Undo', () => actions.undo(), 'Ctrl+Z', !s.canUndo),
+      item('redo', 'Redo', () => actions.redo(), 'Ctrl+Shift+Z', !s.canRedo),
+      h('div', { class: 'menu-sep' }),
+      item('library', 'Save library…', () => actions.saveLibrary()),
+      item('library', 'Open library…', () => actions.loadLibrary()),
+    );
+  });
+  return root;
 }
 
 /** "Layout" dropdown: show / hide editor parts, reset. */

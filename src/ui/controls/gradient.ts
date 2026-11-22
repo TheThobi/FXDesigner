@@ -8,18 +8,33 @@ import {
   type GradientValue,
 } from '../../params/gradient';
 import { GRADIENT_PRESETS } from '../../params/gradientPresets';
-import type { GradientParam, ParamValue } from '../../params/types';
+import type { FloatParam, GradientParam, ParamValue } from '../../params/types';
 import { rgbToHex } from '../../util/color';
 import { clamp01 } from '../../util/math';
-import { clear, h } from '../dom';
+import { h } from '../dom';
+import { icon } from '../icons';
+import { openColorPicker } from './colorPicker';
 import { gradientPresetMenu } from './gradientMenu';
+import { numberControl } from './number';
 import type { ChangeHandler, Control } from './types';
+
+const POSITION: FloatParam = {
+  type: 'float',
+  key: 'stopPosition',
+  label: 'Stop position',
+  min: 0,
+  max: 1,
+  step: 0.001,
+  default: 0,
+};
 
 /**
  * Color ramp editor:
- *  - click the bar to add a stop, drag markers to move them, drag a marker far below to delete;
- *  - the selected stop's color/alpha/position are edited in the row below;
- *  - presets and reverse.
+ *  - click the bar to add a stop; drag a stop to move it (drag it far below to delete it);
+ *  - Del / Backspace on the selected stop removes it (the node is not deleted);
+ *  - the selected stop: color + opacity swatch (opens the color picker), position field
+ *    (drag to scrub, click to type), reverse and remove;
+ *  - ramp presets.
  */
 export function gradientControl(
   def: GradientParam,
@@ -29,105 +44,141 @@ export function gradientControl(
   let stops: GradientStop[] = [...(isGradientValue(initial) ? initial : def.default).stops];
   let selected = 0;
 
-  const preview = h('div', { class: 'gradient-preview' });
+  // Two bands: colors (opaque) on top, colors with their opacity over a checkerboard below.
+  const colorBand = h('div', { class: 'gradient-band color' });
+  const alphaBand = h('div', { class: 'gradient-band alpha' });
+  const preview = h('div', { class: 'gradient-preview' }, colorBand, alphaBand);
   const markers = h('div', { class: 'gradient-markers' });
   const bar = h(
     'div',
-    { class: 'gradient-bar', title: 'Click to add a stop, drag stops to move them' },
+    { class: 'gradient-bar', title: 'Click to add a stop · drag stops to move them' },
     preview,
     markers,
   );
 
-  const colorInput = h('input', { type: 'color', 'aria-label': 'Stop color' });
-  const alphaInput = h('input', {
-    type: 'range',
-    min: 0,
-    max: 1,
-    step: 0.01,
-    'aria-label': 'Stop opacity',
-    title: 'Opacity',
+  const current = (): GradientValue => ({ stops: [...stops] });
+  const emit = () => onChange(current());
+
+  const swatch = h('button', {
+    type: 'button',
+    class: 'gradient-swatch',
+    title: 'Stop color and opacity',
+    'aria-label': 'Stop color and opacity',
   });
-  const posInput = h('input', {
-    type: 'number',
-    class: 'num',
-    min: 0,
-    max: 1,
-    step: 0.01,
-    'aria-label': 'Stop position',
+  const swatchLabel = h('span', { class: 'gradient-swatch-label' });
+  const position = numberControl(POSITION, 0, (v) => {
+    const s = stops[selected];
+    if (!s || typeof v !== 'number') return;
+    stops[selected] = { ...s, pos: clamp01(v) };
+    render();
+    emit();
   });
-  const removeBtn = h('button', { class: 'icon-btn', text: '✕', title: 'Remove stop' });
+  const removeBtn = h(
+    'button',
+    { type: 'button', class: 'icon-btn', title: 'Remove stop (Del)', 'aria-label': 'Remove stop' },
+    icon('close', 12),
+  );
+  const reverseBtn = h(
+    'button',
+    { type: 'button', class: 'icon-btn', title: 'Reverse the ramp', 'aria-label': 'Reverse' },
+    icon('swap', 14),
+  );
   const presetMenu = gradientPresetMenu(GRADIENT_PRESETS, (value) => {
     stops = [...value.stops];
     selected = 0;
     render();
     emit();
   });
-  const reverseBtn = h('button', { class: 'icon-btn', text: '⇄', title: 'Reverse' });
 
-  const current = (): GradientValue => ({ stops: [...stops] });
-  const emit = () => onChange(current());
-
-  const updateStop = (patch: Partial<GradientStop>) => {
-    const s = stops[selected];
-    if (!s) return;
-    stops[selected] = { ...s, ...patch };
+  const removeSelected = () => {
+    if (stops.length <= 1) return;
+    stops.splice(selected, 1);
+    selected = Math.max(0, selected - 1);
     render();
     emit();
   };
 
+  /** Markers are updated in place: replacing them would break a drag in progress. */
   function render() {
-    preview.style.background = `${gradientToCss(current())}, var(--checker)`;
-    clear(markers);
+    const opaque: GradientValue = { stops: stops.map((s) => ({ ...s, alpha: 1 })) };
+    colorBand.style.background = gradientToCss(opaque);
+    alphaBand.style.background = `${gradientToCss(current())}, var(--checker)`;
+    while (markers.childElementCount > stops.length) markers.lastElementChild?.remove();
+    while (markers.childElementCount < stops.length) markers.append(createMarker());
     stops.forEach((s, i) => {
-      const m = h('div', {
-        class: `gradient-marker${i === selected ? ' selected' : ''}`,
-        title: `${s.color} @ ${s.pos.toFixed(2)}`,
-      });
+      const m = markers.children[i] as HTMLElement;
+      m.dataset.index = String(i);
+      m.classList.toggle('selected', i === selected);
+      m.title = `${s.color} · opacity ${Math.round(s.alpha * 100)}% @ ${s.pos.toFixed(3)}`;
       m.style.left = `${s.pos * 100}%`;
       m.style.setProperty('--stop-color', s.color);
-      m.addEventListener('pointerdown', (e) => startDrag(e, i));
-      markers.append(m);
+      m.style.setProperty('--stop-alpha', String(s.alpha));
     });
     const s = stops[selected];
     if (s) {
-      colorInput.value = s.color;
-      alphaInput.value = String(s.alpha);
-      posInput.value = s.pos.toFixed(2);
+      swatch.style.setProperty('--c', s.color);
+      swatch.style.setProperty('--a', String(s.alpha));
+      swatchLabel.textContent = `${s.color.toUpperCase()} · ${Math.round(s.alpha * 100)}%`;
+      position.setValue(s.pos);
     }
     removeBtn.disabled = stops.length <= 1;
   }
 
-  function startDrag(e: PointerEvent, index: number) {
+  function createMarker(): HTMLElement {
+    const m = h('div', { class: 'gradient-marker', tabIndex: 0, role: 'slider' });
+    m.addEventListener('pointerdown', (e) => startDrag(e, m));
+    m.addEventListener('keydown', (e) => {
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Handled here: the app-wide Del (delete nodes) must not fire.
+        e.preventDefault();
+        e.stopPropagation();
+        removeSelected();
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        const st = stops[selected];
+        if (!st) return;
+        const step = (e.shiftKey ? 0.1 : 0.01) * (e.key === 'ArrowLeft' ? -1 : 1);
+        stops[selected] = { ...st, pos: clamp01(st.pos + step) };
+        render();
+        emit();
+      }
+    });
+    return m;
+  }
+
+  function startDrag(e: PointerEvent, marker: HTMLElement) {
+    if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
-    selected = index;
+    selected = Number(marker.dataset.index ?? 0);
+    marker.focus();
     render();
     const rect = bar.getBoundingClientRect();
-    const target = e.currentTarget as HTMLElement;
-    target.setPointerCapture(e.pointerId);
+    const grab = e.clientX - (rect.left + (stops[selected]?.pos ?? 0) * rect.width);
+    marker.setPointerCapture(e.pointerId);
     const move = (ev: PointerEvent) => {
       const s = stops[selected];
       if (!s) return;
-      stops[selected] = { ...s, pos: clamp01((ev.clientX - rect.left) / rect.width) };
+      stops[selected] = { ...s, pos: clamp01((ev.clientX - grab - rect.left) / rect.width) };
+      marker.classList.toggle('removing', ev.clientY - rect.bottom > 40 && stops.length > 1);
       render();
       emit();
     };
     const up = (ev: PointerEvent) => {
-      target.removeEventListener('pointermove', move);
-      target.removeEventListener('pointerup', up);
+      marker.removeEventListener('pointermove', move);
+      marker.removeEventListener('pointerup', up);
+      marker.removeEventListener('pointercancel', up);
+      marker.classList.remove('removing');
       // Dragging well below the bar removes the stop.
-      if (ev.clientY - rect.bottom > 40 && stops.length > 1) {
-        stops.splice(selected, 1);
-        selected = Math.max(0, selected - 1);
-        render();
-        emit();
-      }
+      if (ev.type === 'pointerup' && ev.clientY - rect.bottom > 40) removeSelected();
     };
-    target.addEventListener('pointermove', move);
-    target.addEventListener('pointerup', up);
+    marker.addEventListener('pointermove', move);
+    marker.addEventListener('pointerup', up);
+    marker.addEventListener('pointercancel', up);
   }
 
   bar.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('.gradient-marker')) return;
     if (stops.length >= MAX_GRADIENT_STOPS) return;
     const rect = bar.getBoundingClientRect();
     const pos = clamp01((e.clientX - rect.left) / rect.width);
@@ -136,22 +187,26 @@ export function gradientControl(
     selected = stops.length - 1;
     render();
     emit();
+    const marker = markers.children[selected] as HTMLElement | undefined;
+    if (marker) startDrag(e, marker);
   });
 
-  colorInput.addEventListener('input', () => updateStop({ color: colorInput.value }));
-  alphaInput.addEventListener('input', () => updateStop({ alpha: Number(alphaInput.value) }));
-  posInput.addEventListener('change', () =>
-    updateStop({ pos: clamp01(Number(posInput.value) || 0) }),
-  );
-  removeBtn.addEventListener('click', () => {
-    if (stops.length <= 1) return;
-    stops.splice(selected, 1);
-    selected = Math.max(0, selected - 1);
-    render();
-    emit();
+  swatch.addEventListener('click', () => {
+    const s = stops[selected];
+    if (!s) return;
+    const index = selected;
+    openColorPicker(swatch, { color: s.color, alpha: s.alpha }, (c) => {
+      const st = stops[index];
+      if (!st) return;
+      stops[index] = { ...st, color: c.color, alpha: c.alpha };
+      render();
+      emit();
+    });
   });
+  removeBtn.addEventListener('click', removeSelected);
   reverseBtn.addEventListener('click', () => {
     stops = [...reverseGradient(current()).stops];
+    selected = stops.length - 1 - selected;
     render();
     emit();
   });
@@ -162,8 +217,19 @@ export function gradientControl(
       'div',
       { class: 'control-gradient' },
       bar,
-      h('div', { class: 'gradient-stop-editor' }, colorInput, alphaInput, posInput, removeBtn),
-      h('div', { class: 'gradient-actions' }, presetMenu, reverseBtn),
+      h(
+        'div',
+        { class: 'gradient-stop-editor' },
+        h('div', { class: 'gradient-swatch-wrap' }, swatch, swatchLabel),
+        h(
+          'div',
+          { class: 'gradient-pos', title: 'Stop position (drag to scrub)' },
+          position.element,
+        ),
+        reverseBtn,
+        removeBtn,
+      ),
+      h('div', { class: 'gradient-actions' }, presetMenu),
     ),
     setValue: (v) => {
       if (!isGradientValue(v)) return;

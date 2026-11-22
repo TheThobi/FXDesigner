@@ -17,6 +17,7 @@ import { cellular } from './noise/cellular';
 import { domainWarp } from './noise/domain-warp';
 import { fractalNoise } from './noise/fractal-noise';
 import { bricks } from './pattern/bricks';
+import { customShader } from './pattern/custom-shader';
 import { gradientGenerator } from './pattern/gradient';
 import { magicCircle } from './pattern/magic-circle';
 import { polygon } from './pattern/polygon';
@@ -31,11 +32,17 @@ import { lenia } from './simulation/lenia/definition';
 import { lifeAutomata } from './simulation/life/definition';
 import { crystalGrowth } from './simulation/crystal/definition';
 import { fluid } from './simulation/fluid/definition';
+import { causticsSimulation } from './simulation/caustics/definition';
+import { smokeFire } from './simulation/smoke/definition';
+import { paintMask } from './simulation/paint/definition';
 import { STYLIZED_GENERATORS } from './stylized';
+import { MATERIAL_GENERATORS } from './noise/material';
 import { MORE_NOISES } from './noise/more';
 import { PARTICLES } from './particle';
 import { UNDERWORLD_GENERATORS } from './underworld';
 import { MORE_PATTERNS } from './pattern/more';
+import { MOTIF_PATTERNS } from './pattern/motifs';
+import { OPERATORS } from './operators';
 
 /** All generators, in display order. Add new ones here. */
 export const GENERATORS: readonly GeneratorDefinition[] = [
@@ -48,6 +55,9 @@ export const GENERATORS: readonly GeneratorDefinition[] = [
   lenia,
   fluid,
   crystalGrowth,
+  causticsSimulation,
+  smokeFire,
+  paintMask,
   lifeAutomata,
   ...UNDERWORLD_GENERATORS,
   ...PARTICLES,
@@ -57,6 +67,7 @@ export const GENERATORS: readonly GeneratorDefinition[] = [
   domainWarp,
   caustics,
   ...MORE_NOISES,
+  ...MATERIAL_GENERATORS,
   glow,
   flare,
   ring,
@@ -67,11 +78,14 @@ export const GENERATORS: readonly GeneratorDefinition[] = [
   explosion,
   smoke,
   gradientGenerator,
+  customShader,
   tiles,
   polygon,
   magicCircle,
   bricks,
   ...MORE_PATTERNS,
+  ...MOTIF_PATTERNS,
+  ...OPERATORS,
 ];
 
 const BY_ID = new Map(GENERATORS.map((g) => [g.id, g]));

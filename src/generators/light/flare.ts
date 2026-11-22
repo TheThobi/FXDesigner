@@ -33,6 +33,26 @@ export const flare: ShaderGenerator = {
       name: 'Cross',
       values: { rays: 2, secondary: false, rayWidth: 0.02, glow: 0.3, rotation: 90 },
     },
+    {
+      name: 'Anamorphic streak',
+      values: {
+        rays: 2,
+        rayLength: 1.5,
+        rayWidth: 0.01,
+        secondary: false,
+        glow: 0.4,
+        glowSize: 0.2,
+        rotation: 0,
+      },
+    },
+    {
+      name: 'Spiky burst',
+      values: { rays: 18, rayLength: 1.1, rayWidth: 0.08, randomness: 1, glow: 0.4, core: 0.12 },
+    },
+    {
+      name: 'Soft orb',
+      values: { rays: 6, rayLength: 0.4, rayWidth: 0.2, glow: 1.6, glowSize: 1, core: 0.2 },
+    },
   ],
   featuredPreset: 'Sun star',
 };

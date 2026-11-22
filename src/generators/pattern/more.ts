@@ -8,10 +8,12 @@ export const runes: ShaderGenerator = {
   kind: 'shader',
   id: 'runes',
   name: 'Rune Glyphs',
-  category: 'pattern',
+  category: 'light',
   description: 'Procedural rune glyphs on a seamless grid or around a ring (magic circles, UI).',
   animated: true,
   fragment: runesFrag,
+  // Glyphs on a transparent background, like the other sprites.
+  defaultPost: { alphaMode: 1 },
   params: [
     param.select('layout', 'Layout', ['Grid (seamless)', 'Ring'], 0),
     param.int('cells', 'Glyphs', 6, 1, 24),
@@ -31,6 +33,14 @@ export const runes: ShaderGenerator = {
     {
       name: 'Flickering sigils',
       values: { layout: 0, cells: 4, strokes: 3, glow: 0.7, flicker: 0.8 },
+    },
+    {
+      name: 'Dense script',
+      values: { layout: 0, cells: 16, strokes: 3, lineWidth: 0.12, glow: 0.1 },
+    },
+    {
+      name: 'Glowing circle',
+      values: { layout: 1, cells: 12, strokes: 5, lineWidth: 0.06, glow: 0.9, ringRadius: 0.8 },
     },
   ],
   featuredPreset: 'Rune ring',

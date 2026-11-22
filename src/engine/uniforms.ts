@@ -1,5 +1,5 @@
 import { isGradientValue, type GradientValue } from '../params/gradient';
-import type { GradientParam, ParamDef, ParamValue, ParamValues } from '../params/types';
+import type { GradientParam, ImageParam, ParamDef, ParamValue, ParamValues } from '../params/types';
 import { hexToRgb } from '../util/color';
 import type { UniformValue } from './gl/ShaderProgram';
 import { uniformName } from './shaderBuilder';
@@ -20,6 +20,7 @@ export function toUniformValue(def: ParamDef, value: ParamValue | undefined): Un
       return Array.isArray(v) ? (v as readonly number[]) : def.default;
     case 'text':
     case 'gradient':
+    case 'image':
       return null;
   }
 }
@@ -47,5 +48,18 @@ export function gradientParams(
     .map((def) => {
       const v = values[def.key];
       return { def, value: isGradientValue(v) ? v : def.default };
+    });
+}
+
+/** Image params with their data URL ('' = none). */
+export function imageParams(
+  defs: readonly ParamDef[],
+  values: ParamValues,
+): { def: ImageParam; value: string }[] {
+  return defs
+    .filter((d): d is ImageParam => d.type === 'image')
+    .map((def) => {
+      const v = values[def.key];
+      return { def, value: typeof v === 'string' ? v : '' };
     });
 }

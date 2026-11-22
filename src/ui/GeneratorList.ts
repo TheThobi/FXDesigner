@@ -2,10 +2,25 @@ import {
   CATEGORY_LABELS,
   type GeneratorCategory,
   type GeneratorDefinition,
+  isOperator,
 } from '../engine/generator';
 import { generatorsByFamily } from '../generators/registry';
 import { clear, h } from './dom';
 import { icon } from './icons';
+import { segmentedTabs, type SegmentedTabs } from './Panel';
+
+/** Where generator tiles can be dropped (the viewport). */
+export interface TileDropTarget {
+  /** The dragged tile is over (x, y) screen pixels. */
+  hover(x: number, y: number): void;
+  /** Released at (x, y): add generator `id` there (ignored outside the target). */
+  drop(id: string, x: number, y: number): void;
+  /** The drag ended (dropped or cancelled). */
+  end(): void;
+}
+
+/** Pointer distance (px) before pressing a tile becomes a drag. */
+const TILE_DRAG_THRESHOLD = 6;
 
 /**
  * Content-Browser-like asset grid: one tile per generator (thumbnail, category color stripe,
@@ -23,6 +38,8 @@ export class GeneratorList {
   onHover: ((id: string) => void) | null = null;
   /** Tile currently under the pointer. */
   hoveredId: string | null = null;
+  /** Receives tiles dragged out of the browser. */
+  dropTarget: TileDropTarget | null = null;
   private readonly mainThumbs = new Map<string, string>();
   private readonly presetThumbs = new Map<string, readonly string[]>();
   private cycleTimer: ReturnType<typeof setInterval> | undefined;
@@ -30,6 +47,8 @@ export class GeneratorList {
   constructor(
     readonly element: HTMLElement,
     private readonly onSelect: (id: string) => void,
+    /** Double-click: add the generator as a new node. */
+    private readonly onAdd: (id: string) => void,
   ) {
     const search = h('input', {
       type: 'search',
@@ -38,6 +57,7 @@ export class GeneratorList {
       'aria-label': 'Search generators',
     });
     search.addEventListener('input', () => this.filter(search.value));
+    this.search = search;
     this.list = h('nav', { class: 'generator-list' });
     this.observer = new IntersectionObserver(
       (entries) => {
@@ -54,8 +74,45 @@ export class GeneratorList {
       },
       { root: this.list, rootMargin: '120px' },
     );
+    // Full-width switch: generators (make images) and operators (process / combine them).
+    this.tabs = segmentedTabs(
+      [
+        {
+          id: 'generators',
+          title: 'Generators',
+          icon: 'texture',
+          tooltip: 'Nodes that create images',
+        },
+        {
+          id: 'operators',
+          title: 'Operators',
+          icon: 'nodes',
+          tooltip: 'Nodes that transform or combine other nodes (blend, mask, warp, blur…)',
+        },
+      ],
+      (id) => this.showTab(id === 'operators' ? 'operators' : 'generators'),
+    );
+    element.append(this.tabs.element);
     element.append(h('div', { class: 'search-box' }, icon('search', 14), search), this.list);
     this.build();
+    this.showTab('generators');
+  }
+
+  private readonly tabs: SegmentedTabs;
+  private readonly search: HTMLInputElement;
+  private tab: 'generators' | 'operators' = 'generators';
+
+  /**
+   * Shows the generator families or the operators. Only the user switches tabs: selecting or
+   * deleting nodes never does.
+   */
+  showTab(tab: 'generators' | 'operators'): void {
+    this.tabs.select(tab);
+    this.tab = tab;
+    this.filter(this.search.value);
+    const what = tab === 'generators' ? 'generators' : 'operators';
+    this.search.placeholder = `Search ${what}`;
+    this.search.setAttribute('aria-label', `Search ${what}`);
   }
 
   setActive(id: string): void {
@@ -63,7 +120,8 @@ export class GeneratorList {
     this.activeId = id;
     const item = this.items.get(id);
     item?.classList.add('active');
-    item?.scrollIntoView({ block: 'nearest' });
+    if (item && !item.closest<HTMLElement>('.generator-category')?.hidden)
+      item.scrollIntoView({ block: 'nearest' });
   }
 
   /** Ids of the tiles currently in (or near) view. */
@@ -161,17 +219,75 @@ export class GeneratorList {
         title: `${g.name}\n${g.description}`,
         'data-id': g.id,
         'data-category': g.category,
-        onclick: () => this.onSelect(g.id),
       },
-      h(
-        'div',
-        { class: 'tile-thumb' },
-        h('img', { alt: '', width: 64, height: 64, draggable: false }),
-      ),
+      isOperator(g)
+        ? h('div', { class: 'tile-thumb operator-glyph', text: OPERATOR_GLYPHS[g.id] ?? 'ƒ' })
+        : h(
+            'div',
+            { class: 'tile-thumb' },
+            h('img', { alt: '', width: 64, height: 64, draggable: false }),
+          ),
       h('div', { class: 'tile-stripe' }),
       h('div', { class: 'tile-name', text: g.name }),
       h('div', { class: 'tile-type', text: typeLabel(g.category) }),
     );
+    // Click swaps the selected node's generator; double-click adds a node (the single click
+    // is delayed so a double-click doesn't also swap); drag onto the viewport adds it there.
+    let clickTimer: ReturnType<typeof setTimeout> | undefined;
+    let dragged = false;
+    el.addEventListener('click', (e) => {
+      clearTimeout(clickTimer);
+      if (dragged) {
+        dragged = false;
+        return;
+      }
+      if (e.detail > 1) return;
+      clickTimer = setTimeout(() => this.onSelect(g.id), 220);
+    });
+    el.addEventListener('dblclick', () => {
+      clearTimeout(clickTimer);
+      this.onAdd(g.id);
+    });
+    // Pointer-driven drag (not native HTML drag & drop, which other pointer captures and
+    // browser extensions can leave in a stuck state): a ghost follows the pointer.
+    // The browser must not start its own drag (it would cancel the pointer stream).
+    el.addEventListener('dragstart', (e) => e.preventDefault());
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault(); // no text selection / native drag; click and dblclick still fire
+      const start = [e.clientX, e.clientY] as const;
+      let ghost: HTMLElement | null = null;
+      el.setPointerCapture(e.pointerId);
+      const move = (ev: PointerEvent) => {
+        if (!ghost) {
+          if (Math.hypot(ev.clientX - start[0], ev.clientY - start[1]) < TILE_DRAG_THRESHOLD)
+            return;
+          const thumb = el.querySelector('.tile-thumb')?.cloneNode(true) ?? null;
+          ghost = h('div', { class: 'tile-ghost' }, thumb, h('span', { text: g.name }));
+          document.body.append(ghost);
+          document.body.classList.add('dragging-tile');
+          window.getSelection()?.removeAllRanges();
+          this.stopCycle();
+        }
+        ghost.style.transform = `translate(${ev.clientX + 10}px, ${ev.clientY + 10}px)`;
+        this.dropTarget?.hover(ev.clientX, ev.clientY);
+      };
+      const up = (ev: PointerEvent) => {
+        el.removeEventListener('pointermove', move);
+        el.removeEventListener('pointerup', up);
+        el.removeEventListener('pointercancel', up);
+        if (!ghost) return;
+        ghost.remove();
+        document.body.classList.remove('dragging-tile');
+        dragged = true;
+        if (ev.type === 'pointerup') this.dropTarget?.drop(g.id, ev.clientX, ev.clientY);
+        this.dropTarget?.end();
+      };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
+    });
+    el.title += '\nClick: use on the selected node · Double-click or drag: new node';
     this.items.set(g.id, el);
     this.observer.observe(el);
     if (g.presets?.length && g.kind === 'shader') {
@@ -194,7 +310,8 @@ export class GeneratorList {
       for (const sub of section.querySelectorAll<HTMLElement>('.generator-subcategory')) {
         sub.hidden = sub.querySelector('.generator-item:not([hidden])') === null;
       }
-      section.hidden = visible === 0;
+      const inTab = (section.dataset.family === 'operators') === (this.tab === 'operators');
+      section.hidden = !inTab || visible === 0;
       if (q && visible) section.open = true;
     }
   }
@@ -203,11 +320,35 @@ export class GeneratorList {
 function typeLabel(category: GeneratorCategory): string {
   const labels: Partial<Record<GeneratorCategory, string>> = {
     simulation: 'Simulation',
-    stylized: 'Stylized FX',
-    underworld: 'Underworld FX',
+    operator: 'Operator',
+    animation: 'Animation op',
     particle: 'Sprite',
     fire: 'Fire & smoke',
-    light: 'Light & energy',
+    light: 'Light & magic',
+    impact: 'Impact',
+    water: 'Water',
+    material: 'Material',
   };
   return labels[category] ?? 'Generator';
 }
+
+/** Symbols shown on operator tiles (operators have no meaningful thumbnail on their own). */
+const OPERATOR_GLYPHS: Readonly<Record<string, string>> = {
+  'op-blend': '⧉',
+  'op-mask': '◐',
+  'op-levels': '◢',
+  'op-transform': '⤡',
+  'op-warp': '≋',
+  'op-blur': '◌',
+  'op-slope-blur': '⥂',
+  'op-distance': '◎',
+  'op-edges': '⬚',
+  'op-unpack': 'R G B',
+  'op-pack': 'RGBA',
+  'op-custom': '{ }',
+  'op-hue-shift': 'H°',
+  'op-color-cycle': '↻',
+  'op-flicker': '✦',
+  'op-scroll': '⇅',
+  'op-dissolve': '░',
+};

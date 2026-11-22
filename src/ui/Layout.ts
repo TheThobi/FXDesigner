@@ -5,12 +5,14 @@ export const LAYOUT_PARTS = [
   { id: 'browser', label: 'Generator browser', shortcut: '' },
   { id: 'details', label: 'Details panel', shortcut: '' },
   { id: 'timeline', label: 'Timeline', shortcut: 'T' },
-  { id: 'stats', label: 'Viewport stats', shortcut: '' },
+  { id: 'stats', label: 'Stats', shortcut: '' },
 ] as const;
 
 export type LayoutPart = (typeof LAYOUT_PARTS)[number]['id'];
 
-const STORAGE_KEY = 'ptm.ui.layout';
+const STORAGE_KEY = 'ptm.ui.layout.v2';
+/** Hidden until the user shows them. */
+const HIDDEN_BY_DEFAULT: readonly LayoutPart[] = ['stats'];
 
 /**
  * Visibility of the optional editor parts, persisted per browser. Applied as `hide-<part>`
@@ -23,7 +25,8 @@ export class Layout {
 
   constructor(private readonly root: HTMLElement) {
     try {
-      const saved = JSON.parse(readStorage(STORAGE_KEY) ?? '[]') as unknown;
+      const stored = readStorage(STORAGE_KEY);
+      const saved = (stored === null ? HIDDEN_BY_DEFAULT : JSON.parse(stored)) as unknown;
       if (Array.isArray(saved)) {
         for (const id of saved) if (LAYOUT_PARTS.some((p) => p.id === id)) this.hidden.add(id);
       }
@@ -51,7 +54,7 @@ export class Layout {
   }
 
   reset(): void {
-    for (const p of LAYOUT_PARTS) this.set(p.id, true);
+    for (const p of LAYOUT_PARTS) this.set(p.id, !HIDDEN_BY_DEFAULT.includes(p.id));
   }
 
   private apply(): void {

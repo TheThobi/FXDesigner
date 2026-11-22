@@ -1,4 +1,5 @@
 import type { SimulationGenerator } from '../../../engine/generator';
+import type { NodeInputDef } from '../../../engine/nodes';
 import { param } from '../../../params/define';
 import type { ParamDef, Preset } from '../../../params/types';
 import { PhysarumSimulation } from './simulation';
@@ -34,6 +35,26 @@ const PARAMS: readonly ParamDef[] = [
     group: 'Agents',
     resetOnChange: true,
   }),
+  param.select(
+    'species',
+    'Species',
+    [
+      { label: '1', value: 1 },
+      { label: '2 (R, G)', value: 2 },
+      { label: '3 (R, G, B)', value: 3 },
+    ],
+    1,
+    {
+      group: 'Species',
+      description:
+        'Competing populations, each with its own trail channel: they follow their own trail ' +
+        'and avoid the others’ (graphic RGB networks; use source colors to see them).',
+    },
+  ),
+  param.float('repulsion', 'Repulsion', 1, 0, 3, {
+    group: 'Species',
+    description: 'How strongly an agent avoids the other species’ trails.',
+  }),
   param.float('deposit', 'Deposit', 0.3, 0.01, 2, { group: 'Trail' }),
   param.float('decay', 'Decay', 0.1, 0.005, 0.5, { group: 'Trail' }),
   param.float('diffuse', 'Diffusion', 0.6, 0, 1, { group: 'Trail' }),
@@ -41,6 +62,23 @@ const PARAMS: readonly ParamDef[] = [
   param.simResolution(512),
   param.brushSize(0.03),
   param.float('gain', 'Exposure', 0.6, 0.05, 4, { group: 'Display' }),
+  param.float('foodStrength', 'Food strength', 0.4, 0, 3, {
+    group: 'Food',
+    description:
+      'Bright areas of the Food input keep emitting attractant: the network grows toward ' +
+      'them and links them (Karl Sims / Jones "nutrients").',
+  }),
+];
+
+export const PHYSARUM_INPUTS: readonly NodeInputDef[] = [
+  {
+    key: 'food',
+    label: 'Food',
+    description: 'Bright areas attract the agents (e.g. an Image, Paint Mask or pattern).',
+    color: '#9be86a',
+    value: 'gray',
+    params: ['foodStrength'],
+  },
 ];
 
 function preset(
@@ -62,7 +100,8 @@ export const physarum: SimulationGenerator = {
     'Slime-mold transport networks (Jeff Jones model): veins, webs, organic lattices. Paint food to attract agents.',
   animated: true,
   params: PARAMS,
-  create: (gpu) => new PhysarumSimulation(gpu, PARAMS),
+  inputs: PHYSARUM_INPUTS,
+  create: (gpu) => new PhysarumSimulation(gpu, PARAMS, PHYSARUM_INPUTS),
   presets: [
     preset('Veins', 30, 9, 30),
     preset('Fine web', 22.5, 5, 45, { decay: 0.2 }),
@@ -104,6 +143,24 @@ export const physarum: SimulationGenerator = {
         decay: 0.03,
         gain: 0.3,
       },
+    },
+    {
+      name: 'Rival colonies',
+      values: { species: 2, repulsion: 1.2, sensorAngle: 30, sensorDistance: 12, turnAngle: 30 },
+      post: { colorMode: 0 },
+    },
+    {
+      name: 'RGB territories',
+      values: {
+        species: 3,
+        repulsion: 1,
+        sensorAngle: 35,
+        sensorDistance: 15,
+        turnAngle: 25,
+        decay: 0.08,
+        gain: 0.8,
+      },
+      post: { colorMode: 0 },
     },
   ],
   featuredPreset: 'Veins',

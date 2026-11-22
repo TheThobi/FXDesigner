@@ -24,14 +24,9 @@ export const flame: ShaderGenerator = {
   defaultPost: { alphaMode: 1 },
   presets: [
     {
-      name: 'Toon flame',
+      name: 'Calm flame',
       values: { turbulence: 0.8, octaves: 3, intensity: 0.9 },
-      post: { posterize: 4, gradient: GRADIENTS.saffron, outline: 0 },
-    },
-    {
-      name: 'Inked toon flame',
-      values: { turbulence: 0.7, octaves: 3, intensity: 0.9 },
-      post: { posterize: 4, gradient: GRADIENTS.saffron, outline: 1, outlineWidth: 2 },
+      ramp: GRADIENTS.saffron,
     },
     {
       name: 'Torch',

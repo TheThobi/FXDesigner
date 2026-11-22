@@ -14,5 +14,10 @@ void main() {
   } else {
     v = fract(gradientNoise(uv * 4.0, vec2(4.0), 0.0) * bands * 0.5); // noise contours
   }
+  // Seed input (any node, e.g. an Image): marble that picture instead.
+  if (u_has_seed) {
+    vec4 c = texture(u_in_seed, uv);
+    v = luminance(c.rgb) * c.a;
+  }
   outColor = vec4(v, 0.0, 0.0, 1.0);
 }

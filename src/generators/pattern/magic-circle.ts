@@ -6,7 +6,7 @@ export const magicCircle: ShaderGenerator = {
   kind: 'shader',
   id: 'magic-circle',
   name: 'Magic Circle',
-  category: 'pattern',
+  category: 'light',
   description: 'Summoning-circle decal: rings, ticks, star, orbiting dots.',
   animated: true,
   fragment,

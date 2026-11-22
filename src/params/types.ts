@@ -16,6 +16,8 @@ interface ParamBase {
   readonly description?: string;
   /** For simulations: changing this value restarts the simulation. */
   readonly resetOnChange?: boolean;
+  /** Shown only when this returns true for the current values (e.g. settings of one mode). */
+  readonly visibleWhen?: (values: Readonly<Record<string, unknown>>) => boolean;
 }
 
 export interface FloatParam extends ParamBase {
@@ -26,6 +28,11 @@ export interface FloatParam extends ParamBase {
   readonly default: number;
   /** Suffix shown in the field (e.g. "°", "px"). */
   readonly unit?: string;
+  /**
+   * Range accepted when the value is typed (and in documents): the slider covers min..max,
+   * typing may go further when it is safe. Default: `numericLimits` (wider above max).
+   */
+  readonly limit?: readonly [number, number];
 }
 
 export interface IntParam extends ParamBase {
@@ -34,6 +41,11 @@ export interface IntParam extends ParamBase {
   readonly max: number;
   readonly default: number;
   readonly unit?: string;
+  /**
+   * Range accepted when the value is typed (and in documents): the slider covers min..max,
+   * typing may go further when it is safe. Default: `numericLimits` (wider above max).
+   */
+  readonly limit?: readonly [number, number];
 }
 
 export interface BoolParam extends ParamBase {
@@ -77,12 +89,23 @@ export interface TextParam extends ParamBase {
   readonly type: 'text';
   readonly default: string;
   readonly maxLength?: number;
+  /** Edited in a multi-line monospace box (e.g. GLSL code). */
+  readonly multiline?: boolean;
 }
 
 /** Color ramp, exposed to GLSL as a 256x1 `sampler2D`. */
 export interface GradientParam extends ParamBase {
   readonly type: 'gradient';
   readonly default: GradientValue;
+}
+
+/**
+ * Imported picture, stored as a data URL (downscaled on import; '' = none). Exposed to GLSL as
+ * `sampler2D u_<key>` plus `vec2 u_<key>Size` (pixels; 0 while loading / empty).
+ */
+export interface ImageParam extends ParamBase {
+  readonly type: 'image';
+  readonly default: string;
 }
 
 export type ParamDef =
@@ -93,7 +116,8 @@ export type ParamDef =
   | SelectParam
   | Vec2Param
   | TextParam
-  | GradientParam;
+  | GradientParam
+  | ImageParam;
 
 export type ParamType = ParamDef['type'];
 
@@ -113,4 +137,6 @@ export interface Preset {
   readonly values: ParamValues;
   /** Overrides of the shared post-processing (e.g. posterize for a toon look). */
   readonly post?: ParamValues;
+  /** Post Process color ramp set by the preset (otherwise the user's ramp is kept). */
+  readonly ramp?: GradientValue;
 }

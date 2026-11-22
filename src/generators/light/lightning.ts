@@ -12,15 +12,20 @@ export const lightning: ShaderGenerator = {
   fragment,
   params: [
     param.int('bolts', 'Bolts', 2, 1, 6),
-    param.float('amplitude', 'Amplitude', 0.5, 0, 1.5),
-    param.float('frequency', 'Frequency', 2, 0.5, 8),
-    param.int('octaves', 'Jaggedness', 6, 1, 8),
-    param.float('thickness', 'Thickness', 0.012, 0.001, 0.08),
-    param.float('glow', 'Glow', 0.15, 0, 0.6),
+    param.float('amplitude', 'Amplitude', 0.2, 0, 1.5),
+    param.float('frequency', 'Frequency', 1, 0.5, 8),
+    param.int('octaves', 'Jaggedness', 8, 1, 8),
+    param.float('thickness', 'Thickness', 0.01, 0.001, 0.08),
+    param.float('glow', 'Glow', 0.4, 0, 0.6),
     param.float('strikeRate', 'Strikes / s', 4, 0, 30, { group: 'Animation' }),
   ],
   defaultPost: { alphaMode: 1 },
+  // Defaults = the Arc look (first preset, browser thumbnail).
   presets: [
+    {
+      name: 'Arc',
+      values: { bolts: 2, amplitude: 0.2, frequency: 1, octaves: 8, thickness: 0.01, glow: 0.4 },
+    },
     {
       name: 'Single strike',
       values: { bolts: 1, amplitude: 0.4, thickness: 0.02, glow: 0.3, strikeRate: 2 },
@@ -36,10 +41,6 @@ export const lightning: ShaderGenerator = {
         strikeRate: 12,
       },
     },
-    {
-      name: 'Arc',
-      values: { bolts: 2, amplitude: 0.2, frequency: 1, octaves: 8, thickness: 0.01, glow: 0.4 },
-    },
   ],
-  featuredPreset: 'Single strike',
+  featuredPreset: 'Arc',
 };

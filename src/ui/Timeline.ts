@@ -87,6 +87,8 @@ export class Timeline {
   private readonly blendZone: HTMLElement;
   private readonly playhead: HTMLElement;
   private readonly keyLayer: HTMLElement;
+  /** Frames mode: span of the run that keyframes can rewind to. */
+  private readonly recorded: HTMLElement;
   private readonly empty: HTMLElement;
   private readonly duration: Control;
   private shownDuration = NaN;
@@ -159,12 +161,14 @@ export class Timeline {
     );
     this.bindBlend();
     this.keyLayer = h('div', { class: 'tl-keys' });
+    this.recorded = h('div', { class: 'tl-recorded' });
     this.playhead = h('div', { class: 'tl-playhead' });
     this.empty = h('div', { class: 'tl-empty', hidden: true });
     this.track = h(
       'div',
       { class: 'tl-track' },
       this.strip,
+      this.recorded,
       this.blendZone,
       this.keyLayer,
       this.ruler,
@@ -173,33 +177,37 @@ export class Timeline {
     );
     this.bindTrack();
 
+    // Three columns: info (left), transport (always centered), options (right).
     this.element = h(
       'section',
       { class: 'timeline', 'aria-label': 'Timeline' },
       h(
         'div',
         { class: 'tl-bar' },
+        h('div', { class: 'tl-side tl-left' }, this.readout),
         h(
           'div',
-          { class: 'tl-group' },
+          { class: 'tl-group tl-transport' },
           button('restart', 'Restart', () => actions.restart()),
           button('stepBack', 'Previous frame (,)', () => actions.step(-1)),
           this.playBtn,
           button('stepForward', 'Next frame (.)', () => actions.step(1)),
         ),
-        this.readout,
-        h('div', { class: 'spacer' }),
-        this.timeOptions,
-        h('div', { class: 'tl-group' }, this.speedSelect),
         h(
-          'button',
-          {
-            class: 'vp-btn tl-close',
-            title: 'Hide the timeline (T)',
-            'aria-label': 'Hide the timeline',
-            onclick: () => actions.close(),
-          },
-          icon('close', 14),
+          'div',
+          { class: 'tl-side tl-right' },
+          this.timeOptions,
+          h('div', { class: 'tl-group' }, this.speedSelect),
+          h(
+            'button',
+            {
+              class: 'vp-btn tl-close',
+              title: 'Hide the timeline (T)',
+              'aria-label': 'Hide the timeline',
+              onclick: () => actions.close(),
+            },
+            icon('close', 14),
+          ),
         ),
       ),
       this.track,
@@ -238,10 +246,13 @@ export class Timeline {
       const rulerKey = `t${state.duration}`;
       if (rulerKey !== this.rulerFor) this.buildRuler(state.duration);
     } else if (state.mode === 'frames') {
-      this.readout.textContent = `Frame ${state.frame}`;
+      const keys = this.keyframes.length;
+      this.readout.textContent = `Frame ${state.frame} · ${keys} snapshot${keys === 1 ? '' : 's'}`;
       this.blendZone.hidden = true;
       const span = this.frameSpan();
       this.setPlayhead(state.frame / span);
+      const newest = Math.max(state.frame, this.keyframes.at(-1)?.frame ?? 0);
+      this.recorded.style.width = `${clamp(newest / span, 0, 1) * 100}%`;
       const rulerKey = `f${span}`;
       if (rulerKey !== this.rulerFor) this.layoutKeyframes();
     } else {
@@ -249,6 +260,7 @@ export class Timeline {
       this.blendZone.hidden = true;
       this.setPlayhead(0);
     }
+    this.recorded.hidden = state.mode !== 'frames';
   }
 
   /** Time mode: images of frames evenly spread over the loop (null = not rendered yet). */
@@ -296,7 +308,12 @@ export class Timeline {
   private layoutKeyframes(): void {
     const span = this.frameSpan();
     this.rulerFor = `f${span}`;
-    this.ruler.replaceChildren();
+    const step = span / 8;
+    this.ruler.replaceChildren(
+      ...Array.from({ length: 8 }, (_, i) =>
+        h('span', { class: 'tl-tick', style: `left: ${(i / 8) * 100}%`, text: `${i * step}` }),
+      ),
+    );
     this.keyLayer.replaceChildren(
       ...this.keyframes.map((k, i) =>
         h(
@@ -372,14 +389,32 @@ export class Timeline {
       const s = this.state;
       if (e.button !== 0 || !s) return;
       if (s.mode === 'frames') {
-        // Jump to the last keyframe before the click.
-        const rect = this.track.getBoundingClientRect();
-        const frame = ((e.clientX - rect.left) / rect.width) * this.frameSpan();
-        let index = -1;
-        this.keyframes.forEach((k, i) => {
-          if (k.frame <= frame) index = i;
-        });
-        if (index >= 0) this.actions.jumpToKeyframe(index);
+        // Click or drag: restores the last snapshot before the pointer (live scrub).
+        e.preventDefault();
+        this.track.setPointerCapture(e.pointerId);
+        let shown = -1;
+        const jumpAt = (clientX: number) => {
+          const rect = this.track.getBoundingClientRect();
+          const frame = ((clientX - rect.left) / rect.width) * this.frameSpan();
+          let index = -1;
+          this.keyframes.forEach((k, i) => {
+            if (k.frame <= frame) index = i;
+          });
+          if (index >= 0 && index !== shown) {
+            shown = index;
+            this.actions.jumpToKeyframe(index);
+          }
+        };
+        jumpAt(e.clientX);
+        const move = (ev: PointerEvent) => jumpAt(ev.clientX);
+        const up = () => {
+          this.track.removeEventListener('pointermove', move);
+          this.track.removeEventListener('pointerup', up);
+          this.track.removeEventListener('pointercancel', up);
+        };
+        this.track.addEventListener('pointermove', move);
+        this.track.addEventListener('pointerup', up);
+        this.track.addEventListener('pointercancel', up);
         return;
       }
       if (s.mode !== 'time') return;

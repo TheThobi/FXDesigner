@@ -7,7 +7,7 @@ export const caustics: ShaderGenerator = {
   kind: 'shader',
   id: 'caustics',
   name: 'Caustics',
-  category: 'noise',
+  category: 'water',
   description: 'Seamless animated underwater light caustics.',
   animated: true,
   fragment,
@@ -21,9 +21,9 @@ export const caustics: ShaderGenerator = {
 
   presets: [
     {
-      name: 'Toon caustics',
+      name: 'Sharp caustics',
       values: { sharpness: 4 },
-      post: { posterize: 3, gradient: GRADIENTS.azure },
+      ramp: GRADIENTS.azure,
     },
     { name: 'Pool floor', values: { scale: 2, iterations: 6, intensity: 0.006, sharpness: 10 } },
     { name: 'Soft light', values: { scale: 1, iterations: 4, intensity: 0.01, sharpness: 3 } },

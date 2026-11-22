@@ -1,8 +1,8 @@
 /**
  * Converts post values written in the pre-module format (document v1, and the shorthand used
  * by presets) to the module format: a module is enabled when its main value is set to an
- * "active" value, e.g. `{ posterize: 4 }` -> `{ posterizeOn: true, posterize: 4 }`, and an
- * explicit `gradient` becomes a per-generator ramp override.
+ * "active" value, e.g. `{ posterize: 4 }` -> `{ posterizeOn: true, posterize: 4 }`.
+ * An explicit `gradient` is passed through: callers turn it into the color ramp.
  */
 export function upgradeLegacyPost(raw: Readonly<Record<string, unknown>>): Record<string, unknown> {
   const post: Record<string, unknown> = { ...raw };
@@ -29,7 +29,6 @@ export function upgradeLegacyPost(raw: Readonly<Record<string, unknown>>): Recor
       post.invert === true;
     if (changed) post.levelsOn = true;
   }
-  if (post.gradient !== undefined && !('overrideRamp' in post)) post.overrideRamp = true;
 
   for (const obsolete of ['paintRadius', 'strokes', 'strokeSize', 'strokeAngle', 'strokeFlow'])
     delete post[obsolete];

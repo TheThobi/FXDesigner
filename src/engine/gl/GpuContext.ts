@@ -23,6 +23,17 @@ export class WebGL2UnavailableError extends Error {
 export class GpuContext {
   readonly gl: WebGL2RenderingContext;
   readonly caps: GpuCapabilities;
+  /**
+   * Workspace aspect (width / height). Simulations size their grids from it at reset
+   * (`simResolution` = short side); set by the app, then simulations are reset.
+   */
+  workspaceAspect = 1;
+
+  /** Grid of `size` cells on the short side, following the workspace aspect. */
+  gridDims(size: number): [number, number] {
+    const a = this.workspaceAspect;
+    return a >= 1 ? [Math.round(size * a), size] : [size, Math.round(size / a)];
+  }
   private readonly vao: WebGLVertexArrayObject;
   private blank: WebGLTexture | null = null;
 
@@ -100,6 +111,22 @@ export class GpuContext {
     gl.bindVertexArray(null);
   }
 
+  /**
+   * Draws `vertexCount` vertices as triangles, `instances` times (the vertex shader builds the
+   * geometry from gl_VertexID / gl_InstanceID), optionally additively blended.
+   */
+  drawTriangles(vertexCount: number, instances = 1, additive = false): void {
+    const { gl } = this;
+    if (additive) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
+    }
+    gl.bindVertexArray(this.vao);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, vertexCount, instances);
+    gl.bindVertexArray(null);
+    if (additive) gl.disable(gl.BLEND);
+  }
+
   /** Draws `count` points (vertex shader uses gl_VertexID), optionally additively blended. */
   drawPoints(count: number, additive = false): void {
     const { gl } = this;
@@ -153,6 +180,18 @@ export class GpuContext {
   }
 
   /** Reads RGBA8 pixels of `target` (bottom-up row order, as GL returns them). */
+  /** RGBA values of a target as floats (full precision for float targets). */
+  readPixelsFloat(target: RenderTarget): Float32Array {
+    const { gl } = this;
+    if (target.format === 'rgba8')
+      return Float32Array.from(this.readPixels(target), (v) => v / 255);
+    const out = new Float32Array(target.width * target.height * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+    gl.readPixels(0, 0, target.width, target.height, gl.RGBA, gl.FLOAT, out);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return out;
+  }
+
   readPixels(target: RenderTarget): Uint8Array {
     const { gl } = this;
     const out = new Uint8Array(target.width * target.height * 4);

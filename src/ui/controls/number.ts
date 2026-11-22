@@ -1,5 +1,6 @@
 import type { FloatParam, IntParam, ParamValue } from '../../params/types';
 import { clamp, decimalsForStep, niceStep } from '../../util/math';
+import { numericLimits } from '../../params/values';
 import { h } from '../dom';
 import type { ChangeHandler, Control } from './types';
 
@@ -23,9 +24,12 @@ export function numberControl(
 ): Control {
   const step = stepFor(def);
   const decimals = decimalsForStep(step);
-  const quantize = (v: number) => {
+  const [lo, hi] = numericLimits(def);
+  /** Scrubbing stays in the slider range; typed values may go up to the limits. */
+  const quantize = (v: number, typed = false) => {
     const q = def.type === 'int' ? Math.round(v) : Math.round(v / step) * step;
-    return clamp(Number(q.toFixed(Math.max(decimals, 0) + 2)), def.min, def.max);
+    const n = Number(q.toFixed(Math.max(decimals, 0) + 2));
+    return typed ? clamp(n, lo, hi) : clamp(n, def.min, def.max);
   };
   const unit = def.unit ?? '';
   const format = (v: number) => (def.type === 'int' ? String(Math.round(v)) : v.toFixed(decimals));
@@ -38,16 +42,25 @@ export function numberControl(
     spellcheck: false,
     'aria-label': def.label,
   });
-  const box = h('div', { class: 'spin', title: 'Drag to scrub · click to type' }, input);
+  const box = h(
+    'div',
+    {
+      class: 'spin',
+      title: `Drag to scrub · click to type (up to ${hi}${def.min < 0 ? `, down to ${lo}` : ''})`,
+    },
+    input,
+  );
   let value = typeof initial === 'number' ? initial : def.default;
 
   const show = (v: number) => {
     value = v;
     input.value = document.activeElement === input ? format(v) : display(v);
-    box.style.setProperty('--fill', `${((v - def.min) / (def.max - def.min || 1)) * 100}%`);
+    const t = (v - def.min) / (def.max - def.min || 1);
+    box.style.setProperty('--fill', `${Math.min(1, Math.max(0, t)) * 100}%`);
+    box.classList.toggle('over-range', v > def.max || v < def.min);
   };
-  const commit = (v: number) => {
-    const q = quantize(v);
+  const commit = (v: number, typed = false) => {
+    const q = quantize(v, typed);
     show(q);
     onChange(q);
   };
@@ -67,7 +80,8 @@ export function numberControl(
     drag.moved = true;
     const speed = e.shiftKey ? 0.1 : e.ctrlKey ? 4 : 1;
     const range = def.max - def.min;
-    commit(drag.start + (dx / Math.max(box.clientWidth, 1)) * range * speed);
+    const start = clamp(drag.start, def.min, def.max);
+    commit(start + (dx / Math.max(box.clientWidth, 1)) * range * speed);
   });
   const endDrag = () => {
     if (!drag) return;
@@ -84,7 +98,7 @@ export function numberControl(
 
   input.addEventListener('change', () => {
     const n = parseFloat(input.value.replace(',', '.'));
-    if (Number.isFinite(n)) commit(n);
+    if (Number.isFinite(n)) commit(n, true);
     else show(value);
   });
   // Edit the bare number; show the unit again when not editing.
@@ -100,7 +114,7 @@ export function numberControl(
       input.blur();
     } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       e.preventDefault();
-      commit(value + (e.key === 'ArrowUp' ? step : -step) * (e.shiftKey ? 10 : 1));
+      commit(value + (e.key === 'ArrowUp' ? step : -step) * (e.shiftKey ? 10 : 1), true);
       input.select();
     }
   });

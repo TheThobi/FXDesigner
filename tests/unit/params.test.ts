@@ -26,7 +26,10 @@ describe('defaultValues', () => {
 
 describe('sanitizeValue', () => {
   it('clamps and rounds numbers', () => {
-    expect(sanitizeValue(defs[0]!, 100)).toBe(32);
+    // Typed values may go past the slider (up to 4x the range for floats), not below a 0+ min.
+    expect(sanitizeValue(defs[0]!, 200)).toBe(32 + 31 * 3);
+    expect(sanitizeValue(defs[0]!, 40)).toBe(40);
+    expect(sanitizeValue(defs[0]!, -3)).toBe(1);
     expect(sanitizeValue(defs[1]!, 3.7)).toBe(4);
     expect(sanitizeValue(defs[0]!, Number.NaN)).toBe(4);
     expect(sanitizeValue(defs[0]!, '5')).toBe(4);

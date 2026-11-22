@@ -24,19 +24,14 @@ export const cellular: ShaderGenerator = {
   ],
   presets: [
     {
-      name: 'Comic halftone',
-      values: { mode: 0 },
-      post: { halftone: 48, gradient: GRADIENTS.linear },
-    },
-    {
       name: 'Stained glass',
       values: { mode: 4, edgeWidth: 0.12 },
-      post: { posterize: 6, gradient: GRADIENTS.spectrum },
+      ramp: GRADIENTS.spectrum,
     },
     {
-      name: 'Pixel cells',
+      name: 'Flat cells',
       values: { mode: 3 },
-      post: { pixelate: 48, posterize: 5, gradient: GRADIENTS.moss },
+      ramp: GRADIENTS.moss,
     },
     { name: 'Cracked earth', values: { mode: 2, scale: 5, jitter: 0.9, edgeWidth: 0.05 } },
     { name: 'Pebbles', values: { mode: 4, scale: 7, jitter: 1 } },

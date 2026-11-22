@@ -15,9 +15,13 @@ float flameField(vec2 p, float t) {
 
 vec4 generate(vec2 uv) {
   vec2 p = centered(uv);
-  p.y += 0.7;
+  // Base raised above the bottom edge (offset moves the whole flame vertically).
+  p.y += 0.55 - u_offset;
   float t = u_time * u_speed;
   float f = flameField(p, t);
+  // Burn the field off near the top / bottom edges: nothing may touch them, or it would
+  // wrap to the opposite side when the texture repeats (flipbooks, tiled sampling).
+  f -= 1.5 * (smoothstep(0.88, 0.99, uv.y) + smoothstep(0.08, 0.01, uv.y));
   float aa = clamp(fwidth(f) * 1.2, 1e-4, 0.03);
   float mask = smoothstep(-aa, aa, f);
   float body = smoothstep(u_outline - aa, u_outline + aa, f);

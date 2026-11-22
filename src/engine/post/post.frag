@@ -8,6 +8,7 @@ in vec2 v_uv;
 out vec4 outColor;
 
 uniform sampler2D u_source;
+uniform sampler2D u_ramp;    // color ramp (FrameRequest.ramp)
 uniform vec2 u_pixelSize;   // one output pixel, in texture uv
 uniform float u_viewTiles;
 uniform bool u_premultiply;
@@ -71,7 +72,7 @@ float halftone(float v, vec2 uv) {
   return smoothstep(radius - aa, radius + aa, length(q - cell));
 }
 
-vec4 rampColor(float t) { return texture(u_gradient, vec2((t * 255.0 + 0.5) / 256.0, 0.5)); }
+vec4 rampColor(float t) { return texture(u_ramp, vec2((t * 255.0 + 0.5) / 256.0, 0.5)); }
 
 // Height gradient (d height / d uv) with central differences at step o.
 vec2 heightGradient(vec2 uv, vec2 o) {
@@ -227,12 +228,14 @@ void main() {
   vec4 color;
 
   if (u_pixelateOn) {
+    // n blocks across the width; square blocks on non-square images.
     float n = float(u_pixelate);
-    vec2 cell = floor(uv * n);
-    vec2 center = (cell + 0.5) / n;
+    vec2 counts = vec2(n, n * u_pixelSize.x / u_pixelSize.y);
+    vec2 cell = floor(uv * counts);
+    vec2 center = (cell + 0.5) / counts;
     if (u_pixelMode == 0) {
       // Pixel art: every effect operates on the block grid.
-      g_block = vec2(1.0 / n);
+      g_block = 1.0 / counts;
       g_ditherCoord = cell;
       color = evaluate(center, g_block);
     } else {

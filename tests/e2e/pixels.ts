@@ -9,6 +9,8 @@ export interface PixelProbe {
   readonly stdDev: number;
   /** Number of distinct luminance levels (rounded to 4) over the sample grid. */
   readonly distinctTones: number;
+  /** Fraction of the sample grid covered by its `n` most frequent levels. */
+  dominantShare(n: number): number;
 }
 
 /** Screenshots `locator` and decodes it in the page to probe pixel values. */
@@ -40,6 +42,12 @@ export async function probe(page: Page, locator: Locator): Promise<PixelProbe> {
   for (let y = 0.05; y < 1; y += 0.05) for (let x = 0.05; x < 1; x += 0.05) samples.push(lum(x, y));
   const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
   const stdDev = Math.sqrt(samples.reduce((a, b) => a + (b - mean) ** 2, 0) / samples.length);
-  const distinctTones = new Set(samples.map((v) => Math.round(v / 4))).size;
-  return { lum, rgb, stdDev, distinctTones };
+  const levels = samples.map((v) => Math.round(v / 4));
+  const distinctTones = new Set(levels).size;
+  const counts = new Map<number, number>();
+  for (const l of levels) counts.set(l, (counts.get(l) ?? 0) + 1);
+  const sorted = [...counts.values()].sort((a, b) => b - a);
+  const dominantShare = (n: number) =>
+    sorted.slice(0, n).reduce((a, b) => a + b, 0) / Math.max(1, levels.length);
+  return { lum, rgb, stdDev, distinctTones, dominantShare };
 }

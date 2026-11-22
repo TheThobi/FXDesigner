@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { upgradeLegacyPost } from '../../src/engine/post/legacy';
 import { DEFAULT_RAMP, POST_PARAMS } from '../../src/engine/post/schema';
 import { GRADIENT_PRESETS, GRADIENTS } from '../../src/params/gradientPresets';
+import { sanitizeGradient } from '../../src/params/gradient';
 import {
   buildGeneratorShader,
   glslUniformType,
@@ -78,7 +79,8 @@ describe('generator registry', () => {
         it('uses every shader-visible param in its GLSL', () => {
           for (const p of g.params) {
             if (glslUniformType(p) === null) continue;
-            expect(g.fragment, `u_${p.key} unused`).toMatch(new RegExp(`\\bu_${p.key}\\b`));
+            const all = [g.fragment, ...(g.passes ?? []).map((pass) => pass.fragment)].join('\n');
+            expect(all, `u_${p.key} unused`).toMatch(new RegExp(`\\bu_${p.key}\\b`));
           }
         });
 
@@ -150,6 +152,15 @@ describe('reserved uniform names', () => {
 });
 
 describe('presets with post overrides', () => {
+  it('set the ramp with `ramp`, never a per-generator gradient', () => {
+    for (const g of GENERATORS) {
+      for (const preset of g.presets ?? []) {
+        expect('gradient' in (preset.post ?? {}), `${g.id}/${preset.name}`).toBe(false);
+        if (preset.ramp) expect(sanitizeGradient(preset.ramp)).toEqual(preset.ramp);
+      }
+    }
+  });
+
   it('only reference valid post params', () => {
     for (const g of GENERATORS) {
       for (const preset of g.presets ?? []) {

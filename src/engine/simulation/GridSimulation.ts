@@ -4,6 +4,7 @@ import type { Simulation, SimulationPointer, SimulationSnapshot } from '../gener
 import type { GpuContext } from '../gl/GpuContext';
 import type { PingPong, RenderTarget } from '../gl/RenderTarget';
 import type { ShaderProgram } from '../gl/ShaderProgram';
+import type { NodeInputDef } from '../nodes';
 import { buildSimulationShader } from '../shaderBuilder';
 import { paramUniforms } from '../uniforms';
 
@@ -33,6 +34,10 @@ export interface GridSimulationSpec {
   readonly render: string;
   /** Optional image fed to the seed pass as u_seedTexture (e.g. rasterized text). */
   readonly seedImage?: (params: ParamValues, size: number) => TexImageSource | null;
+  /** Node inputs sampled by every pass as u_in_<key> / u_has_<key> (same as the definition's). */
+  readonly inputs?: readonly NodeInputDef[];
+  /** Inputs read by the seed pass: connecting / disconnecting one restarts the simulation. */
+  readonly reseedInputs?: readonly string[];
 }
 
 const BRUSH_MODES = { paint: 1, erase: 2 } as const;
@@ -62,6 +67,9 @@ export class GridSimulation implements Simulation {
   private pointer: SimulationPointer | null = null;
   private frame = 0;
   private lastSeed = 0;
+  private inputs: Readonly<Record<string, WebGLTexture | null>> = {};
+  /** A seed input was (dis)connected: reseed at the next render. */
+  private reseedPending = false;
 
   constructor(
     private readonly gpu: GpuContext,
@@ -70,7 +78,10 @@ export class GridSimulation implements Simulation {
     private readonly spec: GridSimulationSpec,
   ) {
     const build = (src: string, pass: string) =>
-      gpu.createProgram(buildSimulationShader(defs, src, `${id}/${pass}`), `${id}/${pass}`);
+      gpu.createProgram(
+        buildSimulationShader(defs, src, `${id}/${pass}`, spec.inputs ?? []),
+        `${id}/${pass}`,
+      );
     this.seedProgram = build(spec.seed, 'seed');
     const passes: readonly GridPass[] =
       typeof spec.step === 'string' ? [{ label: 'step', source: spec.step }] : spec.step;
@@ -83,19 +94,19 @@ export class GridSimulation implements Simulation {
 
   reset(params: ParamValues, seed: number): void {
     const { gpu } = this;
-    const size = getNumber(params, 'simResolution', 256);
-    if (!this.state || this.state.width !== size) {
+    const [width, height] = gpu.gridDims(getNumber(params, 'simResolution', 256));
+    if (!this.state || this.state.width !== width || this.state.height !== height) {
       this.state?.dispose();
       this.state = gpu.createPingPong({
-        width: size,
-        height: size,
+        width,
+        height,
         format: gpu.precisionFormat,
         filter: 'nearest',
         wrap: 'repeat',
       });
     }
     if (this.seedTexture) gpu.gl.deleteTexture(this.seedTexture);
-    const image = this.spec.seedImage?.(params, size) ?? null;
+    const image = this.spec.seedImage?.(params, Math.min(width, height)) ?? null;
     this.seedTexture = image ? gpu.createImageTexture(image, 'nearest') : null;
 
     this.frame = 0;
@@ -130,6 +141,10 @@ export class GridSimulation implements Simulation {
 
   render(target: RenderTarget, params: ParamValues): void {
     if (!this.state) return;
+    if (this.reseedPending) {
+      this.reseedPending = false;
+      this.reset(params, this.lastSeed);
+    }
     this.bindCommon(this.renderProgram, params, this.lastSeed)
       .texture('u_state', this.state.read.texture, 0)
       .texture('u_seedTexture', this.seedTexture ?? this.gpu.blankTexture, 1);
@@ -144,13 +159,26 @@ export class GridSimulation implements Simulation {
 
   restore(snapshot: SimulationSnapshot): void {
     if (!(snapshot instanceof GridSnapshot) || snapshot.owner !== this || !this.state) return;
-    if (snapshot.state.width !== this.state.width) return;
+    if (snapshot.state.width !== this.state.width || snapshot.state.height !== this.state.height)
+      return;
     this.gpu.copyTarget(snapshot.state, this.state.read);
     this.frame = snapshot.frame;
   }
 
+  /** Current state texture (for custom render passes); null before the first reset. */
+  get stateTexture(): WebGLTexture | null {
+    return this.state?.read.texture ?? null;
+  }
+
   setPointer(pointer: SimulationPointer | null): void {
     this.pointer = pointer;
+  }
+
+  setInputs(inputs: Readonly<Record<string, WebGLTexture | null>>): void {
+    for (const key of this.spec.reseedInputs ?? []) {
+      if (Boolean(this.inputs[key]) !== Boolean(inputs[key])) this.reseedPending = true;
+    }
+    this.inputs = inputs;
   }
 
   dispose(): void {
@@ -163,12 +191,19 @@ export class GridSimulation implements Simulation {
 
   private bindCommon(program: ShaderProgram, params: ParamValues, seed: number): ShaderProgram {
     const brush = this.pointer;
+    program.use();
+    // Units 0 (state) and 1 (seed texture) are bound by the callers; inputs follow.
+    (this.spec.inputs ?? []).forEach((input, i) => {
+      const texture = this.inputs[input.key] ?? null;
+      program
+        .set(`u_has_${input.key}`, texture !== null)
+        .texture(`u_in_${input.key}`, texture ?? this.gpu.blankTexture, 2 + i);
+    });
     return program
-      .use()
       .setAll(paramUniforms(this.defs, params))
       .set('u_seed', seed)
       .set('u_frame', this.frame)
-      .set('u_gridSize', [this.state?.width ?? 1, this.state?.width ?? 1])
+      .set('u_gridSize', [this.state?.width ?? 1, this.state?.height ?? 1])
       .set('u_brushDir', brush?.velocity ?? [0, 0])
       .set('u_brush', [
         brush?.uv[0] ?? 0,

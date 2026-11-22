@@ -11,21 +11,10 @@ export const HEIGHT_SOURCE = { luminance: 0, alpha: 1 } as const;
 export const DEFAULT_RAMP = GRADIENTS.linear;
 
 /** Shared ramp (global state, edited in the Post Process tab's Color section). */
-export const SHARED_RAMP_PARAM = param.gradient('ramp', 'Shared color ramp', DEFAULT_RAMP, {
+export const SHARED_RAMP_PARAM = param.gradient('ramp', 'Color ramp', DEFAULT_RAMP, {
   group: 'Color',
-  description: 'Used by every generator in gradient-map mode, unless the generator overrides it.',
+  description: 'Gradient map used in gradient-map color mode.',
 });
-
-/** Per-generator override of the shared ramp (shown in the Generator tab). */
-export const RAMP_OVERRIDE_PARAMS: readonly ParamDef[] = [
-  param.toggle(
-    'overrideRamp',
-    'Color ramp override',
-    false,
-    'Use a ramp specific to this generator.',
-  ),
-  param.gradient('gradient', 'Ramp', DEFAULT_RAMP, { group: 'Color ramp override' }),
-];
 
 const n = (v: ParamValues, k: string) => Number(v[k] ?? 0);
 const opt = (labels: readonly string[], v: ParamValues, k: string) => labels[n(v, k)] ?? '';
@@ -271,8 +260,17 @@ export const POST_MODULES: readonly ParamGroupInfo[] = [
   },
 ];
 
-/** Export-related settings ("Output" tab). Stored with the post values in documents. */
+const isMap = (v: Readonly<Record<string, unknown>>, map: number) =>
+  Number(v.output ?? OUTPUT_MODE.color) === map;
+
+/**
+ * Export-related settings ("Output" tab). Stored with the post values in documents. Only the
+ * settings of the chosen map are shown.
+ */
 export const OUTPUT_PARAMS: readonly ParamDef[] = [
+  param.select('output', 'Output map', ['Color', 'Normal map', 'Height map'], OUTPUT_MODE.color, {
+    group: 'Output',
+  }),
   param.select(
     'alphaMode',
     'Alpha',
@@ -281,11 +279,9 @@ export const OUTPUT_PARAMS: readonly ParamDef[] = [
     {
       group: 'Output',
       description: 'How the exported alpha channel is computed.',
+      visibleWhen: (v) => isMap(v, OUTPUT_MODE.color),
     },
   ),
-  param.select('output', 'Output map', ['Color', 'Normal map', 'Height map'], OUTPUT_MODE.color, {
-    group: 'Output',
-  }),
   param.select(
     'heightSource',
     'Height source',
@@ -294,10 +290,18 @@ export const OUTPUT_PARAMS: readonly ParamDef[] = [
     {
       group: 'Output',
       description: 'Height used by relief lighting and normal / height maps.',
+      // Also read by the Relief lighting module.
+      visibleWhen: (v) => !isMap(v, OUTPUT_MODE.color) || v.lightingOn === true,
     },
   ),
-  param.float('normalStrength', 'Normal strength', 2, 0, 10, { group: 'Output' }),
-  param.bool('normalFlipY', 'Normal: DirectX (flip Y)', false, { group: 'Output' }),
+  param.float('normalStrength', 'Normal strength', 2, 0, 10, {
+    group: 'Output',
+    visibleWhen: (v) => isMap(v, OUTPUT_MODE.normal),
+  }),
+  param.bool('normalFlipY', 'Normal: DirectX (flip Y)', false, {
+    group: 'Output',
+    visibleWhen: (v) => isMap(v, OUTPUT_MODE.normal),
+  }),
 ];
 
 /**
@@ -326,7 +330,6 @@ export const TIME_PARAMS: readonly ParamDef[] = [
 /** Every per-generator post value (all tabs), as persisted in documents. */
 export const POST_PARAMS: readonly ParamDef[] = [
   ...POST_PROCESS_PARAMS,
-  ...RAMP_OVERRIDE_PARAMS,
   ...OUTPUT_PARAMS,
   ...TIME_PARAMS,
 ];
@@ -431,7 +434,46 @@ export const POST_PRESETS: readonly Preset[] = [
       dither: true,
       outlineOn: true,
       outlineWidth: 1,
+      outlineThreshold: 0.25,
     },
+  },
+  {
+    name: 'Toon (3 tones)',
+    values: { posterizeOn: true, posterize: 3 },
+  },
+  {
+    name: 'Inked toon',
+    values: {
+      posterizeOn: true,
+      posterize: 4,
+      outlineOn: true,
+      outline: 1,
+      outlineWidth: 2,
+    },
+  },
+  {
+    name: 'Comic halftone',
+    values: {
+      halftoneOn: true,
+      halftone: 44,
+      outlineOn: true,
+      outline: 1,
+      outlineWidth: 1.5,
+    },
+  },
+  {
+    name: 'Topographic',
+    values: {
+      posterizeOn: true,
+      posterize: 10,
+      outlineOn: true,
+      outline: 1,
+      outlineWidth: 1,
+    },
+  },
+  {
+    name: 'Dithered',
+    values: { posterizeOn: true, posterize: 4, dither: true },
   },
   {
     name: 'Retro print',

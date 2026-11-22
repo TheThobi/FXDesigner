@@ -21,14 +21,9 @@ export const domainWarp: ShaderGenerator = {
   ],
   presets: [
     {
-      name: 'Psychedelic bands',
+      name: 'Strong warp',
       values: { warp: 3 },
-      post: { posterize: 8, gradient: GRADIENTS.synthwave },
-    },
-    {
-      name: 'Topographic',
-      values: { warp: 1 },
-      post: { posterize: 10, outline: 1, outlineWidth: 1, gradient: GRADIENTS.sunset },
+      ramp: GRADIENTS.synthwave,
     },
     { name: 'Smoke wisps', values: { scale: 2, warp: 4, octaves: 6 } },
     { name: 'Liquid marble', values: { scale: 4, warp: 1.5, octaves: 4 } },

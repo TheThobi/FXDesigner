@@ -1,4 +1,5 @@
 // Field of rising bubbles (seamless): thin bright rims, faint fill, crescent highlight.
+// Alpha = coverage, so the bubbles composite over anything (no forced black background).
 vec4 generate(vec2 uv) {
   float n = float(u_cells);
   float t = u_time * u_speed;
@@ -28,5 +29,7 @@ vec4 generate(vec2 uv) {
       }
     }
   }
-  return vec4(vec3(saturate(v)), 1.0);
+  // Transparent background: alpha follows the rims / fill / highlights.
+  v = saturate(v);
+  return vec4(vec3(v), v);
 }

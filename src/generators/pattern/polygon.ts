@@ -35,6 +35,21 @@ export const polygon: ShaderGenerator = {
       name: 'Glowing triangle',
       values: { sides: 3, pointiness: 0, outline: true, outlineWidth: 0.03, glow: 0.8 },
     },
+    {
+      name: 'Soft diamond',
+      values: { sides: 4, pointiness: 0, radius: 0.7, softness: 0.25, rotation: 45 },
+    },
+    {
+      name: 'Spinning sigil',
+      values: {
+        sides: 8,
+        pointiness: 0.8,
+        outline: true,
+        outlineWidth: 0.02,
+        glow: 0.5,
+        speed: 0.3,
+      },
+    },
   ],
   featuredPreset: 'Hexagon outline',
 };

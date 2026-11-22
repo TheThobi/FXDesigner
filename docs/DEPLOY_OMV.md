@@ -10,7 +10,7 @@ utilisateur non-root, système de fichiers en lecture seule, port **8080**, `GET
 
 ## Option A — construire sur le NAS (le plus simple)
 
-1. Copier le dépôt sur le NAS (ex. `git clone` dans un dossier partagé `apps/procedural-texture-maker`).
+1. Copier le dépôt sur le NAS (ex. `git clone` dans un dossier partagé `apps/fx-designer`).
 2. Dans le dossier : `docker compose up -d --build`
    (ou via l'UI : _Services › Compose › Files › Add_, coller le contenu de `docker-compose.yml`,
    puis _Up_. Avec l'UI, le `build: .` exige que le chemin du fichier pointe vers le dépôt —
@@ -19,14 +19,20 @@ utilisateur non-root, système de fichiers en lecture seule, port **8080**, `GET
 
 Mise à jour : `git pull && docker compose up -d --build`.
 
+> Ancien nom : jusqu'à la v0.1 l'outil s'appelait « Procedural Texture Maker » (image et
+> conteneur `procedural-texture-maker`). Le service compose garde le même nom, donc
+> `docker compose up -d --build` remplace l'ancien conteneur ; supprimer ensuite l'ancienne image
+> avec `docker image rm procedural-texture-maker:latest`. Les documents et la sauvegarde
+> automatique du navigateur restent compatibles.
+
 ## Option B — construire ailleurs, déployer l'image
 
 ```sh
 # Sur la machine de dev (adapter l'architecture si le NAS est ARM : --platform linux/arm64)
-docker build -t procedural-texture-maker:latest .
-docker save procedural-texture-maker:latest | gzip > ptm.tar.gz
-scp ptm.tar.gz nas:/tmp/
-ssh nas 'gunzip -c /tmp/ptm.tar.gz | docker load'
+docker build -t fx-designer:latest .
+docker save fx-designer:latest | gzip > fx-designer.tar.gz
+scp fx-designer.tar.gz nas:/tmp/
+ssh nas 'gunzip -c /tmp/fx-designer.tar.gz | docker load'
 ```
 
 Puis sur OMV, un compose sans `build:` :
@@ -34,7 +40,7 @@ Puis sur OMV, un compose sans `build:` :
 ```yaml
 services:
   texture-maker:
-    image: procedural-texture-maker:latest
+    image: fx-designer:latest
     restart: unless-stopped
     ports: ['8080:8080']
     read_only: true
@@ -58,7 +64,7 @@ Exemple Caddy :
 
 ```
 textures.mondomaine.fr {
-    reverse_proxy procedural-texture-maker:8080
+    reverse_proxy fx-designer:8080
 }
 ```
 

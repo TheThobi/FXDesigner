@@ -31,6 +31,14 @@ export const beam: ShaderGenerator = {
       name: 'Light pillar',
       values: { width: 0.4, core: 0.3, falloff: 2, endFade: 0.8, vertical: true },
     },
+    {
+      name: 'Lightning rod',
+      values: { width: 0.12, core: 0.8, falloff: 3, flicker: 1, noiseScale: 14, speed: 3 },
+    },
+    {
+      name: 'Wide aurora',
+      values: { width: 1, core: 0, falloff: 0.6, flicker: 0.7, noiseScale: 2, endFade: 0.5 },
+    },
   ],
   featuredPreset: 'Energy stream',
 };

@@ -11,12 +11,30 @@ import { createControl, type Control } from './controls';
 import { clear, h } from './dom';
 import { icon, isIconName } from './icons';
 
+/** Visual preset picker shown above the parameters. */
+export interface PresetGalleryOptions {
+  readonly title: string;
+  readonly presets: readonly Preset[];
+  /** User presets, after the built-in ones. */
+  readonly userPresets?: readonly Preset[];
+  readonly onPick: (preset: Preset) => void;
+  /** Pointer over a tile (preview it live), null when it leaves. */
+  readonly onHover?: (preset: Preset | null) => void;
+  /** Image of the result (data URL), or null when it can't be previewed. */
+  readonly thumbnail?: (preset: Preset) => Promise<string | null>;
+  /** Extra elements in the gallery header (e.g. the user preset manager). */
+  readonly extras?: readonly HTMLElement[];
+}
+
 export interface ParamPanelOptions {
   readonly defs: readonly ParamDef[];
   readonly values: ParamValues;
-  readonly presets?: readonly Preset[];
+  readonly gallery?: PresetGalleryOptions;
+  /** Extra elements shown in the actions row. */
+  readonly extras?: readonly HTMLElement[];
+  /** Elements appended to a row's value cell, by param key (e.g. a random seed button). */
+  readonly rowExtras?: Readonly<Record<string, HTMLElement>>;
   readonly onChange: (key: string, value: ParamValue) => void;
-  readonly onPreset?: (preset: Preset) => void;
   readonly onReset?: () => void;
   /** Extra buttons shown next to "Reset all". */
   readonly actions?: readonly { label: string; title?: string; onClick: () => void }[];
@@ -24,8 +42,6 @@ export interface ParamPanelOptions {
   readonly defaults?: ParamValues;
   /** Module metadata (descriptions, header summaries) keyed by group name. */
   readonly groups?: readonly ParamGroupInfo[];
-  /** Show a strip of module chips (in group order) above the sections. */
-  readonly moduleStrip?: boolean;
 }
 
 const DEFAULT_GROUP = 'General';
@@ -45,7 +61,6 @@ interface Section {
   readonly checkbox: HTMLInputElement | null;
   readonly summary: HTMLElement;
   readonly info: ParamGroupInfo | undefined;
-  readonly chip: HTMLButtonElement | null;
 }
 
 /**
@@ -59,6 +74,10 @@ export class ParamPanel {
   private readonly collapsed = new Set<string>();
   private values: Record<string, ParamValue> = {};
   private query = '';
+  private gallery: { readonly opts: PresetGalleryOptions; readonly tiles: HTMLElement[] } | null =
+    null;
+  /** Gallery collapsed state, per gallery title (kept across renders). */
+  private static readonly closedGalleries = new Set<string>();
 
   constructor(readonly element: HTMLElement) {
     element.classList.add('param-panel');
@@ -70,22 +89,12 @@ export class ParamPanel {
     this.sections = [];
     this.values = { ...opts.values };
 
+    this.gallery = null;
+    if (opts.gallery && (opts.gallery.presets.length || opts.gallery.userPresets?.length))
+      this.element.append(this.buildGallery(opts.gallery));
+
     const actions = h('div', { class: 'panel-actions' });
-    if (opts.presets?.length && opts.onPreset) {
-      const { onPreset, presets } = opts;
-      const select = h(
-        'select',
-        { class: 'preset-select', 'aria-label': 'Presets' },
-        h('option', { value: '', text: 'Presets…' }),
-        ...presets.map((p, i) => h('option', { value: String(i), text: p.name })),
-      );
-      select.addEventListener('change', () => {
-        const preset = presets[Number(select.value)];
-        select.value = '';
-        if (preset) onPreset(preset);
-      });
-      actions.append(select);
-    }
+    actions.append(...(opts.extras ?? []));
     if (opts.onReset) {
       actions.append(
         h(
@@ -109,17 +118,96 @@ export class ParamPanel {
       groups.set(g, [...(groups.get(g) ?? []), def]);
     }
 
-    const strip = opts.moduleStrip ? h('div', { class: 'module-strip' }) : null;
-    if (strip) this.element.append(strip);
-
     for (const [name, defs] of groups) {
       const section = this.section(name, defs, opts);
-      if (strip && section.chip) strip.append(section.chip);
       this.sections.push(section);
       this.element.append(section.element);
     }
     this.refreshSections();
     this.filter(this.query);
+  }
+
+  /** Asks the thumbnails of the gallery again (they are cached by the provider). */
+  reloadThumbnails(): void {
+    const g = this.gallery;
+    if (!g?.opts.thumbnail) return;
+    const list = [...g.opts.presets, ...(g.opts.userPresets ?? [])];
+    g.tiles.forEach((tile, i) => {
+      const preset = list[i];
+      if (preset) this.loadThumb(g.opts, tile, preset);
+    });
+  }
+
+  private loadThumb(opts: PresetGalleryOptions, tile: HTMLElement, preset: Preset): void {
+    const img = tile.querySelector('img');
+    if (!img || !opts.thumbnail) return;
+    void opts.thumbnail(preset).then((url) => {
+      if (!url || !img.isConnected) return;
+      if (img.src !== url) img.src = url;
+      tile.classList.add('loaded');
+    });
+  }
+
+  private buildGallery(opts: PresetGalleryOptions): HTMLElement {
+    const tiles: HTMLElement[] = [];
+    const tile = (preset: Preset, user: boolean) => {
+      const el = h(
+        'button',
+        {
+          type: 'button',
+          class: `preset-tile${user ? ' user' : ''}`,
+          title: `${preset.name} · click to apply`,
+          onclick: () => opts.onPick(preset),
+        },
+        h(
+          'span',
+          { class: 'preset-thumb' },
+          opts.thumbnail ? h('img', { alt: '', draggable: false }) : null,
+        ),
+        h('span', { class: 'preset-name', text: preset.name }),
+      );
+      if (opts.onHover) {
+        el.addEventListener('pointerenter', () => opts.onHover?.(preset));
+        el.addEventListener('pointerleave', () => opts.onHover?.(null));
+      }
+      tiles.push(el);
+      this.loadThumb(opts, el, preset);
+      return el;
+    };
+    const user = opts.userPresets ?? [];
+    const grid = h(
+      'div',
+      { class: 'preset-grid' },
+      ...opts.presets.map((p) => tile(p, false)),
+      ...(user.length
+        ? [
+            h('div', { class: 'preset-divider', text: 'My presets' }),
+            ...user.map((p) => tile(p, true)),
+          ]
+        : []),
+    );
+    const count = opts.presets.length + user.length;
+    const details = h(
+      'details',
+      { class: 'preset-gallery', open: !ParamPanel.closedGalleries.has(opts.title) },
+      h(
+        'summary',
+        {},
+        h('span', { class: 'group-title', text: opts.title }),
+        h('span', { class: 'module-summary', text: String(count) }),
+        h('span', { class: 'preset-extras' }, ...(opts.extras ?? [])),
+      ),
+      grid,
+    );
+    details.querySelector('.preset-extras')?.addEventListener('click', (e) => e.preventDefault());
+    details.addEventListener('toggle', () => {
+      if (details.open) ParamPanel.closedGalleries.delete(opts.title);
+      else ParamPanel.closedGalleries.add(opts.title);
+    });
+    // Leaving the panel while hovering a tile ends the preview.
+    grid.addEventListener('pointerleave', () => opts.onHover?.(null));
+    this.gallery = { opts, tiles };
+    return details;
   }
 
   /** Pushes new values into existing widgets (no rebuild, no change events). */
@@ -143,6 +231,20 @@ export class ParamPanel {
     this.refreshSections();
   }
 
+  /**
+   * Greys out (and blocks) the rows of `keys`, e.g. settings of an unconnected input; `reason`
+   * becomes their tooltip.
+   */
+  setDisabled(keys: ReadonlySet<string>, reason: string): void {
+    for (const [key, row] of this.rows) {
+      const off = keys.has(key);
+      row.element.classList.toggle('disabled', off);
+      row.element.toggleAttribute('inert', off);
+      if (off) row.element.title = reason;
+      else row.element.removeAttribute('title');
+    }
+  }
+
   /** Number of values differing from their defaults. */
   modifiedCount(): number {
     let n = 0;
@@ -160,7 +262,8 @@ export class ParamPanel {
       row.element.hidden = !match;
     }
     for (const s of this.sections) {
-      const visible = s.element.querySelector('.param-row:not([hidden])') !== null;
+      const visible =
+        s.element.querySelector('.param-row:not([hidden]):not(.cond-hidden)') !== null;
       s.element.hidden = !visible;
       if (this.query && visible) s.element.open = true;
     }
@@ -213,32 +316,18 @@ export class ParamPanel {
       else this.collapsed.add(name);
     });
 
-    const chip = toggle
-      ? h(
-          'button',
-          {
-            class: 'module-chip',
-            title: info?.description ?? name,
-            onclick: () => {
-              element.open = true;
-              element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-              element.classList.add('flash');
-              setTimeout(() => element.classList.remove('flash'), 600);
-            },
-          },
-          isIconName(info?.icon) ? icon(info.icon, 12) : null,
-          h('span', { text: name }),
-        )
-      : null;
-    return { name, element, toggle, checkbox, summary, info, chip };
+    return { name, element, toggle, checkbox, summary, info };
   }
 
-  /** Updates module headers (summary text, on/off look, chips) from current values. */
+  /** Updates module headers (summary text, on/off look) from current values. */
   private refreshSections(): void {
+    for (const row of this.rows.values()) {
+      const shown = row.def.visibleWhen ? row.def.visibleWhen(this.values) : true;
+      row.element.classList.toggle('cond-hidden', !shown);
+    }
     for (const s of this.sections) {
       const on = !s.toggle || this.values[s.toggle.key] === true;
       s.element.classList.toggle('is-off', !on);
-      s.chip?.classList.toggle('on', on);
       const text = s.toggle && !on ? 'Off' : (s.info?.summary?.(this.values) ?? '');
       s.summary.textContent = text;
       s.summary.hidden = text === '';
@@ -273,12 +362,12 @@ export class ParamPanel {
       title: [def.description, 'Double-click to reset'].filter(Boolean).join('\n'),
     });
     label.addEventListener('dblclick', reset);
-    const wide = def.type === 'gradient';
+    const wide = def.type === 'gradient' || def.type === 'image';
     const element = h(
       'div',
       { class: `param-row${wide ? ' wide' : ''}`, 'data-key': def.key },
       label,
-      h('div', { class: 'param-value' }, control.element),
+      h('div', { class: 'param-value' }, control.element, opts.rowExtras?.[def.key] ?? null),
       resetButton,
     );
     const row: Row = { def, control, element, resetButton, defaultValue };

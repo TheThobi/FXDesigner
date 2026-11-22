@@ -114,6 +114,10 @@ export class PingPong {
     return this.targets[0].width;
   }
 
+  get height(): number {
+    return this.targets[0].height;
+  }
+
   swap(): void {
     this.targets = [this.targets[1], this.targets[0]];
   }

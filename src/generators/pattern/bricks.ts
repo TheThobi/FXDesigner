@@ -6,7 +6,7 @@ export const bricks: ShaderGenerator = {
   kind: 'shader',
   id: 'bricks',
   name: 'Bricks',
-  category: 'pattern',
+  category: 'material',
   description: 'Seamless bricks / tiles height map. Try Output → Normal map.',
   animated: false,
   fragment,

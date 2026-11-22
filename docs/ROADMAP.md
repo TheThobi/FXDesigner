@@ -32,30 +32,81 @@ Priorités indicatives. Cocher au fil de l'eau.
 - [x] Post : Kuwahara, étalonnage, aquarelle, grain papier ; presets de look ; scope
       global/local ; export à la résolution du pixel art.
 - [x] Presets étoffés partout, vignette = preset mis en avant, défilement au survol.
+- [x] **Système nodal** dans le viewport (nodes avec texture en direct, entrées Base / Mask /
+      Warp + entrées propres, liens courbes, post et rampe par node, œil pour masquer le post) ;
+      documents v4 (migration automatique des anciens).
+- [x] Presets qui repartent de zéro + confirmation ; plus de surcharge de rampe (rampe du post
+      ou `Preset.ramp`).
+- [x] Caustiques d'eau simulées (équation d'onde + projection réfractée de la lumière,
+      dispersion) ; Fumée & Feu façon FluidNinja (vorticité, flottabilité, émetteurs, entrées
+      Emitter / Flow, motion vectors).
+- [x] Motifs tirés de références : motifs géométriques, masques doux, hachures, taches / camo.
+- [x] Timeline : contrôles centrés, allers-retours non destructifs dans les images-clés des
+      simulations ; flipbook avec début décalé / temps de chauffe.
+- [x] Freeze frame par node, modules d'ajustement (transformation, maths, code GLSL),
+      format d'espace de travail non carré, Paint Mask, usure de surface, émetteur en orbite,
+      rampe avec opacité visible, nodes retravaillées (contour, sélection, pulse discret).
+- [x] Bibliothèque de presets utilisateur (enregistrer, appliquer, renommer, supprimer) ;
+      node **Image** (import / glisser-déposer, utilisable en Base / Mask / Warp / Emitter) ;
+      export **ZIP** couleur + normal + height en un clic ; verre brisé refait en segments.
+- [x] **Opérateurs** façon Substance (Blend, Mask, Levels, Transform, Warp, Blur, Slope Blur,
+      Distance, Edge Detect, Channels, Pack RGBA, Custom Code) dans un onglet dédié ; entrées
+      génériques et modules d'ajustement migrés vers ces opérateurs (documents v5) ; fenêtre
+      d'export des maps avec aperçus.
+- [x] Renommage en **FX Designer**. Onglets Generators / Operators dans l'en-tête du panneau,
+      entrées centrées sur les nodes, **Unpack RGBA** à 4 sorties (liens par canal, documents
+      v6), **Distance** exacte (jump flooding : extérieur, biseau, signé, couleurs propagées),
+      Blur gaussien séparable avec nombre de samples, passes multiples pour les opérateurs.
+- [x] Sélection multiple dans le viewport (rectangle, `Shift`+clic, déplacement groupé,
+      suppression), liens tirés depuis les entrées, Blur à échantillonnage automatique
+      (gaussien multi-niveaux).
+- [x] Liens à angles droits arrondis, pins en barres arrondies, marges égales autour de l'image ;
+      menu d'ajout rapide quand un lien est lâché dans le vide ; générateurs Weave, Creased,
+      Crystal, Anisotropic Noise ; Surface Wear séparé en Brushed Metal / Scratches / Cracked
+      Glass (documents v7) ; **opérateurs d'animation** (Hue Shift, Color Cycle, Flicker,
+      Scroll, Dissolve).
+- [x] Bibliothèque de **systèmes** (plusieurs graphes sauvegardés, vignettes) ; fenêtre
+      d'**export** unique (image, maps, flipbook, toutes les nodes en ZIP, document, lien) ;
+      types de valeur (gris / couleur détectés) sur les pins et liens en dégradé ; liens
+      cliquables (Suppr) ; nodes repliables, alignées sur la grille, la sélection passe devant ;
+      fond du viewport lié à la caméra ; catégories revues (Feu & fumée, Lumière & magie,
+      Impacts & mouvement, Eau, Matières…) ; presets de générateur séparés du post-traitement ;
+      barre Stats ; nouveau logo.
+- [x] Galeries de presets et de looks avec vignettes et aperçu au survol ; éditeur de rampe
+      refait (sélecteur de couleur complet, stops déplaçables) ; **conversion de n'importe
+      quelle node shader en code GLSL** (node custom) et générateur Custom Shader ; panneaux
+      déplaçables ; menu File, export / import de la bibliothèque ; valeurs tapées au-delà
+      des curseurs ; Crystal et Creased refaits ; documentation générée (`docs/NODES.md`) et
+      guide d'écriture de nodes (`docs/AUTHORING.md`, utilisable par une IA).
+- [x] **Comptes** (pseudo / email / mot de passe, Discord) et bibliothèque synchronisée sur le
+      compte (PostgreSQL) ; dossiers dans la bibliothèque ; déploiement auto-update avec
+      rollback ; presets de générateurs sans effets de post-process (looks toon / comic /
+      topographique déplacés dans les looks).
 
 ## Court terme
 
 - [ ] Boucles « natives » sans fondu pour les bruits (phase 0..1, rotation de 2π du bruit
       « flow » par boucle) quand le fondu générique abîme l'effet.
-- [ ] Bibliothèque de presets utilisateur dans `localStorage` (liste, renommer, supprimer).
-- [ ] Graine depuis une **image** importée (RD, marbrure, « nourriture » Physarum) et carte f/k
-      depuis une image, comme Karl Sims.
-- [ ] Physarum multi-espèces (3 populations qui s'évitent → rendu RGB très graphique).
+- [x] Bibliothèque de presets utilisateur dans `localStorage` (liste, renommer, supprimer).
+- [x] Graine depuis une **image** (ou n'importe quelle node) pour la réaction-diffusion et la
+      marbrure (entrée Seed).
+- [x] « Nourriture » Physarum depuis n'importe quelle node (entrée Food).
+- [x] Carte f/k de la réaction-diffusion depuis une image, comme Karl Sims (entrée f/k map).
+- [x] Physarum multi-espèces (jusqu'à 3 populations qui s'évitent → rendu RGB).
 - [ ] Contours toon plus riches : épaisseur variable, contour intérieur/extérieur séparés.
 
 ## Pistes (direction Silksong / Dead Cells)
 
-- [ ] Chaîne de nœuds simple : générateur → slope blur avec un **autre générateur** comme slope
-      map, blend de deux générateurs, masques (la base d'un graphe de nœuds).
-- [ ] Flowmap : importer une flowmap/texture à prévisualiser, appliquer une flowmap peinte
-      comme distorsion d'un autre générateur, export avec flip X/Y.
+- [x] Chaîne de nœuds simple : blend de deux générateurs, masques, warp (graphe de nœuds).
+- [x] Flowmap : export avec flip X/Y (fenêtre d'export : flip R / G). (Import d'une texture :
+      node Image ; flowmap peinte appliquée à un autre générateur : opérateur Warp ou entrée Flow.)
 - [ ] Particules : fumée « wispy », gouttes/éclaboussures d'eau, feuilles, lueurs magiques.
-- [ ] Export multi-maps en un clic (couleur, height, normal) en ZIP.
+- [x] Export multi-maps en un clic (couleur, height, normal) en ZIP.
 
 ## Simulations candidates
 
 - [ ] **Croissance différentielle** (lignes qui se plissent, motifs de cerveau) — CPU + rendu de lignes.
-- [ ] Fluide : confinement de vorticité, couleurs d'encre multiples (RGB), obstacles peints.
+- [ ] Fluide : couleurs d'encre multiples (RGB), obstacles peints. (Vorticité : Smoke & Fire.)
 - [ ] Érosion hydraulique pour heightmaps (plus réaliste, utile avec l'export normal map).
 
 ## Effets stylisés candidats
@@ -66,10 +117,10 @@ Priorités indicatives. Cocher au fil de l'eau.
 
 ## Moyen terme
 
-- [ ] **Graphe de nœuds / calques** : combiner plusieurs générateurs (blend modes, masques, warp
-      d'un générateur par un autre). La chaîne générateur → source → post en est la base.
-- [ ] Rapports non carrés (résolution W×H).
-- [ ] Export EXR/PNG 16 bits pour les height maps, export ZIP (couleur + normal + height).
+- [x] **Graphe de nœuds / calques** : combiner plusieurs générateurs (blend modes, masques, warp
+      d'un générateur par un autre).
+- [x] Rapports non carrés (format de l'espace de travail).
+- [x] Export PNG 16 bits pour les height maps (fenêtre d'export). EXR : à faire si besoin.
 - [ ] i18n de l'interface (FR/EN).
 - [ ] PWA (manifest + service worker) pour usage hors-ligne.
 
@@ -77,5 +128,6 @@ Priorités indicatives. Cocher au fil de l'eau.
 
 - [ ] Bibliothèque communautaire (presets et shaders custom, comptes) : voir
       [COMMUNITY.md](COMMUNITY.md) pour le découpage. Étapes 1-2 sans serveur : presets
-      utilisateur locaux, puis générateur « Custom shader » (GLSL).
+      utilisateur locaux (fait), puis générateur « Custom shader » (GLSL ; le module Custom code
+      des ajustements en est la première brique).
 - [ ] WebGPU (compute shaders) si les simulations deviennent limitantes.

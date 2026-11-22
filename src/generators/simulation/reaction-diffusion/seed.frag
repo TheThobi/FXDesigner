@@ -20,5 +20,10 @@ void main() {
     // Rasterized text
     b = step(0.5, texture(u_seedTexture, uv).r);
   }
+  // Seed input (any node): its bright areas start the reaction, replacing the seed mode.
+  if (u_has_seed) {
+    vec4 c = texture(u_in_seed, uv);
+    b = step(0.5, luminance(c.rgb) * c.a);
+  }
   outColor = vec4(1.0, b, 0.0, 1.0);
 }
