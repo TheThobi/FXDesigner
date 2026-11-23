@@ -7,7 +7,7 @@ export const lightning: ShaderGenerator = {
   id: 'lightning',
   name: 'Lightning',
   category: 'light',
-  description: 'Electric bolts; re-strikes over time.',
+  description: 'Electric bolts with sharp jumps or smooth motion.',
   animated: true,
   fragment,
   params: [
@@ -17,7 +17,20 @@ export const lightning: ShaderGenerator = {
     param.int('octaves', 'Jaggedness', 8, 1, 8),
     param.float('thickness', 'Thickness', 0.01, 0.001, 0.08),
     param.float('glow', 'Glow', 0.4, 0, 0.6),
-    param.float('strikeRate', 'Strikes / s', 4, 0, 30, { group: 'Animation' }),
+    param.bool('pinEnds', 'Pin ends', true),
+    param.bool('restrike', 'Smooth Movement', true, {
+      group: 'Animation',
+      invertedCheckbox: true,
+      description: 'Use continuous movement between frames.',
+    }),
+    param.float('strikeRate', 'Strikes / s', 4, 0, 30, {
+      group: 'Animation',
+      visibleWhen: (values) => values.restrike !== false,
+    }),
+    param.float('waveSpeed', 'Wave speed', 0.2, 0, 2, {
+      group: 'Animation',
+      visibleWhen: (values) => values.restrike === false,
+    }),
   ],
   defaultPost: { alphaMode: 1 },
   // Defaults = the Arc look (first preset, browser thumbnail).

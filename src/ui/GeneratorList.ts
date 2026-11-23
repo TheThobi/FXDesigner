@@ -344,7 +344,11 @@ function typeLabel(category: GeneratorCategory): string {
 const OPERATOR_GLYPHS: Readonly<Record<string, string>> = {
   'op-blend': '⧉',
   'op-mask': '◐',
-  'op-levels': '◢',
+  'op-math': 'π',
+  'op-auto-levels': '◩',
+  'op-edge-fade': '▒',
+  uniform: '1.0',
+  'op-level': '◢',
   'op-transform': '⤡',
   'op-warp': '≋',
   'op-blur': '◌',

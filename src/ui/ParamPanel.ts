@@ -44,6 +44,7 @@ export interface ParamPanelOptions {
   readonly extras?: readonly HTMLElement[];
   /** Elements appended to a row's value cell, by param key (e.g. a random seed button). */
   readonly rowExtras?: Readonly<Record<string, HTMLElement>>;
+  readonly levelsRange?: boolean;
   readonly onChange: (key: string, value: ParamValue) => void;
   readonly onReset?: () => void;
   /** Extra buttons shown next to "Reset all". */
@@ -79,6 +80,7 @@ interface Section {
  * summary of its state, so the panel stays readable with many parameters.
  */
 export class ParamPanel {
+  private readonly levelHandles = new Map<string, HTMLInputElement>();
   private rows = new Map<string, Row>();
   private sections: Section[] = [];
   private readonly collapsed = new Set<string>();
@@ -99,6 +101,7 @@ export class ParamPanel {
   render(opts: ParamPanelOptions): void {
     clear(this.element);
     this.rows.clear();
+    this.levelHandles.clear();
     this.sections = [];
     this.values = { ...opts.values };
 
@@ -127,6 +130,37 @@ export class ParamPanel {
       );
     }
     if (actions.childElementCount > 0) this.element.append(actions);
+
+    if (opts.levelsRange) {
+      for (const [label, prefix] of [
+        ['Input', 'in'],
+        ['Output', 'out'],
+      ] as const) {
+        const track = h('div', { class: 'levels-track' });
+        for (const [point, title] of [
+          ['Low', 'black'],
+          ['High', 'white'],
+        ] as const) {
+          const key = prefix + point;
+          const value = opts.values[key];
+          if (typeof value !== 'number') continue;
+          const handle = h('input', {
+            type: 'range',
+            min: 0,
+            max: 1,
+            step: 0.001,
+            value,
+            'aria-label': `${label} ${title} point`,
+            'data-point': title,
+          });
+          handle.addEventListener('input', () => opts.onChange(key, handle.valueAsNumber));
+          this.levelHandles.set(key, handle);
+          track.append(handle);
+        }
+        if (track.childElementCount)
+          this.element.append(h('div', { class: 'levels-range' }, label, track));
+      }
+    }
 
     const groups = new Map<string, ParamDef[]>();
     for (const def of opts.defs) {
@@ -252,6 +286,7 @@ export class ParamPanel {
 
   /** Pushes new values into existing widgets (no rebuild, no change events). */
   setValues(values: ParamValues): void {
+    for (const [key, handle] of this.levelHandles) handle.value = String(values[key]);
     for (const [key, row] of this.rows) {
       const v = values[key];
       if (v === undefined) continue;

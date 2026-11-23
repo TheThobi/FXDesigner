@@ -342,6 +342,7 @@ export function openLibrary(actions: LibraryActions): void {
         class: `library-card${item.id === current ? ' current' : ''}`,
         role: 'button',
         tabIndex: 0,
+        'aria-current': item.id === current ? 'true' : null,
         title:
           item.id === current
             ? 'Current system'
@@ -359,14 +360,10 @@ export function openLibrary(actions: LibraryActions): void {
         publishBadge(state),
       ),
       h('span', { class: 'library-name', text: item.name }),
-      h(
-        'span',
-        { class: 'library-date' },
-        item.id === current ? h('span', { class: 'library-current', text: 'Open' }) : null,
-        h('span', {
-          text: folderName ? `${folderName} · ${when(item.updated)}` : when(item.updated),
-        }),
-      ),
+      h('span', {
+        class: 'library-date',
+        text: folderName ? `${folderName} · ${when(item.updated)}` : when(item.updated),
+      }),
       state === 'local'
         ? h('button', {
             type: 'button',

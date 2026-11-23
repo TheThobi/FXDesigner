@@ -88,6 +88,8 @@ export const GENERATORS: readonly GeneratorDefinition[] = [
   ...OPERATORS,
 ];
 
+export const ADDABLE_GENERATORS = GENERATORS.filter((def) => !def.role && def.id !== 'op-levels');
+
 const BY_ID = new Map(GENERATORS.map((g) => [g.id, g]));
 
 export const DEFAULT_GENERATOR_ID = reactionDiffusion.id;
@@ -124,7 +126,9 @@ export function generatorsByFamily(): GeneratorFamilyGroup[] {
     sections: f.categories
       .map((category) => ({
         category,
-        generators: (byCategory.get(category) ?? []).filter((def) => !def.role),
+        generators: (byCategory.get(category) ?? []).filter((def) =>
+          ADDABLE_GENERATORS.includes(def),
+        ),
       }))
       .filter((s) => s.generators.length > 0),
   })).filter((f) => f.sections.length > 0);

@@ -101,15 +101,15 @@ export const veins: ShaderGenerator = {
     param.float('scale', 'Noise scale', 3, 1, 12),
     param.int('octaves', 'Octaves', 5, 1, 8),
     param.int('slant', 'Slant (marble)', 1, -3, 3),
-    param.float('stretch', 'Stretch (wood)', 0.25, 0.05, 1),
-    param.vec2('center', 'Center (wood)', [0, -1.2], -2, 2),
+    param.float('stretch', 'Stretch (wood)', 1, 0.05, 1),
+    param.vec2('center', 'Center (wood)', [0, 0], -2, 2),
     param.speed(0, 1),
   ],
   presets: [
     { name: 'White marble', values: { pattern: 0, bands: 3, distortion: 3, sharpness: 4 } },
     {
       name: 'Wood grain',
-      values: { pattern: 1, bands: 30, distortion: 3, sharpness: 2 },
+      values: { pattern: 1, bands: 30, distortion: 3, sharpness: 2, stretch: 1, center: [0, 0] },
       ramp: GRADIENTS.gold,
     },
     {
@@ -117,7 +117,10 @@ export const veins: ShaderGenerator = {
       values: { pattern: 2, bands: 10, sharpness: 2 },
       ramp: GRADIENTS.sunset,
     },
-    { name: 'Tree rings tight', values: { pattern: 1, bands: 24, distortion: 1.2, sharpness: 6 } },
+    {
+      name: 'Tree rings tight',
+      values: { pattern: 1, bands: 24, distortion: 1.2, sharpness: 6, stretch: 1, center: [0, 0] },
+    },
     {
       name: 'Storm marble',
       values: { pattern: 0, bands: 8, distortion: 6, sharpness: 8, octaves: 7 },

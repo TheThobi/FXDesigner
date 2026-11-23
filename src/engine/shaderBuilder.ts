@@ -63,11 +63,15 @@ export function uniformDeclarations(defs: readonly ParamDef[]): string {
 
 /**
  * Generator-specific node inputs: `u_in_<key>` (the connected node's output, a blank texture
- * when nothing is connected) and `u_has_<key>`.
+ * when nothing is connected) and `u_has_<key>`. Shader operators can inspect
+ * `u_channel_<key>` (-1 for RGBA, 0–3 for a scalar channel, 4 for RGB).
  */
 export function inputDeclarations(inputs: readonly NodeInputDef[]): string {
   return inputs
-    .map((i) => `uniform sampler2D u_in_${i.key};\nuniform bool u_has_${i.key};`)
+    .map(
+      (i) =>
+        `uniform sampler2D u_in_${i.key};\nuniform bool u_has_${i.key};\nuniform int u_channel_${i.key};`,
+    )
     .join('\n');
 }
 

@@ -163,6 +163,7 @@ export class NodeTargets {
  * (program cache, gradient textures, one live simulation per node).
  */
 export class Renderer {
+  private readonly outputChannels = new WeakMap<RenderTarget, NodeChannel>();
   readonly gpu: GpuContext;
   private readonly programs = new Map<string, ShaderProgram>();
   private readonly gradients: GradientTextureCache;
@@ -327,6 +328,11 @@ export class Renderer {
     const postOn = req.postEnabled !== false;
     const input = this.renderInput(req, targets, width, height, postOn);
     const out = final ?? targets.get('output', width, height);
+    const source = req.inputs?.image;
+    const channel =
+      req.generator.role === 'reroute' && source ? this.outputChannels.get(source) : undefined;
+    if (channel === undefined) this.outputChannels.delete(out);
+    else this.outputChannels.set(out, channel);
     if (postOn) this.renderPost(req, input, out);
     else {
       this.copyProgram.use().texture('u_source', input.texture, 0);
@@ -349,6 +355,7 @@ export class Renderer {
     const o = outputDef(def, key);
     if (!out || !o) return key === undefined ? out : undefined;
     const dst = targets.get(`out:${o.key}`, out.width, out.height);
+    this.outputChannels.set(dst, o.channel);
     this.channelProgram.use().set('u_channel', o.channel).texture('u_source', out.texture, 0);
     this.gpu.bindTarget(dst);
     this.gpu.drawFullscreen();
@@ -625,8 +632,10 @@ export class Renderer {
         .texture(uniformName(def.key), image?.texture ?? this.gpu.blankTexture, unit++);
     }
     for (const [key, texture] of Object.entries(this.customInputs(req))) {
+      const input = req.inputs?.[key];
       program
         .set(`u_has_${key}`, texture !== null)
+        .set(`u_channel_${key}`, input ? (this.outputChannels.get(input) ?? -1) : -1)
         .texture(`u_in_${key}`, texture ?? this.gpu.blankTexture, unit++);
     }
     if (multi) {

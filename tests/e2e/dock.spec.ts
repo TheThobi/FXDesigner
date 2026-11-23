@@ -4,7 +4,7 @@ test(
   'hidden panels give their space to the viewport and restore their sizes',
   { tag: '@part4' },
   async ({ page }) => {
-    await page.goto('/?e2e');
+    await page.goto('/?e2e&paused');
     const stack = (id: string) =>
       page.locator('.dock-stack').filter({ has: page.locator(`.dock-tab[data-panel="${id}"]`) });
     const width = async (id: string) => (await stack(id).boundingBox())!.width;
@@ -12,6 +12,10 @@ test(
       await page.getByRole('button', { name: 'Layout', exact: true }).click();
       await page.getByRole('menuitemcheckbox', { name, exact: true }).click();
       await page.keyboard.press('Escape');
+      await expect(page.getByRole('button', { name: 'Layout', exact: true })).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
     };
     await expect(stack('viewport')).toBeVisible();
     const browser = await width('browser');

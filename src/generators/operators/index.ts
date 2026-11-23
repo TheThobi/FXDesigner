@@ -1,3 +1,5 @@
+import mathFrag from './math.glsl?raw';
+import manualLevelsFrag from './manual-levels.glsl?raw';
 /**
  * Operators: nodes that transform or combine other nodes' images (Substance Designer-like
  * utilities). They are shader generators of the 'operator' category with declared `inputs`,
@@ -94,7 +96,7 @@ function operator(spec: {
 export const blendOp = operator({
   id: 'op-blend',
   name: 'Blend',
-  description: 'Foreground over Background with a blend mode, opacity and optional mask.',
+  description: 'Composite with Normal or combine channels with a blend mode, opacity and mask.',
   fragment: blendFrag,
   inputs: [
     input('foreground', 'Foreground', 'Image blended on top.', '#e8e8e8'),
@@ -134,36 +136,66 @@ export const maskOp = operator({
   ],
 });
 
+const LEVEL_PARAMS = [
+  param.float('inLow', 'Input low', 0, 0, 1, { group: 'Levels' }),
+  param.float('inHigh', 'Input high', 1, 0, 1, { group: 'Levels' }),
+  param.float('gamma', 'Gamma', 1, 0.1, 5, { group: 'Levels' }),
+  param.float('outLow', 'Output low', 0, 0, 1, { group: 'Levels' }),
+  param.float('outHigh', 'Output high', 1, 0, 1, { group: 'Levels' }),
+];
+const MATH_PARAMS = [
+  param.float('power', 'Power', 1, 0.1, 8, { group: 'Math' }),
+  param.float('gain', 'Multiply', 1, 0, 4, { group: 'Math' }),
+  param.float('bias', 'Add', 0, -1, 1, { group: 'Math' }),
+  param.bool('fold', 'Fold', false, {
+    group: 'Math',
+    description: 'Mirror around 0.5: |2v − 1| (gradients become ridges).',
+  }),
+  param.float('threshold', 'Threshold', 0, 0, 1, { group: 'Math', description: '0 = off.' }),
+  param.float('softness', 'Threshold softness', 0.02, 0, 0.5, { group: 'Math' }),
+  param.bool('invert', 'Invert', false, { group: 'Math' }),
+  param.bool('clampValue', 'Clamp 0..1', true, { group: 'Math' }),
+];
+
 export const levelsOp = operator({
   id: 'op-levels',
   name: 'Levels & Math',
-  description: 'Levels, gamma, power, multiply, add, fold, threshold, invert and clamp.',
+  description: 'Combined Levels and Math for existing graphs.',
   fragment: levelsFrag,
   inputs: [IMAGE],
-  params: [
-    param.float('inLow', 'Input low', 0, 0, 1, { group: 'Levels' }),
-    param.float('inHigh', 'Input high', 1, 0, 1, { group: 'Levels' }),
-    param.float('gamma', 'Gamma', 1, 0.1, 5, { group: 'Levels' }),
-    param.float('outLow', 'Output low', 0, 0, 1, { group: 'Levels' }),
-    param.float('outHigh', 'Output high', 1, 0, 1, { group: 'Levels' }),
-    param.float('power', 'Power', 1, 0.1, 8, { group: 'Math' }),
-    param.float('gain', 'Multiply', 1, 0, 4, { group: 'Math' }),
-    param.float('bias', 'Add', 0, -1, 1, { group: 'Math' }),
-    param.bool('fold', 'Fold', false, {
-      group: 'Math',
-      description: 'Mirror around 0.5: |2v − 1| (gradients become ridges).',
-    }),
-    param.float('threshold', 'Threshold', 0, 0, 1, { group: 'Math', description: '0 = off.' }),
-    param.float('softness', 'Threshold softness', 0.02, 0, 0.5, { group: 'Math' }),
-    param.bool('invert', 'Invert', false, { group: 'Math' }),
-    param.bool('clampValue', 'Clamp 0..1', true, { group: 'Math' }),
-  ],
+  params: [...LEVEL_PARAMS, ...MATH_PARAMS],
   presets: [
     { name: 'Identity', values: {} },
     { name: 'Invert', values: { invert: true } },
     { name: 'High contrast', values: { inLow: 0.3, inHigh: 0.7 } },
-    { name: 'Ridges', values: { fold: true, power: 0.6 } },
-    { name: 'Threshold', values: { threshold: 0.5, softness: 0.02 } },
+    { name: 'Ridges', values: { fold: true, power: 1.2 } },
+  ],
+});
+
+export const manualLevelsOp = operator({
+  id: 'op-level',
+  name: 'Levels',
+  description: 'Remap the black and white points and adjust the midtones.',
+  fragment: manualLevelsFrag,
+  inputs: [IMAGE],
+  params: LEVEL_PARAMS,
+  presets: [
+    { name: 'Identity', values: {} },
+    { name: 'High contrast', values: { inLow: 0.3, inHigh: 0.7 } },
+  ],
+});
+
+export const mathOp = operator({
+  id: 'op-math',
+  name: 'Math',
+  description: 'Power, multiply, add, fold, threshold, invert and clamp.',
+  fragment: mathFrag,
+  inputs: [IMAGE],
+  params: MATH_PARAMS,
+  presets: [
+    { name: 'Identity', values: {} },
+    { name: 'Invert', values: { invert: true } },
+    { name: 'Ridges', values: { fold: true, power: 1.2 } },
   ],
 });
 
@@ -669,6 +701,8 @@ export const OPERATORS: readonly ShaderGenerator[] = [
   blendOp,
   maskOp,
   levelsOp,
+  manualLevelsOp,
+  mathOp,
   autoLevelsOp,
   transformOp,
   warpOp,

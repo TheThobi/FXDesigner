@@ -14,12 +14,13 @@ import type { ChangeHandler, Control } from './types';
 
 export function boolControl(def: BoolParam, initial: ParamValue, onChange: ChangeHandler): Control {
   const input = h('input', { type: 'checkbox', class: 'checkbox', 'aria-label': def.label });
-  input.checked = initial === true;
-  input.addEventListener('change', () => onChange(input.checked));
+  const invert = def.invertedCheckbox === true;
+  input.checked = (initial === true) !== invert;
+  input.addEventListener('change', () => onChange(input.checked !== invert));
   return {
     element: input,
     setValue: (v) => {
-      input.checked = v === true;
+      input.checked = (v === true) !== invert;
     },
   };
 }

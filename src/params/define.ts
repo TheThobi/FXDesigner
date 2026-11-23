@@ -53,7 +53,12 @@ export const param = {
     ...extra,
   }),
 
-  bool: (key: string, label: string, def: boolean, extra: Extra = {}): BoolParam => ({
+  bool: (
+    key: string,
+    label: string,
+    def: boolean,
+    extra: Extra & Pick<BoolParam, 'invertedCheckbox'> = {},
+  ): BoolParam => ({
     type: 'bool',
     key,
     label,

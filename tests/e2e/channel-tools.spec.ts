@@ -8,6 +8,7 @@ async function openGraph(
   selected: string,
   links: unknown[] = [],
   aspect = 1,
+  paused = false,
 ) {
   await page.addInitScript(
     ({ nodes, selected, links, aspect }) => {
@@ -31,9 +32,84 @@ async function openGraph(
     },
     { nodes, selected, links, aspect },
   );
-  await page.goto('/?e2e');
+  await page.goto(paused ? '/?e2e&paused' : '/?e2e');
   await expect(page.locator('.preview-canvas')).toBeVisible();
 }
+
+async function exportImage(page: Page, path?: string) {
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: /Image \(PNG\)/ }).click(),
+  ]);
+  if (path) await download.saveAs(path);
+  return probePng(page, await readFile(await download.path()));
+}
+
+test(
+  'Blend broadcasts scalar pins and multiplies RGBA componentwise',
+  { tag: '@part1' },
+  async ({ page }) => {
+    const cases = [
+      { id: 'rgba', output: undefined, base: undefined, expected: [102, 32, 26, 64] },
+      { id: 'rgb', output: 'rgb', base: undefined, expected: [102, 32, 26, 128] },
+      { id: 'scalar', output: 'r', base: undefined, expected: [102, 51, 26, 64] },
+      { id: 'scalar-base', output: undefined, base: 'g', expected: [51, 32, 51, 51] },
+      { id: 'add', output: 'rgb', base: undefined, mode: 1, expected: [255, 182, 179, 128] },
+      { id: 'bypass', output: undefined, base: 'g', opacity: 0, expected: [102, 102, 102, 255] },
+    ];
+    await openGraph(
+      page,
+      [
+        {
+          id: 'bg',
+          generator: 'op-pack',
+          x: 0,
+          y: 0,
+          params: { redValue: 0.8, greenValue: 0.4, blueValue: 0.2, alphaValue: 0.5 },
+        },
+        {
+          id: 'fg',
+          generator: 'op-pack',
+          x: 0,
+          y: 400,
+          params: { redValue: 0.5, greenValue: 0.3125, blueValue: 0.5, alphaValue: 0.5 },
+        },
+        { id: 'route', generator: 'reroute', x: 400, y: 400 },
+        ...cases.map(({ id, mode, opacity }, i) => ({
+          id,
+          generator: 'op-blend',
+          x: i < 3 ? 600 : 1000,
+          y: (i % 3) * 400,
+          params: { mode: mode ?? 3, opacity: opacity ?? 1 },
+        })),
+      ],
+      'rgba',
+      [
+        { from: 'fg', to: 'route', input: 'image', output: 'r' },
+        ...cases.flatMap(({ id, output, base }) => [
+          { from: 'bg', to: id, input: 'background', output: base },
+          id === 'scalar'
+            ? { from: 'route', to: id, input: 'foreground' }
+            : { from: 'fg', to: id, input: 'foreground', output },
+        ]),
+      ],
+      1,
+      true,
+    );
+    for (const { id, expected } of cases) {
+      await page.locator(`.node[data-id="${id}"] .node-title`).click();
+      const pixels = await exportImage(page);
+      const actual = [...pixels.rgb(0.5, 0.5), pixels.alpha(0.5, 0.5)];
+      for (const [channel, value] of actual.entries()) {
+        expect(
+          Math.abs(value - expected[channel]!),
+          `${id}, channel ${channel}`,
+        ).toBeLessThanOrEqual(4);
+      }
+    }
+  },
+);
 
 test(
   'portrait brush cursor matches the round painted footprint',
@@ -105,18 +181,20 @@ test(
         { id: 'wrap', generator: 'smoke-fire', x: 420, y: 0, params: { ...params, boundaries: 0 } },
       ],
       'open',
+      [],
+      1,
+      true,
     );
-    const image = page.locator('.preview-canvas');
-    await expect
-      .poll(async () => (await probe(page, image)).lum(0.5, 0.01), { timeout: 15000 })
-      .toBeGreaterThan(200);
-    const open = await probe(page, image);
-    expect(open.lum(0.5, 0.99)).toBeLessThan(80);
-    await image.screenshot({ path: 'test-results/generators/smoke-fire-open-edge.png' });
+    const nextFrame = page.getByRole('button', { name: 'Next frame (.)', exact: true });
+    await nextFrame.click();
+    const open = await exportImage(page, 'test-results/generators/smoke-fire-open-edge.png');
+    expect(open.alpha(0.5, 0.01)).toBeGreaterThan(200);
+    expect(open.alpha(0.5, 0.99)).toBeLessThan(10);
 
     await page.locator('.node[data-id="wrap"] .node-title').click();
-    const wrapped = await probe(page, image);
-    expect(wrapped.lum(0.5, 0.99)).toBeGreaterThan(175);
+    await nextFrame.click();
+    const wrapped = await exportImage(page);
+    expect(wrapped.alpha(0.5, 0.99)).toBeGreaterThan(175);
     expect(errors).toEqual([]);
   },
 );
@@ -233,14 +311,7 @@ test(
       'embers',
     );
     // The preview card has an inset shadow over the outermost texels.
-    await page.getByRole('button', { name: 'Export', exact: true }).click();
-    const [download] = await Promise.all([
-      page.waitForEvent('download'),
-      page.getByRole('button', { name: /Image \(PNG\)/ }).click(),
-    ]);
-    const path = 'test-results/generators/ember-motes-stretched.png';
-    await download.saveAs(path);
-    const pixels = await probePng(page, await readFile(path));
+    const pixels = await exportImage(page, 'test-results/generators/ember-motes-stretched.png');
     expect(pixels.stdDev).toBeGreaterThan(10);
     const xs = Array.from({ length: pixels.width }, (_, i) => i / (pixels.width - 1));
     // A continuous spark can vary slightly between the pixel centers on either side.

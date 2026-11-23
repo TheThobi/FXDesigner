@@ -4,7 +4,7 @@ const STORAGE_KEY = 'ptm.ui.nodeUsage';
 /** Shown first until the user's own habits take over. */
 const DEFAULT_ORDER = [
   'op-blend',
-  'op-levels',
+  'op-level',
   'op-blur',
   'op-warp',
   'op-mask',

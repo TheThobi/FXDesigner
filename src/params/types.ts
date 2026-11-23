@@ -51,6 +51,8 @@ export interface IntParam extends ParamBase {
 export interface BoolParam extends ParamBase {
   readonly type: 'bool';
   readonly default: boolean;
+  /** Invert the checkbox label's meaning while keeping the stored value and uniform. */
+  readonly invertedCheckbox?: boolean;
   /**
    * Module switch: rendered as the checkbox in its group's header; when off, the rest of the
    * group is collapsed and greyed out.

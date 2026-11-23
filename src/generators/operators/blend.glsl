@@ -1,6 +1,6 @@
 // Blend: Foreground over Background (straight alpha) with a blend mode, opacity and an
 // optional Mask input. Modes follow operators/index.ts#BLEND_MODES.
-vec3 blendRgb(vec3 b, vec3 t, int mode) {
+vec4 blendChannels(vec4 b, vec4 t, int mode) {
   if (mode == 1) return b + t;
   if (mode == 2) return max(b - t, 0.0);
   if (mode == 3) return b * t;
@@ -16,15 +16,31 @@ vec3 blendRgb(vec3 b, vec3 t, int mode) {
 vec4 generate(vec2 uv) {
   vec4 fg = u_has_foreground ? texture(u_in_foreground, uv) : vec4(0.0);
   vec4 bg = u_has_background ? texture(u_in_background, uv) : vec4(0.0);
-  float k = u_opacity * fg.a;
+  float amount = u_opacity;
   if (u_has_mask) {
     vec4 m = texture(u_in_mask, uv);
     float mv = saturate(luminance(m.rgb) * m.a);
-    k *= u_invertMask ? 1.0 - mv : mv;
+    amount *= u_invertMask ? 1.0 - mv : mv;
   }
-  // Blend modes need a background; over transparency the foreground shows as is.
-  vec3 c = mix(fg.rgb, blendRgb(bg.rgb, fg.rgb, u_mode), bg.a);
+  if (u_mode != 0 && u_has_foreground && u_has_background) {
+    bool fgRgba = u_channel_foreground < 0;
+    bool bgRgba = u_channel_background < 0;
+    bool fgRgb = u_channel_foreground == 4;
+    bool bgRgb = u_channel_background == 4;
+    vec4 base = bg;
+    // Scalar pins broadcast to alpha when paired with RGBA. RGB has no alpha.
+    if (!fgRgba && !fgRgb && bgRgba) fg.a = fg.r;
+    if (!bgRgba && !bgRgb && fgRgba) bg.a = bg.r;
+    vec4 result = blendChannels(bg, fg, u_mode);
+    if (fgRgb && bgRgba) result.a = bg.a;
+    else if (bgRgb && fgRgba) result.a = fg.a;
+    else if (!fgRgba && !bgRgba) result.a = 1.0;
+    result = mix(base, result, amount);
+    return vec4(result.rgb, saturate(result.a));
+  }
+
+  float k = amount * fg.a;
   float a = k + bg.a * (1.0 - k);
-  vec3 rgb = (c * k + bg.rgb * bg.a * (1.0 - k)) / max(a, 1e-5);
+  vec3 rgb = (fg.rgb * k + bg.rgb * bg.a * (1.0 - k)) / max(a, 1e-5);
   return vec4(rgb, a);
 }

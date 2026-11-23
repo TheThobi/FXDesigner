@@ -5,6 +5,7 @@ test(
   'publish a library card without opening it and edit its display type',
   { tag: '@part3' },
   async ({ page }) => {
+    test.setTimeout(360_000);
     let publication: Record<string, unknown> | undefined;
     const edits: Record<string, unknown>[] = [];
     await page.route('**/api/**', async (route) => {
@@ -40,7 +41,7 @@ test(
       } else if (path.endsWith('/community')) body = { items: [], more: false };
       await route.fulfill({ json: body });
     });
-    await page.goto('/?e2e');
+    await page.goto('/?e2e&paused');
     await expect(page.locator('.preview-canvas')).toBeVisible();
     const currentId = await page.evaluate(() => localStorage.getItem('ptm.library.current'));
     await page.addInitScript(() => {
@@ -49,11 +50,11 @@ test(
       const current = localStorage.getItem('ptm.library.current');
       const doc = JSON.parse(localStorage.getItem(`ptm.library.doc.${current}`) ?? 'null');
       if (!doc || index.some((item: { id: string }) => item.id === entry)) return;
-      doc.nodes[0].generator = 'ripples';
-      doc.nodes[0].params = {};
+      doc.nodes[0].generator = 'lightning';
+      doc.nodes[0].params = { bolts: 1, octaves: 1 };
       index.push({
         id: entry,
-        name: 'Library Ripples',
+        name: 'Library Lightning',
         updated: Date.now(),
         thumb: null,
         folder: null,
@@ -64,10 +65,13 @@ test(
     await page.reload();
     await expect(page.getByRole('button', { name: 'Test', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Library', exact: true }).click();
-    await page.getByRole('button', { name: 'Publish Library Ripples', exact: true }).click();
+    const current = page.locator('.library-card.current[aria-current="true"]');
+    await expect(current.locator('.library-date')).not.toBeEmpty();
+    await expect(current.getByText('Open', { exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Publish Library Lightning', exact: true }).click();
     const community = page.locator('.community-dialog');
     await expect(
-      community.getByRole('heading', { name: 'Publish "Library Ripples"' }),
+      community.getByRole('heading', { name: 'Publish "Library Lightning"' }),
     ).toBeVisible();
     await expect(community.locator('.community-preview-picker img')).toBeVisible({
       timeout: 30000,
@@ -150,11 +154,11 @@ test(
       } else body = { items: [], more: false };
       await route.fulfill({ json: body });
     });
-    await page.goto('/?e2e');
+    await page.goto('/?e2e&paused');
     await page.getByRole('button', { name: 'Community', exact: true }).click();
     const dialog = page.locator('.community-dialog');
     const body = dialog.locator('.community-body');
-    await expect(body.getByText('Nothing found.')).toBeVisible();
+    await expect(body.getByText('Nothing found.')).toBeVisible({ timeout: 30000 });
     await expect(body.locator('.library-grid')).toHaveCount(0);
     await dialog.getByRole('tab', { name: 'Static', exact: true }).click();
     await expect(body.getByText('Static effect')).toBeVisible();

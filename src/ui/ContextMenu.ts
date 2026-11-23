@@ -32,10 +32,10 @@ export function openContextMenu(
     window.removeEventListener('pointerdown', outside, true);
     window.removeEventListener('keydown', onKey, true);
     window.removeEventListener('blur', close);
-    window.removeEventListener('wheel', close, true);
+    window.removeEventListener('wheel', outside, true);
     if (closeOpen === close) closeOpen = null;
   };
-  const outside = (e: PointerEvent) => {
+  const outside = (e: Event) => {
     if (!menu.contains(e.target as Node)) close();
   };
   const onKey = (e: KeyboardEvent) => {
@@ -82,6 +82,6 @@ export function openContextMenu(
   window.addEventListener('pointerdown', outside, true);
   window.addEventListener('keydown', onKey, true);
   window.addEventListener('blur', close);
-  window.addEventListener('wheel', close, true);
+  window.addEventListener('wheel', outside, true);
   closeOpen = close;
 }

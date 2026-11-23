@@ -8,7 +8,7 @@ test(
     page.on('console', (message) => {
       if (/GL_INVALID|WebGL:/.test(message.text())) shaderErrors.push(message.text());
     });
-    await page.goto('/?e2e');
+    await page.goto('/?e2e&paused');
     const workspace = page.locator('.panel-workspace');
     await page.getByRole('tab', { name: 'Workspace', exact: true }).click();
     await expect(workspace.locator('[data-key="aspect"]')).toBeVisible();
@@ -54,8 +54,30 @@ test(
     await page.locator('.panel-browser .segment[data-tab="operators"]').click();
     await expect(tile('reroute')).toHaveCount(0);
     await expect(tile('output')).toHaveCount(0);
-    await tile('op-edge-fade').dblclick();
+    await tile('op-edge-fade').click();
     await expect(page.locator('.inspector-header h2')).toHaveText('Edge Feather');
+    await tile('op-level').click();
+    await expect(page.locator('.inspector-header h2')).toHaveText('Levels');
+    const blackPoint = page.getByRole('slider', { name: 'Input black point' });
+    await blackPoint.press('ArrowRight');
+    await expect(blackPoint).toHaveValue('0.001');
+    const whitePoint = page.getByRole('slider', { name: 'Input white point' });
+    const track = (await whitePoint.boundingBox())!;
+    await page.mouse.move(track.x + track.width - 6, track.y + track.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(track.x + track.width * 0.75, track.y + track.height / 2);
+    await page.mouse.up();
+    await expect(whitePoint).not.toHaveValue('1');
+    await tile('op-math').click();
+    await expect(page.locator('.inspector-header h2')).toHaveText('Math');
+    await expect(blackPoint).toHaveCount(0);
+    await page.locator('.panel-browser .segment[data-tab="generators"]').click();
+    await tile('lightning').click();
+    const smooth = page.getByRole('checkbox', { name: 'Smooth Movement' });
+    await expect(smooth).not.toBeChecked();
+    await smooth.check();
+    await expect(page.locator('.param-row[data-key="waveSpeed"]')).toBeVisible();
+    await expect(page.locator('.param-row[data-key="strikeRate"]')).toBeHidden();
     await expect(page.locator('.error-overlay')).toBeHidden();
     expect(shaderErrors).toEqual([]);
   },

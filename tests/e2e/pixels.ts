@@ -7,6 +7,7 @@ export interface PixelProbe {
   lum(x: number, y: number): number;
   /** RGB (0-255) at fractional image coordinates. */
   rgb(x: number, y: number): [number, number, number];
+  alpha(x: number, y: number): number;
   /** Standard deviation of luminance over a coarse grid (0 = flat image). */
   readonly stdDev: number;
   /** Number of distinct luminance levels (rounded to 4) over the sample grid. */
@@ -21,26 +22,35 @@ export async function probe(page: Page, locator: Locator): Promise<PixelProbe> {
 }
 
 export async function probePng(page: Page, png: Buffer): Promise<PixelProbe> {
-  const { width, height, data } = await page.evaluate(async (b64) => {
+  const { width, height, rgbaUrl } = await page.evaluate(async (b64) => {
     const blob = await (await fetch(`data:image/png;base64,${b64}`)).blob();
     const bmp = await createImageBitmap(blob);
     const canvas = new OffscreenCanvas(bmp.width, bmp.height);
     const ctx = canvas.getContext('2d')!;
     ctx.drawImage(bmp, 0, 0);
     const img = ctx.getImageData(0, 0, bmp.width, bmp.height);
-    return { width: bmp.width, height: bmp.height, data: Array.from(img.data) };
+    // Serialize bytes as one string to avoid millions of individual protocol values.
+    const rgbaUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(new Blob([img.data]));
+    });
+    return { width: bmp.width, height: bmp.height, rgbaUrl };
   }, png.toString('base64'));
+  const data = Buffer.from(rgbaUrl.slice(rgbaUrl.indexOf(',') + 1), 'base64');
 
-  const rgb = (x: number, y: number): [number, number, number] => {
+  const offset = (x: number, y: number) => {
     const px = Math.min(width - 1, Math.max(0, Math.round(x * (width - 1))));
     const py = Math.min(height - 1, Math.max(0, Math.round(y * (height - 1))));
-    const i = (py * width + px) * 4;
+    return (py * width + px) * 4;
+  };
+  const rgb = (x: number, y: number): [number, number, number] => {
+    const i = offset(x, y);
     return [data[i]!, data[i + 1]!, data[i + 2]!];
   };
   const lum = (x: number, y: number) => {
-    const px = Math.min(width - 1, Math.max(0, Math.round(x * (width - 1))));
-    const py = Math.min(height - 1, Math.max(0, Math.round(y * (height - 1))));
-    const i = (py * width + px) * 4;
+    const i = offset(x, y);
     return 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!;
   };
   const samples: number[] = [];
@@ -54,5 +64,14 @@ export async function probePng(page: Page, png: Buffer): Promise<PixelProbe> {
   const sorted = [...counts.values()].sort((a, b) => b - a);
   const dominantShare = (n: number) =>
     sorted.slice(0, n).reduce((a, b) => a + b, 0) / Math.max(1, levels.length);
-  return { width, height, lum, rgb, stdDev, distinctTones, dominantShare };
+  return {
+    width,
+    height,
+    lum,
+    rgb,
+    alpha: (x, y) => data[offset(x, y) + 3]!,
+    stdDev,
+    distinctTones,
+    dominantShare,
+  };
 }

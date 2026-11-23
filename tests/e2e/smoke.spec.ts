@@ -154,7 +154,7 @@ test('pixel-art mode renders uniform blocks', part(2), async ({ page }) => {
 });
 
 test('flowmap painter encodes the stroke direction', part(3), async ({ page }) => {
-  await page.goto('/?e2e');
+  await page.goto('/?e2e&paused');
   await select(page, 'flowmap-painter', 500);
   // Neutral start (the default has a gentle base flow), preview off, no arrows: the
   // viewport shows the plain encoded flowmap.
@@ -184,7 +184,7 @@ test('flowmap painter encodes the stroke direction', part(3), async ({ page }) =
 test('node graph: add, link, per-node post', part(4), async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto('/?e2e');
+  await page.goto('/?e2e&paused');
   await page.locator('.generator-item[data-id="fractal-noise"]').click();
   await page.waitForTimeout(500);
   // Double-click adds a node (selected) next to the current one; operators have their tab.
@@ -231,13 +231,31 @@ test('node graph: add, link, per-node post', part(4), async ({ page }) => {
   await page.locator('.segment[data-tab="post"]').click();
   await expect(page.locator('.module-toggle[data-key="posterizeOn"]')).not.toBeChecked();
 
+  const menuItem = (label: string) => page.locator('.context-menu .menu-item', { hasText: label });
+  await page.locator('.node[data-id="n3"] .node-title').click({ modifiers: ['Shift'] });
+  await expect(page.locator('.node[data-id="n1"]')).toHaveClass(/\bmulti\b/);
+  await page.locator('.node[data-id="n3"] .node-title').click({ button: 'right' });
+  await menuItem('Copy Post Process').click();
+  await expect(page.locator('.toast').getByText('Post Process copied')).toBeVisible();
+  await page.locator('.node[data-id="n1"] .node-title').click();
+  await page.locator('.node[data-id="n1"] .node-title').click({ button: 'right' });
+  await menuItem('Paste Post Process').click();
+  await expect(page.locator('.toast').getByText('Post Process pasted')).toBeVisible();
+  await expect(page.locator('.module-toggle[data-key="posterizeOn"]')).toBeChecked();
+  await page.locator('.node.output-node .node-title').click({ button: 'right' });
+  await menuItem('Paste Post Process').click();
+  await expect(page.locator('.module-toggle[data-key="posterizeOn"]')).toBeChecked();
+  await page.locator('.node[data-id="n1"] .node-title').click();
+
   // The eye bypasses a node's Post Process.
-  await page.locator('.node[data-id="n1"] .node-post').click();
+  await page
+    .locator('.node[data-id="n1"]')
+    .getByRole('button', { name: 'Toggle Post Process' })
+    .click();
   await expect(page.locator('.node[data-id="n1"]')).toHaveClass(/post-off/);
   await expect(page.locator('.error-overlay')).toBeHidden();
 
   // Right-click menus: a reroute on the default link (n1 → Output), then cut / paste a node.
-  const menuItem = (label: string) => page.locator('.context-menu .menu-item', { hasText: label });
   await page.locator('.vp-link-hit').first().click({ button: 'right' });
   await menuItem('Add reroute').click();
   await expect(page.locator('.node.reroute')).toHaveCount(1);

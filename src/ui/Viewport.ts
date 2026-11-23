@@ -229,7 +229,7 @@ export interface ViewportCallbacks {
 
 export interface GraphContextMenu {
   readonly target:
-    | { readonly kind: 'nodes'; readonly ids: readonly string[] }
+    | { readonly kind: 'nodes'; readonly ids: readonly string[]; readonly clickedId: string }
     | { readonly kind: 'link'; readonly link: GraphViewLink }
     | { readonly kind: 'background' };
   readonly world: readonly [number, number];
@@ -1624,7 +1624,7 @@ export class Viewport {
       if (id && this.cards.has(id)) {
         if (!this.selection.has(id)) this.select([id], id);
         this.callbacks.onContextMenu({
-          target: { kind: 'nodes', ids: [...this.selection] },
+          target: { kind: 'nodes', ids: [...this.selection], clickedId: id },
           world,
           client,
         });

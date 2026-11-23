@@ -33,7 +33,12 @@ import {
   type FrameRequest,
   type NodeTargets,
 } from '../engine/Renderer';
-import { DEFAULT_GENERATOR_ID, GENERATORS, getGenerator } from '../generators/registry';
+import {
+  ADDABLE_GENERATORS,
+  DEFAULT_GENERATOR_ID,
+  GENERATORS,
+  getGenerator,
+} from '../generators/registry';
 import { GRADIENT_PRESETS } from '../params/gradientPresets';
 import type { GradientValue } from '../params/gradient';
 import type { ParamDef, ParamValue, ParamValues, Preset } from '../params/types';
@@ -145,7 +150,9 @@ const THUMBNAIL_SIZE = 64;
  * `?e2e`: no background thumbnails (browser tiles, preset galleries). Software-rendered test
  * browsers would spend most of their time on them.
  */
-const LITE = new URLSearchParams(window.location.search).has('e2e');
+const RUN_OPTIONS = new URLSearchParams(window.location.search);
+const LITE = RUN_OPTIONS.has('e2e');
+const PAUSED_TEST = LITE && RUN_OPTIONS.has('paused');
 /** Color ramp presets as gallery presets (only their ramp matters). */
 const RAMP_PRESETS: readonly Preset[] = GRADIENT_PRESETS.map((p) => ({
   name: p.name,
@@ -222,7 +229,7 @@ function nextPow2(n: number): number {
 export class App {
   private state: EditorState;
   private readonly history = new History<EditorState>();
-  private playing = true;
+  private playing = !PAUSED_TEST;
   private viewTiles = 1;
   /** Seconds, always within [0, loop duration]. */
   private time = 0;
@@ -1319,6 +1326,8 @@ export class App {
     if (target.kind === 'nodes') {
       const ids = target.ids;
       const nodes = ids.map((id) => nodeById(this.state, id)).filter((n) => n !== undefined);
+      const clicked = nodeById(this.state, target.clickedId);
+      const postTargets = nodes.filter((node) => getGenerator(node.generator)?.role !== 'reroute');
       const all = ids.length >= this.state.nodes.length;
       const collapsed = nodes.every((n) => n.collapsed === true);
       const bypassed = nodes.every((n) => !n.postEnabled);
@@ -1354,6 +1363,46 @@ export class App {
           label: bypassed ? 'Enable Post Process' : 'Bypass Post Process',
           icon: 'fx',
           run: () => patchAll(() => ({ postEnabled: bypassed })),
+        },
+        {
+          label: 'Copy Post Process',
+          icon: 'fx',
+          disabled: !clicked || getGenerator(clicked.generator)?.role === 'reroute',
+          run: () => {
+            if (!clicked) return;
+            const post = Object.fromEntries(
+              POST_PROCESS_PARAMS.map(({ key, default: fallback }) => [
+                key,
+                clicked.post[key] ?? fallback,
+              ]),
+            );
+            this.postClipboard = { post, ramp: clicked.ramp, postEnabled: clicked.postEnabled };
+            toast('Post Process copied');
+          },
+        },
+        {
+          label: 'Paste Post Process',
+          disabled: !this.postClipboard || postTargets.length === 0,
+          run: () => {
+            const clip = this.postClipboard;
+            if (!clip) return;
+            this.commit(
+              postTargets.reduce(
+                (state, node) =>
+                  withNode(state, node.id, {
+                    ...clip,
+                    post: { ...node.post, ...clip.post },
+                  }),
+                this.state,
+              ),
+            );
+            this.syncPanels();
+            toast(
+              postTargets.length === 1
+                ? 'Post Process pasted'
+                : `Post Process pasted to ${postTargets.length} nodes`,
+            );
+          },
         },
         {
           label: frozen ? 'Unfreeze' : 'Freeze frame',
@@ -1406,12 +1455,12 @@ export class App {
               x: client[0],
               y: client[1],
               title: 'Add a node',
-              suggestions: mostUsedNodes(GENERATORS.filter((d) => !d.role)).map((d) => ({
+              suggestions: mostUsedNodes(ADDABLE_GENERATORS).map((d) => ({
                 id: d.id,
                 name: d.name,
                 label: CATEGORY_LABELS[d.category],
               })),
-              all: GENERATORS.filter((d) => !d.role).map((d) => ({
+              all: ADDABLE_GENERATORS.map((d) => ({
                 id: d.id,
                 name: d.name,
                 label: CATEGORY_LABELS[d.category],
@@ -1504,7 +1553,7 @@ export class App {
   private quickAdd(drop: LinkDrop): void {
     const fromOutput = drop.from !== undefined;
     // From an output the new node needs an input; from an input, any node with an output.
-    const candidates = GENERATORS.filter((d) => !d.role && (!fromOutput || inputsOf(d).length > 0));
+    const candidates = ADDABLE_GENERATORS.filter((d) => !fromOutput || inputsOf(d).length > 0);
     const item = (d: GeneratorDefinition) => ({
       id: d.id,
       name: d.name,
@@ -1793,6 +1842,7 @@ export class App {
 
     this.paramPanel.render({
       defs: this.nodeDef.params,
+      levelsRange: def.id === 'op-level',
       values: this.params,
       gallery: {
         title: 'Presets',
@@ -3265,7 +3315,7 @@ export class App {
     // Adaptive preview: while a value is being dragged on a slow frame rate, render the
     // selected node at half size to keep the UI responsive; full size comes back as soon as
     // editing pauses.
-    const full = Math.min(this.state.resolution, MAX_PREVIEW_SIZE);
+    const full = Math.min(this.state.resolution, PAUSED_TEST ? 256 : MAX_PREVIEW_SIZE);
     const interacting = performance.now() - this.lastChange < ADAPTIVE_IDLE_MS;
     this.degraded = interacting && this.frameMs > ADAPTIVE_SLOW_MS && full > 256;
     const selectedSize = this.degraded ? full / 2 : full;
@@ -3631,6 +3681,7 @@ export class App {
   }
 
   private clipboard: { nodes: readonly GraphNode[]; links: readonly GraphLink[] } | null = null;
+  private postClipboard: Pick<GraphNode, 'post' | 'ramp' | 'postEnabled'> | null = null;
 
   private duplicateNode(): void {
     const source = this.node;
