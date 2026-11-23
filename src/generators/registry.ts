@@ -88,7 +88,7 @@ export const GENERATORS: readonly GeneratorDefinition[] = [
   ...OPERATORS,
 ];
 
-export const ADDABLE_GENERATORS = GENERATORS.filter((def) => !def.role && def.id !== 'op-levels');
+export const ADDABLE_GENERATORS = GENERATORS.filter((def) => !def.role);
 
 const BY_ID = new Map(GENERATORS.map((g) => [g.id, g]));
 

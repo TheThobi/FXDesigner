@@ -23,7 +23,6 @@ import distanceSeedFrag from './distance-seed.glsl?raw';
 import distanceFrag from './distance.glsl?raw';
 import edgesFrag from './edges.glsl?raw';
 import edgeFadeFrag from './edge-fade.glsl?raw';
-import levelsFrag from './levels.glsl?raw';
 import maskFrag from './mask.glsl?raw';
 import packFrag from './pack.glsl?raw';
 import passthroughFrag from './passthrough.glsl?raw';
@@ -156,21 +155,6 @@ const MATH_PARAMS = [
   param.bool('invert', 'Invert', false, { group: 'Math' }),
   param.bool('clampValue', 'Clamp 0..1', true, { group: 'Math' }),
 ];
-
-export const levelsOp = operator({
-  id: 'op-levels',
-  name: 'Levels & Math',
-  description: 'Combined Levels and Math for existing graphs.',
-  fragment: levelsFrag,
-  inputs: [IMAGE],
-  params: [...LEVEL_PARAMS, ...MATH_PARAMS],
-  presets: [
-    { name: 'Identity', values: {} },
-    { name: 'Invert', values: { invert: true } },
-    { name: 'High contrast', values: { inLow: 0.3, inHigh: 0.7 } },
-    { name: 'Ridges', values: { fold: true, power: 1.2 } },
-  ],
-});
 
 export const manualLevelsOp = operator({
   id: 'op-level',
@@ -700,7 +684,6 @@ export const OPERATORS: readonly ShaderGenerator[] = [
   rerouteOp,
   blendOp,
   maskOp,
-  levelsOp,
   manualLevelsOp,
   mathOp,
   autoLevelsOp,

@@ -46,6 +46,30 @@ async function exportImage(page: Page, path?: string) {
   return probePng(page, await readFile(await download.path()));
 }
 
+test('legacy Levels & Math opens and exports as Math', { tag: '@part1' }, async ({ page }) => {
+  await openGraph(
+    page,
+    [
+      { id: 'source', generator: 'uniform', x: 0, y: 0, params: { value: 0.25 } },
+      {
+        id: 'legacy',
+        generator: 'op-levels',
+        x: 420,
+        y: 0,
+        params: { inLow: 0.5, gamma: 3, gain: 2 },
+      },
+    ],
+    'legacy',
+    [{ from: 'source', output: 'value', to: 'legacy', input: 'image' }],
+    1,
+    true,
+  );
+  await expect(page.locator('.inspector-header h2')).toHaveText('Math');
+  await expect(page.locator('.param-row[data-key="inLow"]')).toHaveCount(0);
+  const pixels = await exportImage(page);
+  expect(Math.abs(pixels.lum(0.5, 0.5) - 127.5)).toBeLessThan(2);
+});
+
 test(
   'Blend broadcasts scalar pins and multiplies RGBA componentwise',
   { tag: '@part1' },
@@ -212,11 +236,21 @@ test(
       [
         {
           id: 'ramp',
-          generator: 'custom-shader',
+          generator: 'gradient',
           x: 0,
           y: 0,
-          postEnabled: false,
-          code: 'vec4 generate(vec2 uv) { if (uv.x < 0.1) return vec4(1.0, 1.0, 1.0, 0.0); return vec4(vec3(0.35 + 0.3 * clamp((uv.x - 0.2) / 0.6, 0.0, 1.0)), 1.0); }',
+          post: { colorMode: 1, alphaMode: 2 },
+          ramp: {
+            stops: [
+              { pos: 0, color: '#ffffff', alpha: 0 },
+              { pos: 0.07, color: '#ffffff', alpha: 0 },
+              { pos: 0.1, color: '#595959', alpha: 0 },
+              { pos: 0.14, color: '#595959', alpha: 1 },
+              { pos: 0.2, color: '#595959', alpha: 1 },
+              { pos: 0.8, color: '#a6a6a6', alpha: 1 },
+              { pos: 1, color: '#a6a6a6', alpha: 1 },
+            ],
+          },
         },
         { id: 'levels', generator: 'op-auto-levels', x: 420, y: 0 },
         { id: 'flat', generator: 'uniform', x: 0, y: 400, params: { value: 0.4 } },
@@ -227,20 +261,17 @@ test(
         { from: 'ramp', to: 'levels', input: 'image' },
         { from: 'flat', output: 'value', to: 'flatLevels', input: 'image' },
       ],
+      1,
+      true,
     );
-    const image = page.locator('.preview-canvas');
-    await expect
-      .poll(async () => (await probe(page, image)).lum(0.9, 0.5), {
-        timeout: 15000,
-      })
-      .toBeGreaterThan(245);
-    const levels = await probe(page, image);
+    const levels = await exportImage(page, 'test-results/generators/auto-levels.png');
+    expect(levels.alpha(0.03, 0.5)).toBe(0);
+    expect(levels.lum(0.9, 0.5)).toBeGreaterThan(245);
     expect(levels.lum(0.15, 0.5)).toBeLessThan(10);
     expect(levels.lum(0.5, 0.5)).toBeCloseTo(127, -1);
-    await image.screenshot({ path: 'test-results/generators/auto-levels.png' });
 
     await page.locator('.node[data-id="flatLevels"] .node-title').click();
-    const flat = await probe(page, image);
+    const flat = await exportImage(page);
     expect(flat.rgb(0.5, 0.5)).toEqual([102, 102, 102]);
     expect(errors).toEqual([]);
   },

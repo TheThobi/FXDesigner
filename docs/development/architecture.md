@@ -44,7 +44,7 @@ double-click or drag-and-drop adds a node.
 
 **Generators and operators.** Generators create images; **operators** (`generators/operators/`,
 browser tab "Operators", category `operator`) transform or combine them: Blend (modes, opacity,
-mask), Mask, Levels & Math, Transform 2D, Warp (slope / vector / directional), Blur, Slope Blur,
+mask), Mask, Levels, Math, Transform 2D, Warp (slope / vector / directional), Blur, Slope Blur,
 Distance, Edge Detect, Unpack RGBA, Pack RGBA, Custom Code. Operators are plain shader generators
 that declare `inputs` and sample them; their Post Process defaults to a pass-through (source
 colors and alpha). Any generator may declare inputs (`engine/nodes.ts`): each one is bound as
@@ -268,7 +268,7 @@ additively blended `gl.POINTS` (the vertex shader fetches the agent texture by `
 
 ## Documents & persistence
 
-`app/document.ts` defines a **versioned** JSON format (v7, `format: 'fx-designer'`, the
+`app/document.ts` defines a **versioned** JSON format (v8, `format: 'fx-designer'`, the
 pre-rename `procedural-texture-maker` is still accepted: `nodes`, `links` (with an optional
 `output`), `selected`, `resolution`, `seed`, `aspect`) used by Save/Open, share links (`#doc=<base64url>`)
 and the autosave. Nodes may carry `collapsed` (optional, no version bump). All inputs go through `parseDocument` (validation; unknown nodes,
@@ -276,7 +276,8 @@ invalid links and cycles dropped; `migrate()`: v1 legacy post → v2 modules →
 removed → v4 the single generator becomes the only node → v5 generic Base / Mask / Warp inputs
 and Generator-tab adjustments become chains of operator nodes → v6 Channels becomes Unpack RGBA,
 whose links leave the chosen channel output; its Luminance mode becomes Custom Code → v7
-Surface Wear is split into Brushed Metal / Scratches / Cracked Glass by its mode).
+Surface Wear is split into Brushed Metal / Scratches / Cracked Glass by its mode → v8
+Levels & Math becomes Math and the level settings are dropped).
 
 **Library.** `app/library.ts` keeps several **systems** (one document each) in localStorage
 (index with name / date / thumbnail + one key per document); the current one receives the

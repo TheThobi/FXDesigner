@@ -284,14 +284,14 @@ describe('v4 -> v5: generic inputs and adjustments become operators', () => {
     const gen = (id: string) => doc.nodes.find((n) => n.id === id)?.generator;
     const linkInto = (to: string, input: string) =>
       doc.links.find((l) => l.to === to && l.input === input)?.from;
-    // n3 -> levels -> custom -> warp -> blend, in that order.
-    const levels = doc.nodes.find((n) => n.generator === 'op-levels')!;
+    // n3 -> math -> custom -> warp -> blend, in that order.
+    const math = doc.nodes.find((n) => n.generator === 'op-math')!;
     const custom = doc.nodes.find((n) => n.generator === 'op-custom')!;
     const warp = doc.nodes.find((n) => n.generator === 'op-warp')!;
     const blends = doc.nodes.filter((n) => n.generator === 'op-blend');
-    expect(linkInto(levels.id, 'image')).toBe('n3');
-    expect(levels.params.fold).toBe(true);
-    expect(linkInto(custom.id, 'a')).toBe(levels.id);
+    expect(linkInto(math.id, 'image')).toBe('n3');
+    expect(math.params.fold).toBe(true);
+    expect(linkInto(custom.id, 'a')).toBe(math.id);
     expect(custom.params.code).toBe('v = a(uv);');
     expect(linkInto(warp.id, 'image')).toBe(custom.id);
     expect(linkInto(warp.id, 'warp')).toBe('n1');
@@ -306,6 +306,50 @@ describe('v4 -> v5: generic inputs and adjustments become operators', () => {
     expect(gen('n4')).toBe('glow');
     expect(doc.links.some((l) => ['base', 'warp'].includes(l.input) && l.to === 'n3')).toBe(false);
   });
+});
+
+it('migrates Levels & Math to Math while preserving node IDs and channel links', () => {
+  const links = [
+    { from: 'source', to: 'legacy', input: 'image', output: 'r' },
+    { from: 'legacy', to: 'output', input: 'image', output: 'rgb' },
+  ];
+  const doc = parseDocument(
+    {
+      format: DOCUMENT_FORMAT,
+      version: 7,
+      nodes: [
+        { id: 'source', generator: 'fractal-noise', x: 0, y: 0 },
+        {
+          id: 'legacy',
+          generator: 'op-levels',
+          x: 420,
+          y: 15,
+          frozenAt: 2,
+          params: { gain: 2, invert: true, gamma: 2, inLow: 0.4 },
+          code: 'vec4 generate(vec2 uv) { return vec4(u_gain * u_gamma + u_inLow); }',
+        },
+        { id: 'output', generator: 'output', x: 840, y: 0 },
+      ],
+      links,
+      selected: 'legacy',
+    },
+    getGenerator,
+  );
+  const node = doc.nodes.find((n) => n.id === 'legacy')!;
+  expect(doc.version).toBe(DOCUMENT_VERSION);
+  expect(doc.selected).toBe('legacy');
+  expect(doc.links).toEqual(links);
+  expect(node).toMatchObject({
+    generator: 'op-math',
+    x: 420,
+    y: 15,
+    frozenAt: 2,
+    params: { gain: 2, invert: true },
+    code: 'vec4 generate(vec2 uv) { return vec4(u_gain * 1.0 + 0.0); }',
+  });
+  expect(node.params).not.toHaveProperty('gamma');
+  expect(node.params).not.toHaveProperty('inLow');
+  expect(getGenerator('op-levels')).toBeUndefined();
 });
 
 describe('v5 -> v6: channel outputs', () => {

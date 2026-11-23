@@ -102,7 +102,7 @@ describe('generator browser', () => {
       f.sections.flatMap((s) => s.generators.map((g) => g.id)),
     );
     expect(listed.sort()).toEqual(
-      GENERATORS.filter((g) => !g.role && g.id !== 'op-levels')
+      GENERATORS.filter((g) => !g.role)
         .map((g) => g.id)
         .sort(),
     );

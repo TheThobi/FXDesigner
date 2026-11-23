@@ -30,7 +30,7 @@ import {
 export const DOCUMENT_FORMAT = 'fx-designer';
 /** Format id of documents saved before the FX Designer rename (still accepted). */
 const LEGACY_FORMATS: readonly string[] = ['procedural-texture-maker'];
-export const DOCUMENT_VERSION = 7;
+export const DOCUMENT_VERSION = 8;
 
 export interface TextureDocument {
   readonly format: typeof DOCUMENT_FORMAT;
@@ -94,6 +94,7 @@ function migrate(raw: Record<string, unknown>): Record<string, unknown> {
   if (data.version === 4) data = migrateV4toV5(data);
   if (data.version === 5) data = migrateV5toV6(data);
   if (data.version === 6) data = migrateV6toV7(data);
+  if (data.version === 7) data = migrateV7toV8(data);
   return data;
 }
 
@@ -340,6 +341,30 @@ function migrateV6toV7(raw: Record<string, unknown>): Record<string, unknown> {
     };
   });
   return { ...raw, version: 7, nodes };
+}
+
+/** v7 -> v8: convert the retired Levels & Math operator to Math. */
+function migrateV7toV8(raw: Record<string, unknown>): Record<string, unknown> {
+  const neutralLevels: Record<string, string> = {
+    u_inLow: '0.0',
+    u_inHigh: '1.0',
+    u_gamma: '1.0',
+    u_outLow: '0.0',
+    u_outHigh: '1.0',
+  };
+  const nodes = (Array.isArray(raw.nodes) ? raw.nodes : []).map(record).map((node) => {
+    if (node.generator !== 'op-levels') return node;
+    // Edited GLSL may still read the removed uniforms. Give them identity values.
+    const code =
+      typeof node.code === 'string'
+        ? node.code.replace(
+            /\bu_(?:inLow|inHigh|gamma|outLow|outHigh)\b/g,
+            (key) => neutralLevels[key]!,
+          )
+        : node.code;
+    return { ...node, generator: 'op-math', code };
+  });
+  return { ...raw, version: 8, nodes };
 }
 
 const finite = (v: unknown, fallback: number) =>
