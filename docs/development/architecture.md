@@ -237,7 +237,10 @@ look preset resets and what a node keeps when its generator is swapped; generato
 `dataOutput` (flowmap) get their own defaults instead.
 
 Browser thumbnails use the generator's `featuredPreset`; hovering a tile renders every preset
-once (64 px) and cycles through them.
+once (64 px) and cycles through them. Thumbnails persist in IndexedDB (`app/thumbnails.ts`),
+keyed by a fingerprint of the generator's shader sources and thumbnail settings
+(`Renderer.shaderSources`): a launch only renders the missing or stale ones, after the graph's
+own programs are ready, a few compiling ahead in the background (`Renderer.prepare`).
 
 Generators can declare `exportOverrides` (values forced in exports/thumbnails, e.g. the flowmap
 preview off) and a `split` (float param driving a draggable split handle in the viewport).
@@ -298,6 +301,14 @@ documents, requests); renaming one renames its uniform in the code. User GLSL ne
 in the frame: `Renderer.codeProgram` starts a `PendingProgram` (KHR_parallel_shader_compile)
 and throws `ProgramPending` until it is ready (the node keeps its last image); failures are
 cached per code, so a broken shader is not recompiled every frame.
+
+**Shader compilation.** Built-in programs (post passes, generators, simulation passes) are
+shared per GL context (`GpuContext.prepareProgram / tryProgram / program`, owned by the context:
+never dispose them) and compile in the background (KHR_parallel_shader_compile). In the frame
+loop a program still compiling throws `ProgramPending` (the node keeps its last image and
+retries next frame; simulations report `Simulation.ready()` and don't step meanwhile);
+captures (exports, thumbnails, filmstrip) wait for them instead. The canvas is only redrawn
+when a node image or a card rectangle changed.
 
 **Exports.** One toolbar button opens `ui/ExportDialog.ts` (every export kind: PNG, maps,
 flipbook, every node as a ZIP, document, share link). `app/exporter.ts` renders through a `Capture` (offscreen chain at a fixed size):
@@ -369,7 +380,7 @@ a stack's center adds it there, onto an edge splits that stack (`insertBeside`);
 from the Layout menu stay in the tree and return at their saved position and size. Hidden
 siblings' space goes to the viewport branch rather than enlarging the other panels. Docked panels built
 with `ui/Panel.ts#dockPanel`, Content-Browser tiles with a category color stripe (simulation
-thumbnails are captured from the live preview after 240 frames and cached in localStorage),
+thumbnails are captured from the live preview after 240 frames and cached in IndexedDB),
 Details panel with three pages switched by a full-width segmented control (like the browser's
 Generators / Operators) — Generator / Post Process / Output (`ui/Panel.ts#tabbedPanel`). The
 Workspace tab beside Details holds `GLOBAL_PARAMS`: seed, export size and aspect. A node with

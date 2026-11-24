@@ -41,6 +41,13 @@ export class ProgramPending extends Error {
   }
 }
 
+interface LiveSimulation {
+  readonly defId: string;
+  readonly sim: Simulation;
+  /** Not reset yet. */
+  fresh: boolean;
+}
+
 type CodeProgram =
   | { readonly pending: PendingProgram }
   | { readonly program: ShaderProgram }
@@ -110,7 +117,40 @@ export interface ChainStep {
   readonly links: Readonly<Record<string, ChainInput>>;
 }
 
+/** Built-in passes; `post` ones share the post parameter uniforms and the common chunks. */
+const CORE_PASSES = {
+  post: { post: true, fragment: postFragment },
+  slope: { post: true, fragment: slopeFragment },
+  slopeBlur: { post: true, fragment: slopeBlurFragment },
+  kuwahara: { post: true, fragment: kuwaharaFragment },
+  copy: { post: false, fragment: copyFragment },
+  channel: { post: false, fragment: channelFragment },
+  display: { post: false, fragment: displayFragment },
+} as const;
+type CorePass = keyof typeof CORE_PASSES;
+
+function coreSource(key: CorePass): string {
+  const { post, fragment } = CORE_PASSES[key];
+  return post
+    ? [
+        SHADER_HEADER,
+        'uniform float u_seed;',
+        uniformDeclarations(POST_PARAMS),
+        commonChunk,
+        noiseChunk,
+        fragment,
+      ].join('\n')
+    : [SHADER_HEADER, fragment].join('\n');
+}
+
 const POST_DEFAULTS = defaultValues(POST_PARAMS);
+/** Sources of the post passes (built once, on demand). */
+let postSources: string | undefined;
+const POST_SOURCES = (): string =>
+  (postSources ??= (Object.keys(CORE_PASSES) as CorePass[])
+    .filter((key) => CORE_PASSES[key].post)
+    .map(coreSource)
+    .join('\n'));
 /** Supersampled source targets never exceed this size (memory / time guard). */
 const MAX_SOURCE_SIZE = 8192;
 const REF_SIZE = 512;
@@ -165,20 +205,17 @@ export class NodeTargets {
 export class Renderer {
   private readonly outputChannels = new WeakMap<RenderTarget, NodeChannel>();
   readonly gpu: GpuContext;
-  private readonly programs = new Map<string, ShaderProgram>();
   private readonly gradients: GradientTextureCache;
   /** Imported images (image params); `onLoad` tells the app to re-render. */
   readonly images: ImageTextures;
-  private readonly postProgram: ShaderProgram;
-  private readonly slopeProgram: ShaderProgram;
-  private readonly slopeBlurProgram: ShaderProgram;
-  private readonly kuwaharaProgram: ShaderProgram;
-  private readonly copyProgram: ShaderProgram;
-  private readonly channelProgram: ShaderProgram;
-  private readonly displayProgram: ShaderProgram;
+  /**
+   * > 0 while a capture renders: programs still compiling are waited for (exports must not
+   * come out empty). Otherwise a pending compile throws ProgramPending (retry next frame).
+   */
+  private waiting = 0;
   /** Small target for grayscale detection (created on first use). */
   private probe: RenderTarget | null = null;
-  private readonly simulations = new Map<string, { defId: string; sim: Simulation }>();
+  private readonly simulations = new Map<string, LiveSimulation>();
   /** Programs of custom-code generators, keyed by `${id}\n${code}`. */
   private readonly codePrograms = new Map<string, CodeProgram>();
 
@@ -186,24 +223,70 @@ export class Renderer {
     this.gpu = new GpuContext(canvas);
     this.gradients = new GradientTextureCache(this.gpu.gl);
     this.images = new ImageTextures(this.gpu);
-    // Post passes share the post parameter uniforms and the common/noise chunks.
-    const postPass = (fragment: string) =>
-      [
-        SHADER_HEADER,
-        'uniform float u_seed;',
-        uniformDeclarations(POST_PARAMS),
-        commonChunk,
-        noiseChunk,
-        fragment,
-      ].join('\n');
-    const plain = (fragment: string) => [SHADER_HEADER, fragment].join('\n');
-    this.postProgram = this.gpu.createProgram(postPass(postFragment), 'post');
-    this.slopeProgram = this.gpu.createProgram(postPass(slopeFragment), 'post/slope');
-    this.slopeBlurProgram = this.gpu.createProgram(postPass(slopeBlurFragment), 'post/slope-blur');
-    this.kuwaharaProgram = this.gpu.createProgram(postPass(kuwaharaFragment), 'post/kuwahara');
-    this.copyProgram = this.gpu.createProgram(plain(copyFragment), 'node/copy');
-    this.channelProgram = this.gpu.createProgram(plain(channelFragment), 'node/channel');
-    this.displayProgram = this.gpu.createProgram(plain(displayFragment), 'node/display');
+    // Every built-in pass starts compiling now, in parallel, without blocking the page.
+    for (const key of Object.keys(CORE_PASSES) as CorePass[]) this.prepareCore(key);
+  }
+
+  private prepareCore(key: CorePass): void {
+    this.gpu.prepareProgram(`core:${key}`, () => coreSource(key));
+  }
+
+  /**
+   * Built-in pass. Post passes may still be compiling (ProgramPending, unless waiting); the
+   * tiny node passes (copy, channel, display) are always waited for.
+   */
+  private core(key: CorePass): ShaderProgram {
+    const build = () => coreSource(key);
+    if (this.waiting > 0 || !CORE_PASSES[key].post) return this.gpu.program(`core:${key}`, build);
+    const program = this.gpu.tryProgram(`core:${key}`, build);
+    if (!program) throw new ProgramPending(key);
+    return program;
+  }
+
+  /** Runs `fn` waiting for the programs it needs instead of throwing ProgramPending. */
+  private waitingFor<T>(fn: () => T): T {
+    this.waiting++;
+    try {
+      return fn();
+    } finally {
+      this.waiting--;
+    }
+  }
+
+  /**
+   * Starts compiling every program `def` needs (no-op for simulations and custom code) and
+   * tells whether they are all ready: background work (thumbnails) renders once it is.
+   */
+  prepare(def: GeneratorDefinition): boolean {
+    if (def.kind !== 'shader' || def.codeParam) return true;
+    const keys: [string, () => string][] = [
+      ...(def.passes ?? []).map((pass): [string, () => string] => [
+        `gen:${def.id}/${pass.label}`,
+        () => buildGeneratorShader(def, '', pass),
+      ]),
+      [`gen:${def.id}`, () => buildGeneratorShader(def, '')],
+      ['core:post', () => coreSource('post')],
+    ];
+    let ready = true;
+    for (const [key, build] of keys) {
+      try {
+        if (!this.gpu.tryProgram(key, build)) ready = false;
+      } catch {
+        // Broken shader: the render reports it.
+      }
+    }
+    return ready;
+  }
+
+  /**
+   * Every shader source a render of `def` uses (generator passes and post passes): changes
+   * with the GLSL, for caches of rendered images (browser thumbnails).
+   */
+  shaderSources(def: ShaderGenerator): string {
+    const own = [...(def.passes ?? []), undefined].map((pass) =>
+      buildGeneratorShader(def, '', pass),
+    );
+    return [...own, POST_SOURCES()].join('\n');
   }
 
   /**
@@ -229,12 +312,11 @@ export class Renderer {
       );
     }
     if (!def.codeParam || pass) {
-      const key = pass ? `${def.id}/${pass.label}` : def.id;
-      let program = this.programs.get(key);
-      if (!program) {
-        program = this.gpu.createProgram(buildGeneratorShader(def, '', pass), key);
-        this.programs.set(key, program);
-      }
+      const key = `gen:${pass ? `${def.id}/${pass.label}` : def.id}`;
+      const build = () => buildGeneratorShader(def, '', pass);
+      if (this.waiting > 0) return this.gpu.program(key, build);
+      const program = this.gpu.tryProgram(key, build);
+      if (!program) throw new ProgramPending(def.id);
       return program;
     }
     const raw = params?.[def.codeParam];
@@ -296,12 +378,27 @@ export class Renderer {
     def: SimulationGenerator,
     key: string = def.id,
   ): { sim: Simulation; created: boolean } {
+    const live = this.liveSimulation(def, key);
+    const created = live.fresh;
+    live.fresh = false;
+    return { sim: live.sim, created };
+  }
+
+  /**
+   * False while the programs of node `key`'s simulation compile in the background (the
+   * instance is created if needed, its reset left to the next simulationFor).
+   */
+  simulationReady(def: SimulationGenerator, key: string = def.id): boolean {
+    return this.liveSimulation(def, key).sim.ready?.() ?? true;
+  }
+
+  private liveSimulation(def: SimulationGenerator, key: string): LiveSimulation {
     const live = this.simulations.get(key);
-    if (live?.defId === def.id) return { sim: live.sim, created: false };
+    if (live?.defId === def.id) return live;
     live?.sim.dispose();
-    const sim = def.create(this.gpu);
-    this.simulations.set(key, { defId: def.id, sim });
-    return { sim, created: true };
+    const created: LiveSimulation = { defId: def.id, sim: def.create(this.gpu), fresh: true };
+    this.simulations.set(key, created);
+    return created;
   }
 
   /** Disposes the simulations whose key is not in `keep`. */
@@ -335,7 +432,7 @@ export class Renderer {
     else this.outputChannels.set(out, channel);
     if (postOn) this.renderPost(req, input, out);
     else {
-      this.copyProgram.use().texture('u_source', input.texture, 0);
+      this.core('copy').use().texture('u_source', input.texture, 0);
       this.gpu.bindTarget(out);
       this.gpu.drawFullscreen();
     }
@@ -356,7 +453,7 @@ export class Renderer {
     if (!out || !o) return key === undefined ? out : undefined;
     const dst = targets.get(`out:${o.key}`, out.width, out.height);
     this.outputChannels.set(dst, o.channel);
-    this.channelProgram.use().set('u_channel', o.channel).texture('u_source', out.texture, 0);
+    this.core('channel').use().set('u_channel', o.channel).texture('u_source', out.texture, 0);
     this.gpu.bindTarget(dst);
     this.gpu.drawFullscreen();
     return dst;
@@ -368,7 +465,7 @@ export class Renderer {
    */
   isTransparent(texture: WebGLTexture): boolean {
     this.probe ??= this.gpu.createTarget({ width: 16, height: 16, format: 'rgba8' });
-    this.copyProgram.use().texture('u_source', texture, 0);
+    this.core('copy').use().texture('u_source', texture, 0);
     this.gpu.bindTarget(this.probe);
     this.gpu.drawFullscreen();
     const px = this.gpu.readPixels(this.probe);
@@ -388,7 +485,7 @@ export class Renderer {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.enable(gl.SCISSOR_TEST);
-    const program = this.displayProgram.use();
+    const program = this.core('display').use();
     const dpr = Math.max(1, window.devicePixelRatio || 1);
     for (const item of items) {
       const x = Math.round(item.x);
@@ -418,7 +515,9 @@ export class Renderer {
     const output = gpu.createTarget({ width, height, format: 'rgba8' });
     let precise: RenderTarget | null = null;
     const rowBytes = width * 4;
-    const renderChain = (request: FrameRequest | readonly ChainStep[], final: RenderTarget) => {
+    const renderChain = (request: FrameRequest | readonly ChainStep[], final: RenderTarget) =>
+      this.waitingFor(() => renderSteps(request, final));
+    const renderSteps = (request: FrameRequest | readonly ChainStep[], final: RenderTarget) => {
       const chain: readonly ChainStep[] =
         'generator' in request ? [{ req: request, links: {} }] : request;
       chain.forEach((step, i) => {
@@ -499,7 +598,7 @@ export class Renderer {
     if (values.slopeBlurOn === true) input = this.slopeBlur(req, values, input, targets);
     if (values.kuwaharaOn === true) {
       const painted = targets.get('painted', sw, sh);
-      this.kuwaharaProgram
+      this.core('kuwahara')
         .use()
         .setAll(paramUniforms(POST_PARAMS, values))
         .set('u_radius', getNumber(values, 'kuwaharaRadius') / REF_SIZE)
@@ -521,7 +620,7 @@ export class Renderer {
     const uniforms = paramUniforms(POST_PARAMS, values);
 
     const slope = targets.get('slope', width, height);
-    this.slopeProgram
+    this.core('slope')
       .use()
       .setAll(uniforms)
       .set('u_seed', req.seed)
@@ -530,7 +629,7 @@ export class Renderer {
     this.gpu.drawFullscreen();
 
     const blurred = targets.get('blurred', width, height);
-    this.slopeBlurProgram
+    this.core('slopeBlur')
       .use()
       .setAll(uniforms)
       .set('u_texel', 1.5 / REF_SIZE)
@@ -554,6 +653,8 @@ export class Renderer {
   private renderSource(req: FrameRequest, target: RenderTarget, targets: NodeTargets): void {
     const { generator } = req;
     if (generator.kind === 'simulation') {
+      if (this.waiting === 0 && !this.simulationReady(generator, req.key))
+        throw new ProgramPending(generator.id);
       const { sim, created } = this.simulationFor(generator, req.key);
       // Inputs first: a seed pass may read them (e.g. a seed image).
       sim.setInputs?.(this.customInputs(req));
@@ -650,7 +751,7 @@ export class Renderer {
 
   private renderPost(req: FrameRequest, input: RenderTarget, target: RenderTarget): void {
     const values = { ...POST_DEFAULTS, ...req.post };
-    const program = this.postProgram.use();
+    const program = this.core('post').use();
     program
       .setAll(paramUniforms(POST_PARAMS, values))
       .set('u_seed', req.seed)
@@ -669,20 +770,8 @@ export class Renderer {
 
   dispose(): void {
     this.retainSimulations(new Set());
-    for (const p of this.programs.values()) p.dispose();
-    this.programs.clear();
     for (const p of this.codePrograms.values()) if ('program' in p) p.program.dispose();
     this.codePrograms.clear();
-    for (const p of [
-      this.postProgram,
-      this.slopeProgram,
-      this.slopeBlurProgram,
-      this.kuwaharaProgram,
-      this.copyProgram,
-      this.channelProgram,
-      this.displayProgram,
-    ])
-      p.dispose();
     this.probe?.dispose();
     this.gradients.dispose();
     this.images.dispose();

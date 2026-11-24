@@ -215,8 +215,19 @@ export class Timeline {
   }
 
   /** Cheap: called every displayed frame. */
+  /** The next update must refresh the DOM even if the state is unchanged. */
+  private stale = true;
+
   update(state: TimelineState): void {
     const prev = this.state;
+    // Called every frame: an unchanged state touches no DOM (no style / layout work).
+    if (
+      !this.stale &&
+      prev &&
+      (Object.keys(state) as (keyof TimelineState)[]).every((k) => prev[k] === state[k])
+    )
+      return;
+    this.stale = false;
     this.state = state;
     if (prev?.mode !== state.mode) this.element.dataset.mode = state.mode;
     if (prev?.playing !== state.playing || prev.mode !== state.mode) {
@@ -287,6 +298,7 @@ export class Timeline {
 
   /** Frames mode: snapshots the user can jump back to. */
   setKeyframes(keyframes: readonly TimelineKeyframe[]): void {
+    this.stale = true;
     this.keyframes = keyframes;
     this.layoutKeyframes();
   }

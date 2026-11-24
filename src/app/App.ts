@@ -74,6 +74,7 @@ import { openCommunity } from '../ui/CommunityDialog';
 import { Community } from './community';
 import { mostUsedNodes, recordNodeUsage } from './nodeUsage';
 import { debounce } from '../util/debounce';
+import { fnv1a } from '../util/hash';
 import { downloadBlob, pickFile } from '../util/download';
 import { deepEqual } from '../util/equal';
 import { clamp } from '../util/math';
@@ -142,10 +143,12 @@ import {
   type GraphLink,
   type GraphNode,
 } from './state';
-import { ThumbnailCache } from './thumbnails';
+import { SIM_THUMBNAIL, ThumbnailCache } from './thumbnails';
 import { UserPresets } from './userPresets';
 
 const THUMBNAIL_SIZE = 64;
+/** Browser thumbnails compiling in the background at once. */
+const THUMBNAIL_COMPILES = 3;
 /**
  * `?e2e`: no background thumbnails (browser tiles, preset galleries). Software-rendered test
  * browsers would spend most of their time on them.
@@ -310,6 +313,10 @@ export class App {
   private shownKey = '';
 
   private lastFrame = 0;
+  /** Some node of the graph is still compiling (background work waits). */
+  private graphPending = false;
+  /** What the canvas shows (redrawn only when it changes). */
+  private displayKey = '';
   /** Time of the last state change, to detect interactive editing (adaptive preview). */
   private lastChange = 0;
   /** Smoothed frame interval (ms). */
@@ -555,10 +562,15 @@ export class App {
     this.activateNode();
     this.bindGlobalEvents();
     requestAnimationFrame(this.frame);
-    for (const [id, url] of this.thumbnails.entries()) this.generatorList.setThumbnail(id, url);
     this.generatorList.onVisible = (id) => this.requestThumbnail(id);
     this.generatorList.onHover = (id) => this.previewPresets(id);
-    for (const id of this.generatorList.visibleIds()) this.requestThumbnail(id);
+    void this.thumbnails.loaded.then(() => {
+      // Stored images show at once (even stale ones, replaced when rendered again).
+      for (const [id, { url }] of this.thumbnails.entries())
+        this.generatorList.setThumbnail(id, url);
+      this.thumbnailsLoaded = true;
+      for (const id of this.generatorList.visibleIds()) this.requestThumbnail(id);
+    });
     this.showAuthError();
     void this.cloud.init();
   }
@@ -3237,6 +3249,8 @@ export class App {
       const def = getGenerator(node.generator);
       if (def?.kind !== 'simulation' || this.failed.has(node.id) || node.frozenAt !== null)
         continue;
+      // Still compiling in the background: it starts once its programs are ready.
+      if (!this.renderer.simulationReady(def, node.id)) continue;
       const painting = this.pointerActive && !this.playing && node.id === this.node.id;
       const n = painting ? 1 : steps;
       for (let i = 0; i < n; i++) this.stepSimulation(node, def);
@@ -3292,14 +3306,7 @@ export class App {
     const time = def?.kind === 'shader' && def.animated ? (node.frozenAt ?? this.time) : 0;
     const sim = def?.kind === 'simulation' ? cache.simVersion : 0;
     return JSON.stringify([
-      node.generator,
-      node.params,
-      node.post,
-      node.ramp,
-      node.postEnabled,
-      node.code,
-      node.customParams,
-      node.baseParamEdits,
+      this.nodeContent(node),
       this.assetVersion,
       node.seed ?? this.state.seed,
       size,
@@ -3307,6 +3314,27 @@ export class App {
       sim,
       upstream,
     ]);
+  }
+
+  /** Serialized settings of a node (nodes are immutable: computed once per node object). */
+  private readonly nodeContents = new WeakMap<GraphNode, string>();
+
+  private nodeContent(node: GraphNode): string {
+    let content = this.nodeContents.get(node);
+    if (content === undefined) {
+      content = JSON.stringify([
+        node.generator,
+        node.params,
+        node.post,
+        node.ramp,
+        node.postEnabled,
+        node.code,
+        node.customParams,
+        node.baseParamEdits,
+      ]);
+      this.nodeContents.set(node, content);
+    }
+    return content;
   }
 
   /** Re-renders the nodes whose inputs changed, then draws every card on the canvas. */
@@ -3319,6 +3347,8 @@ export class App {
     const interacting = performance.now() - this.lastChange < ADAPTIVE_IDLE_MS;
     this.degraded = interacting && this.frameMs > ADAPTIVE_SLOW_MS && full > 256;
     const selectedSize = this.degraded ? full / 2 : full;
+    let pending = false;
+    let rendered = false;
 
     for (const stateNode of fullEvaluationOrder(this.state)) {
       const node = this.liveNode(stateNode);
@@ -3360,13 +3390,17 @@ export class App {
         );
         cache.signature = signature;
         cache.version++;
+        rendered = true;
       } catch (e) {
-        // User code still compiling in the background: keep the last image, retry next frame.
-        if (!(e instanceof ProgramPending)) this.showRenderError(node.id, e);
+        // Still compiling in the background: keep the last image, retry next frame.
+        if (e instanceof ProgramPending) pending = true;
+        else this.showRenderError(node.id, e);
       }
     }
+    this.graphPending = pending;
 
     const items: DisplayItem[] = [];
+    let displayKey = '';
     const magnified = this.viewport.magnified;
     // Back to front (the rects come in stacking order): the card in front draws last.
     for (const [id, rect] of rects) {
@@ -3376,6 +3410,7 @@ export class App {
       if (!rect || !texture) continue;
       const selected = node.id === this.state.selectedId;
       const preview = this.pinPreview?.id === node.id ? this.pinPreview.channel : undefined;
+      displayKey += `${id}:${this.nodeCaches.get(id)?.version},${rect.x},${rect.y},${rect.width},${rect.height},${selected && magnified},${preview};`;
       items.push({
         texture,
         ...rect,
@@ -3386,7 +3421,12 @@ export class App {
       });
     }
     const { width, height } = this.viewport.canvasSize();
-    this.renderer.display(items, width, height);
+    // Nothing moved nor changed: the canvas keeps its last image (an idle editor costs ~0).
+    displayKey += `${width}x${height}/${this.viewTiles}`;
+    if (rendered || displayKey !== this.displayKey) {
+      this.displayKey = displayKey;
+      this.renderer.display(items, width, height);
+    }
     this.detectTransparency();
     this.viewport.setRenderSize(imageDims(selectedSize, this.state.aspect)[0]);
   }
@@ -3434,7 +3474,7 @@ export class App {
     const capture = this.renderer.createCapture(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
     try {
       const url = captureToDataUrl(capture, this.requestFor(this.node, this.time, true));
-      this.thumbnails.set(def.id, url);
+      this.thumbnails.set(def.id, SIM_THUMBNAIL, url);
       this.generatorList.setThumbnail(def.id, url);
     } catch (e) {
       console.warn('Simulation thumbnail failed', e);
@@ -3506,6 +3546,11 @@ export class App {
         capture.dispose();
         return; // pointer left: finish another time
       }
+      // Compiling in the background: never block the page on a hover.
+      if (!this.renderer.prepare(def)) {
+        setTimeout(next, 50);
+        return;
+      }
       try {
         urls.push(captureToDataUrl(capture, this.thumbnailRequest(def, presets[i])));
       } catch (e) {
@@ -3526,14 +3571,38 @@ export class App {
   private readonly thumbDone = new Set<string>();
   private thumbTimer: ReturnType<typeof setTimeout> | undefined;
   private thumbCapture: Capture | null = null;
+  /** Stored thumbnails are loaded (requests wait for them, most need no render). */
+  private thumbnailsLoaded = false;
+  /** Fingerprint of each generator's thumbnail (sources + settings). */
+  private readonly thumbHashes = new Map<string, string>();
+
+  private thumbnailHash(def: ShaderGenerator, req: FrameRequest): string {
+    let hash = this.thumbHashes.get(def.id);
+    if (hash === undefined) {
+      const { params, post, ramp, time, seed } = req;
+      hash = fnv1a(
+        JSON.stringify([THUMBNAIL_SIZE, params, post, ramp, time, seed]) +
+          this.renderer.shaderSources(def),
+      );
+      this.thumbHashes.set(def.id, hash);
+    }
+    return hash;
+  }
+
+  private featuredThumbnail(def: ShaderGenerator): FrameRequest {
+    const featured = def.presets?.find((p) => p.name === def.featuredPreset);
+    return this.thumbnailRequest(def, featured);
+  }
+
   /**
-   * Thumbnails are rendered lazily, one per timer tick, only for tiles that scroll into view
-   * (simulations get theirs from the live preview instead).
+   * Thumbnails are rendered lazily, only for tiles that scroll into view and whose stored
+   * image is missing or stale (simulations get theirs from the live preview instead).
    */
   private requestThumbnail(id: string): void {
     const def = getGenerator(id);
     if (
       LITE ||
+      !this.thumbnailsLoaded ||
       !def ||
       def.kind !== 'shader' ||
       isOperator(def) ||
@@ -3541,27 +3610,49 @@ export class App {
       this.thumbQueue.includes(id)
     )
       return;
+    const stored = this.thumbnails.get(id, this.thumbnailHash(def, this.featuredThumbnail(def)));
+    if (stored) {
+      this.thumbDone.add(id);
+      return;
+    }
     this.thumbQueue.push(id);
-    this.thumbTimer ??= setTimeout(() => this.renderNextThumbnail(), 30);
+    this.scheduleThumbnails(30);
   }
 
+  private scheduleThumbnails(delay: number): void {
+    this.thumbTimer ??= setTimeout(() => this.renderNextThumbnail(), delay);
+  }
+
+  /**
+   * One thumbnail per tick. The graph goes first (nothing renders while its nodes compile);
+   * a few generators compile ahead in the background, the first ready one is rendered.
+   */
   private renderNextThumbnail(): void {
     this.thumbTimer = undefined;
-    const id = this.thumbQueue.shift();
-    const def = id ? getGenerator(id) : undefined;
-    if (def && def.kind === 'shader') {
+    if (this.graphPending) {
+      this.scheduleThumbnails(100);
+      return;
+    }
+    let rendered = false;
+    for (const id of this.thumbQueue.slice(0, THUMBNAIL_COMPILES)) {
+      const def = getGenerator(id);
+      if (def?.kind === 'shader' && !this.renderer.prepare(def)) continue;
+      this.thumbQueue.splice(this.thumbQueue.indexOf(id), 1);
+      if (def?.kind !== 'shader') continue;
       try {
         this.thumbCapture ??= this.renderer.createCapture(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
-        const featured = def.presets?.find((p) => p.name === def.featuredPreset);
-        const req = this.thumbnailRequest(def, featured);
-        this.generatorList.setThumbnail(def.id, captureToDataUrl(this.thumbCapture, req));
+        const req = this.featuredThumbnail(def);
+        const url = captureToDataUrl(this.thumbCapture, req);
+        this.thumbnails.set(def.id, this.thumbnailHash(def, req), url);
+        this.generatorList.setThumbnail(def.id, url);
         this.thumbDone.add(def.id);
       } catch (e) {
         console.warn(`Thumbnail failed for ${def.id}`, e);
       }
+      rendered = true;
+      break;
     }
-    if (this.thumbQueue.length > 0)
-      this.thumbTimer = setTimeout(() => this.renderNextThumbnail(), 30);
+    if (this.thumbQueue.length > 0) this.scheduleThumbnails(rendered ? 16 : 50);
     else {
       this.thumbCapture?.dispose();
       this.thumbCapture = null;

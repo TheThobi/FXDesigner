@@ -37,7 +37,8 @@ npm scripts need Node ≥ 20 (local Node 22 works); `make <target>` runs the sam
   `PW_BASE_URL=http://localhost:5173` runs against the dev server (no build). Keep the
   Playwright image tag in Makefile and CI in sync with `@playwright/test`.
 - `npm run dev` (editor) and `npm run dev:server` (API with the `DEV_` settings of `.env`).
-- Small cosmetic changes don't need e2e runs or screenshots; logic changes do.
+- AI assistants never run the e2e suite locally (slow, costly): GitHub CI runs it and the user
+  reports failures. Local verification stops at `npm run check`.
 
 ## Architecture rules
 
@@ -100,9 +101,9 @@ npm scripts need Node ≥ 20 (local Node 22 works); `make <target>` runs the sam
 
 ## Simulations
 
-- Cellular ones use `GridSimulation` (seed / step / render passes, `step: [{ label, source,
-  repeat }]` for multi-pass solvers). In the seed pass use `gl_FragCoord` / `u_gridSize`
-  (`u_state` is a blank 1×1 there, never call `stateSize()`).
+- Cellular ones use `GridSimulation` (seed / step / render passes,
+  `step: [{ label, source, repeat }]` for multi-pass solvers). In the seed pass use
+  `gl_FragCoord` / `u_gridSize` (`u_state` is a blank 1×1 there, never call `stateSize()`).
 - Explicit Euler: check stability (stencil eigenvalue × dt < 2) when adding terms.
 
 ## Custom code
@@ -111,6 +112,9 @@ npm scripts need Node ≥ 20 (local Node 22 works); `make <target>` runs the sam
   fragment (comments included).
 - Node code (Code view) and Custom Code compile in the background (`Renderer.codeProgram`,
   `ProgramPending`): never compile user GLSL synchronously in the frame.
+- Built-in programs too: get them through `GpuContext.program / tryProgram` (shared per
+  context, never disposed by their users; `SimProgram` for simulation passes). Frame-loop code
+  must tolerate `ProgramPending`; captures wait. Never call `new ShaderProgram` directly.
 - Custom parameters live in `GraphNode.customParams`; use `effectiveGenerator(def, node)`
   wherever a node's param schema is needed.
 

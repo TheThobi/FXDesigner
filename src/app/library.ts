@@ -6,6 +6,7 @@
  * sync, see app/cloud.ts); `applyRemote*` methods write server data without reporting it back.
  */
 import { readStorage, writeStorage } from '../util/storage';
+import { fnv1a } from '../util/hash';
 
 export interface SystemEntry {
   readonly id: string;
@@ -54,13 +55,7 @@ export type PublishState = 'local' | 'published' | 'modified';
 export function contentHash(doc: unknown): string {
   const { selected: _selected, ...rest } =
     doc && typeof doc === 'object' ? (doc as Record<string, unknown>) : { selected: null };
-  const text = JSON.stringify(rest);
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, '0') + text.length.toString(16);
+  return fnv1a(JSON.stringify(rest));
 }
 
 export function publicationVersion(raw: unknown): number | null {

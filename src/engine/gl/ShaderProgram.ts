@@ -195,10 +195,14 @@ export class PendingProgram {
     this.program = program;
   }
 
-  /** The program once ready (null while compiling); throws ShaderCompileError on failure. */
-  poll(): ShaderProgram | null {
+  /**
+   * The program once ready (null while compiling); throws ShaderCompileError on failure.
+   * `wait`: blocks until the compile is done instead of returning null.
+   */
+  poll(wait = false): ShaderProgram | null {
     const { gl } = this;
-    if (this.parallel && !gl.getProgramParameter(this.program, COMPLETION_STATUS)) return null;
+    if (!wait && this.parallel && !gl.getProgramParameter(this.program, COMPLETION_STATUS))
+      return null;
     try {
       if (!gl.getProgramParameter(this.program, gl.LINK_STATUS) && !gl.isContextLost()) {
         const fsLog = gl.getShaderInfoLog(this.fs);

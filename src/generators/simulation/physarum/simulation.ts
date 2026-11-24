@@ -4,6 +4,7 @@ import type { PingPong, RenderTarget } from '../../../engine/gl/RenderTarget';
 import type { ShaderProgram } from '../../../engine/gl/ShaderProgram';
 import type { NodeInputDef } from '../../../engine/nodes';
 import { buildSimulationShader } from '../../../engine/shaderBuilder';
+import { SimProgram } from '../../../engine/simulation/GridSimulation';
 import { paramUniforms } from '../../../engine/uniforms';
 import type { ParamDef, ParamValues } from '../../../params/types';
 import { getNumber } from '../../../params/values';
@@ -29,10 +30,7 @@ interface PhysarumSnapshot extends SimulationSnapshot {
 }
 
 export class PhysarumSimulation implements Simulation {
-  private readonly programs: Record<
-    'seed' | 'step' | 'deposit' | 'diffuse' | 'render',
-    ShaderProgram
-  >;
+  private readonly programs: Record<'seed' | 'step' | 'deposit' | 'diffuse' | 'render', SimProgram>;
   private agents: PingPong | null = null;
   private trail: PingPong | null = null;
   private pointer: SimulationPointer | null = null;
@@ -47,18 +45,23 @@ export class PhysarumSimulation implements Simulation {
     private readonly inputDefs: readonly NodeInputDef[] = [],
   ) {
     const build = (src: string, pass: string) =>
-      gpu.createProgram(
-        buildSimulationShader(defs, src, `physarum/${pass}`, inputDefs),
+      new SimProgram(
+        gpu,
         `physarum/${pass}`,
+        buildSimulationShader(defs, src, `physarum/${pass}`, inputDefs),
       );
     const depositFragment = buildSimulationShader(defs, depositFrag, 'physarum/deposit', inputDefs);
     this.programs = {
       seed: build(agentsSeed, 'seed'),
       step: build(agentsStep, 'step'),
-      deposit: gpu.createProgramWithVertex(depositVert, depositFragment, 'physarum/deposit'),
+      deposit: new SimProgram(gpu, 'physarum/deposit', depositFragment, depositVert),
       diffuse: build(diffuse, 'diffuse'),
       render: build(render, 'render'),
     };
+  }
+
+  ready(): boolean {
+    return Object.values(this.programs).every((p) => p.ready());
   }
 
   reset(params: ParamValues, seed: number): void {
@@ -161,14 +164,14 @@ export class PhysarumSimulation implements Simulation {
   dispose(): void {
     this.agents?.dispose();
     this.trail?.dispose();
-    for (const p of Object.values(this.programs)) p.dispose();
   }
 
   /**
    * Common uniforms; unused samplers (u_state, u_seedTexture, unconnected inputs) point at the
    * blank texture.
    */
-  private bind(program: ShaderProgram, params: ParamValues): ShaderProgram {
+  private bind(pass: SimProgram, params: ParamValues): ShaderProgram {
+    const program = pass.get();
     const brush = this.pointer;
     const blank = this.gpu.blankTexture;
     let unit = 4;

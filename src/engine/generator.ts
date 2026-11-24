@@ -198,5 +198,10 @@ export interface Simulation {
    * set before rendering; used by the following steps.
    */
   setInputs?(inputs: Readonly<Record<string, WebGLTexture | null>>): void;
+  /**
+   * False while its programs compile in the background: the app neither steps nor renders it
+   * yet (keeps the page responsive). Absent = always ready.
+   */
+  ready?(): boolean;
   dispose(): void;
 }

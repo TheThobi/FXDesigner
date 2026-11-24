@@ -1,6 +1,11 @@
 import vertexSource from '../glsl/fullscreen.vert?raw';
 import { PingPong, RenderTarget, type TargetFormat, type TargetOptions } from './RenderTarget';
-import { PendingProgram, ShaderProgram } from './ShaderProgram';
+import { PendingProgram, type ShaderProgram } from './ShaderProgram';
+
+type SharedProgram =
+  | { readonly pending: PendingProgram }
+  | { readonly program: ShaderProgram }
+  | { readonly error: unknown };
 import { activateUploadUnit } from './units';
 
 export interface GpuCapabilities {
@@ -62,6 +67,8 @@ export class GpuContext {
         : String(gl.getParameter(gl.RENDERER)),
     };
 
+    this.parallelCompile = gl.getExtension('KHR_parallel_shader_compile') !== null;
+
     const vao = gl.createVertexArray();
     if (!vao) throw new Error('Failed to create VAO');
     this.vao = vao;
@@ -79,25 +86,75 @@ export class GpuContext {
     return this.caps.halfFloatTargets ? 'rgba16f' : 'rgba8';
   }
 
-  createProgram(fragmentSource: string, label: string): ShaderProgram {
-    return new ShaderProgram(this.gl, vertexSource, fragmentSource, label);
+  /**
+   * Starts compiling a fullscreen program in the background (user code): poll it until it is
+   * ready, so a slow or failing compile never blocks the frame. The caller owns the result.
+   */
+  startProgram(
+    fragmentSource: string,
+    label: string,
+    vertex: string = vertexSource,
+  ): PendingProgram {
+    return new PendingProgram(this.gl, this.parallelCompile, vertex, fragmentSource, label);
   }
 
   /**
-   * Starts compiling a fullscreen program in the background (user code): poll it until it is
-   * ready, so a slow or failing compile never blocks the frame.
+   * Shared programs (built-in shaders), compiled once per context and owned by it: never
+   * dispose them. Compiles run in the background (KHR_parallel_shader_compile) so that many
+   * can be started at once without blocking the page.
    */
-  startProgram(fragmentSource: string, label: string): PendingProgram {
-    this.parallelCompile ??= this.gl.getExtension('KHR_parallel_shader_compile') !== null;
-    return new PendingProgram(this.gl, this.parallelCompile, vertexSource, fragmentSource, label);
+  private readonly shared = new Map<string, SharedProgram>();
+
+  /**
+   * Starts compiling shared program `key` (no-op once started). `fragment` is only called the
+   * first time; `vertex` defaults to the fullscreen triangle.
+   */
+  prepareProgram(key: string, fragment: () => string, vertex?: string): void {
+    if (this.shared.has(key)) return;
+    let entry: SharedProgram;
+    try {
+      entry = { pending: this.startProgram(fragment(), key, vertex) };
+    } catch (e) {
+      entry = { error: e };
+    }
+    this.shared.set(key, entry);
   }
 
-  private parallelCompile: boolean | undefined;
-
-  /** Program with a custom vertex shader (e.g. point sprites driven by a data texture). */
-  createProgramWithVertex(vertex: string, fragmentSource: string, label: string): ShaderProgram {
-    return new ShaderProgram(this.gl, vertex, fragmentSource, label);
+  /**
+   * Shared program `key` once compiled, null while it compiles (started if needed). Throws its
+   * ShaderCompileError (remembered: a broken program is never compiled again).
+   */
+  tryProgram(key: string, fragment: () => string, vertex?: string): ShaderProgram | null {
+    return this.resolveProgram(key, fragment, vertex, false);
   }
+
+  /** Shared program `key`, waiting for its compile if needed. */
+  program(key: string, fragment: () => string, vertex?: string): ShaderProgram {
+    return this.resolveProgram(key, fragment, vertex, true)!;
+  }
+
+  private resolveProgram(
+    key: string,
+    fragment: () => string,
+    vertex: string | undefined,
+    wait: boolean,
+  ): ShaderProgram | null {
+    this.prepareProgram(key, fragment, vertex);
+    const entry = this.shared.get(key)!;
+    if ('program' in entry) return entry.program;
+    if ('error' in entry) throw entry.error;
+    try {
+      const program = entry.pending.poll(wait);
+      if (program) this.shared.set(key, { program });
+      return program;
+    } catch (e) {
+      this.shared.set(key, { error: e });
+      throw e;
+    }
+  }
+
+  /** KHR_parallel_shader_compile is available (compiles don't block until polled). */
+  readonly parallelCompile: boolean;
 
   createTarget(options: TargetOptions): RenderTarget {
     return new RenderTarget(this.gl, options);
@@ -263,6 +320,8 @@ export class GpuContext {
   }
 
   dispose(): void {
+    for (const entry of this.shared.values()) if ('program' in entry) entry.program.dispose();
+    this.shared.clear();
     if (this.blank) this.gl.deleteTexture(this.blank);
     this.gl.deleteVertexArray(this.vao);
   }

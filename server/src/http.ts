@@ -1,7 +1,12 @@
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
+import { promisify } from 'node:util';
+import { brotliCompress, constants as zlib, gzip } from 'node:zlib';
+
+const brotliAsync = promisify(brotliCompress);
+const gzipAsync = promisify(gzip);
 
 export class HttpError extends Error {
   constructor(
@@ -183,14 +188,68 @@ export async function serveStatic(
     if (!info?.isFile()) throw new HttpError(404, 'Not found');
   }
   const immutable = path.startsWith('/assets/');
-  res.writeHead(200, {
-    'Content-Type': TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream',
-    'Content-Length': info.size,
+  const ext = extname(file).toLowerCase();
+  const headers: Record<string, string | number> = {
+    'Content-Type': TYPES[ext] ?? 'application/octet-stream',
     'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
+  };
+  const encoding = COMPRESSIBLE.has(ext) ? acceptedEncoding(req) : null;
+  if (encoding) {
+    const body = await compressed(file, info.mtimeMs, encoding);
+    res.writeHead(200, {
+      ...headers,
+      'Content-Encoding': encoding,
+      'Content-Length': body.length,
+      Vary: 'Accept-Encoding',
+    });
+    res.end(req.method === 'HEAD' ? undefined : body);
+    return;
+  }
+  res.writeHead(200, {
+    ...headers,
+    'Content-Length': info.size,
+    ...(COMPRESSIBLE.has(ext) ? { Vary: 'Accept-Encoding' } : {}),
   });
   if (req.method === 'HEAD') {
     res.end();
     return;
   }
   createReadStream(file).pipe(res);
+}
+
+/** Text assets worth compressing (images and fonts already are). */
+const COMPRESSIBLE = new Set(['.html', '.js', '.css', '.json', '.svg', '.txt', '.map', '.wasm']);
+
+type Encoding = 'br' | 'gzip';
+
+function acceptedEncoding(req: IncomingMessage): Encoding | null {
+  const accept = String(req.headers['accept-encoding'] ?? '');
+  if (/\bbr\b/.test(accept)) return 'br';
+  if (/\bgzip\b/.test(accept)) return 'gzip';
+  return null;
+}
+
+/** Compressed files, compressed once per version of the file (the build is small). */
+const compressedCache = new Map<
+  string,
+  { readonly mtime: number; readonly body: Promise<Buffer> }
+>();
+
+function compressed(file: string, mtime: number, encoding: Encoding): Promise<Buffer> {
+  const key = `${encoding}:${file}`;
+  const cached = compressedCache.get(key);
+  if (cached?.mtime === mtime) return cached.body;
+  const body = readFile(file).then((raw) =>
+    encoding === 'br'
+      ? brotliAsync(raw, {
+          params: {
+            [zlib.BROTLI_PARAM_QUALITY]: 9,
+            [zlib.BROTLI_PARAM_SIZE_HINT]: raw.length,
+          },
+        })
+      : gzipAsync(raw, { level: 9 }),
+  );
+  compressedCache.set(key, { mtime, body });
+  body.catch(() => compressedCache.delete(key));
+  return body;
 }

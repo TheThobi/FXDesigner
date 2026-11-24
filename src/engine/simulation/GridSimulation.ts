@@ -7,6 +7,7 @@ import type { ShaderProgram } from '../gl/ShaderProgram';
 import type { NodeInputDef } from '../nodes';
 import { buildSimulationShader } from '../shaderBuilder';
 import { paramUniforms } from '../uniforms';
+import { fnv1a } from '../../util/hash';
 
 /**
  * Declarative description of a cellular/grid simulation. Each pass is a GLSL source defining
@@ -42,6 +43,39 @@ export interface GridSimulationSpec {
   readonly openBoundaries?: boolean;
 }
 
+/**
+ * A simulation pass program, shared by every instance with the same source (owned by the
+ * GpuContext, never disposed here). Compiles start at construction, in parallel.
+ */
+export class SimProgram {
+  private readonly key: string;
+
+  constructor(
+    private readonly gpu: GpuContext,
+    /** Shown in compile errors, e.g. `physarum/step`. */
+    label: string,
+    private readonly fragment: string,
+    private readonly vertex?: string,
+  ) {
+    this.key = `sim:${label}:${fnv1a(`${vertex ?? ''}\n${fragment}`)}`;
+    gpu.prepareProgram(this.key, () => fragment, vertex);
+  }
+
+  /** Compiled (or failed: `get` then throws the error). */
+  ready(): boolean {
+    try {
+      return this.gpu.tryProgram(this.key, () => this.fragment, this.vertex) !== null;
+    } catch {
+      return true;
+    }
+  }
+
+  /** The program, waiting for its compile if needed. */
+  get(): ShaderProgram {
+    return this.gpu.program(this.key, () => this.fragment, this.vertex);
+  }
+}
+
 const BRUSH_MODES = { paint: 1, erase: 2 } as const;
 
 class GridSnapshot implements SimulationSnapshot {
@@ -58,12 +92,12 @@ class GridSnapshot implements SimulationSnapshot {
 
 /** Generic ping-pong implementation of GridSimulationSpec. */
 export class GridSimulation implements Simulation {
-  private readonly seedProgram: ShaderProgram;
+  private readonly seedProgram: SimProgram;
   private readonly stepPrograms: readonly {
-    readonly program: ShaderProgram;
+    readonly program: SimProgram;
     readonly repeat?: (params: ParamValues) => number;
   }[];
-  private readonly renderProgram: ShaderProgram;
+  private readonly renderProgram: SimProgram;
   private state: PingPong | null = null;
   private seedTexture: WebGLTexture | null = null;
   private pointer: SimulationPointer | null = null;
@@ -80,9 +114,10 @@ export class GridSimulation implements Simulation {
     private readonly spec: GridSimulationSpec,
   ) {
     const build = (src: string, pass: string) =>
-      gpu.createProgram(
-        buildSimulationShader(defs, src, `${id}/${pass}`, spec.inputs ?? [], spec.openBoundaries),
+      new SimProgram(
+        gpu,
         `${id}/${pass}`,
+        buildSimulationShader(defs, src, `${id}/${pass}`, spec.inputs ?? [], spec.openBoundaries),
       );
     this.seedProgram = build(spec.seed, 'seed');
     const passes: readonly GridPass[] =
@@ -92,6 +127,12 @@ export class GridSimulation implements Simulation {
       repeat: pass.repeat,
     }));
     this.renderProgram = build(spec.render, 'render');
+  }
+
+  ready(): boolean {
+    return [this.seedProgram, this.renderProgram, ...this.stepPrograms.map((s) => s.program)].every(
+      (p) => p.ready(),
+    );
   }
 
   reset(params: ParamValues, seed: number): void {
@@ -112,7 +153,7 @@ export class GridSimulation implements Simulation {
     this.seedTexture = image ? gpu.createImageTexture(image, 'nearest') : null;
 
     this.frame = 0;
-    this.bindCommon(this.seedProgram, params, seed)
+    this.bindCommon(this.seedProgram.get(), params, seed)
       .texture('u_state', gpu.blankTexture, 0)
       .texture('u_seedTexture', this.seedTexture ?? gpu.blankTexture, 1);
     gpu.bindTarget(this.state.write);
@@ -127,7 +168,7 @@ export class GridSimulation implements Simulation {
     const iterations = getNumber(params, 'stepsPerFrame', 1);
     for (let i = 0; i < iterations; i++) {
       for (const { program, repeat } of this.stepPrograms) {
-        const p = this.bindCommon(program, params, this.lastSeed);
+        const p = this.bindCommon(program.get(), params, this.lastSeed);
         p.texture('u_seedTexture', this.seedTexture ?? gpu.blankTexture, 1);
         const times = repeat ? Math.max(1, Math.round(repeat(params))) : 1;
         for (let r = 0; r < times; r++) {
@@ -147,7 +188,7 @@ export class GridSimulation implements Simulation {
       this.reseedPending = false;
       this.reset(params, this.lastSeed);
     }
-    this.bindCommon(this.renderProgram, params, this.lastSeed)
+    this.bindCommon(this.renderProgram.get(), params, this.lastSeed)
       .texture('u_state', this.state.read.texture, 0)
       .texture('u_seedTexture', this.seedTexture ?? this.gpu.blankTexture, 1);
     this.gpu.bindTarget(target);
@@ -186,9 +227,6 @@ export class GridSimulation implements Simulation {
   dispose(): void {
     this.state?.dispose();
     if (this.seedTexture) this.gpu.gl.deleteTexture(this.seedTexture);
-    this.seedProgram.dispose();
-    for (const { program } of this.stepPrograms) program.dispose();
-    this.renderProgram.dispose();
   }
 
   private bindCommon(program: ShaderProgram, params: ParamValues, seed: number): ShaderProgram {

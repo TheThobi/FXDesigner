@@ -1,11 +1,10 @@
 import type { Simulation, SimulationPointer, SimulationSnapshot } from '../../../engine/generator';
 import type { GpuContext } from '../../../engine/gl/GpuContext';
 import type { RenderTarget } from '../../../engine/gl/RenderTarget';
-import type { ShaderProgram } from '../../../engine/gl/ShaderProgram';
 import commonChunk from '../../../engine/glsl/common.glsl?raw';
 import noiseChunk from '../../../engine/glsl/noise.glsl?raw';
 import { buildSimulationShader, SHADER_HEADER } from '../../../engine/shaderBuilder';
-import { GridSimulation } from '../../../engine/simulation/GridSimulation';
+import { GridSimulation, SimProgram } from '../../../engine/simulation/GridSimulation';
 import { paramUniforms } from '../../../engine/uniforms';
 import type { ParamDef, ParamValues } from '../../../params/types';
 import { getNumber } from '../../../params/values';
@@ -30,8 +29,8 @@ const CHANNELS: readonly (readonly [number, number, number])[] = [
  */
 export class CausticsSimulation implements Simulation {
   private readonly waves: GridSimulation;
-  private readonly meshProgram: ShaderProgram;
-  private readonly renderProgram: ShaderProgram;
+  private readonly meshProgram: SimProgram;
+  private readonly renderProgram: SimProgram;
   private accum: RenderTarget | null = null;
   /** Swell clock (advances with the simulation). */
   private swellTime = 0;
@@ -48,11 +47,16 @@ export class CausticsSimulation implements Simulation {
       render: 'void main() { outColor = neighbor(0, 0); }',
     });
     const vertex = [SHADER_HEADER, 'uniform float u_seed;', commonChunk, noiseChunk, meshVert];
-    this.meshProgram = gpu.createProgramWithVertex(vertex.join('\n'), meshFrag, 'caustics/mesh');
-    this.renderProgram = gpu.createProgram(
-      buildSimulationShader(defs, render, 'caustics/render'),
+    this.meshProgram = new SimProgram(gpu, 'caustics/mesh', meshFrag, vertex.join('\n'));
+    this.renderProgram = new SimProgram(
+      gpu,
       'caustics/render',
+      buildSimulationShader(defs, render, 'caustics/render'),
     );
+  }
+
+  ready(): boolean {
+    return this.waves.ready() && this.meshProgram.ready() && this.renderProgram.ready();
   }
 
   reset(params: ParamValues, seedValue: number): void {
@@ -74,6 +78,7 @@ export class CausticsSimulation implements Simulation {
     if (view === 0) this.projectLight(target.width, target.height, params, state);
 
     this.renderProgram
+      .get()
       .use()
       .setAll(paramUniforms(this.defs, params))
       .texture('u_state', state, 0)
@@ -107,6 +112,7 @@ export class CausticsSimulation implements Simulation {
     const depth = getNumber(params, 'depth', 1);
     const dispersion = getNumber(params, 'dispersion', 0);
     const program = this.meshProgram
+      .get()
       .use()
       .set('u_mesh', mesh)
       .set('u_depth', depth)
@@ -141,8 +147,6 @@ export class CausticsSimulation implements Simulation {
 
   dispose(): void {
     this.waves.dispose();
-    this.meshProgram.dispose();
-    this.renderProgram.dispose();
     this.accum?.dispose();
   }
 }
