@@ -310,6 +310,16 @@ retries next frame; simulations report `Simulation.ready()` and don't step meanw
 captures (exports, thumbnails, filmstrip) wait for them instead. The canvas is only redrawn
 when a node image or a card rectangle changed.
 
+**3D preview.** `ui/Preview3D.ts` (dock panel `preview3d`) shows the exported node through
+`Renderer.renderPreview3D`: geometry from `gl_VertexID` (`node/preview3d.vert`), relief from the
+node's Post Process height output, back faces discarded (convex shapes, no depth buffer). It
+renders into an offscreen target read back to the panel's 2D canvas, only when the image, the
+view or the panel size changed, and only while the panel is visible.
+
+**Offline.** Production builds register `public/sw.js` (not under `?e2e`): fingerprinted
+`assets/` cache first, the page network first, `/api` never cached. Bump its `CACHE` name only
+if the caching rules change.
+
 **Exports.** One toolbar button opens `ui/ExportDialog.ts` (every export kind: PNG, maps,
 flipbook, every node as a ZIP, document, share link). `app/exporter.ts` renders through a `Capture` (offscreen chain at a fixed size):
 RGBA8 PNGs via the canvas (optional channel flips for flowmap conventions), and 16-bit

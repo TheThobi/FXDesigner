@@ -3,6 +3,11 @@
 void main() {
   vec2 size = vec2(stateSize());
   vec4 s = neighbor(0, 0);
+  if (solidAt(0, 0)) {
+    // Inside an obstacle: no flow, no smoke (pressure kept for the solver).
+    outColor = vec4(0.0, 0.0, s.b, 0.0);
+    return;
+  }
   vec2 back = v_uv - s.rg * u_dtScale / size;
   vec4 a = sampleState(back);
   // Air entering through an open edge carries no smoke.

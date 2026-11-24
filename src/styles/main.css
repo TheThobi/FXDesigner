@@ -509,8 +509,27 @@ button:focus-visible {
 }
 
 .tile-thumb {
+  position: relative;
   aspect-ratio: 1;
   background: var(--checker);
+}
+
+/* Simulation pictogram, under the thumbnail until one is captured. */
+.sim-glyph {
+  position: absolute;
+  inset: 18%;
+  color: color-mix(in srgb, var(--cat) 70%, #fff);
+  opacity: 0.85;
+}
+
+.sim-glyph svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.tile-thumb img {
+  position: relative;
 }
 
 .tile-thumb img {
@@ -527,9 +546,7 @@ button:focus-visible {
 }
 
 .generator-item.cat-simulation .tile-thumb {
-  background:
-    radial-gradient(circle at 30% 35%, #3a8bff55 0 16%, transparent 17%),
-    radial-gradient(circle at 68% 62%, #3a8bff55 0 12%, transparent 13%), #1a2230;
+  background: linear-gradient(145deg, #1f2733, #151a21);
 }
 
 .tile-stripe {
@@ -5245,4 +5262,66 @@ body.dragging-tab * {
 
 .levels-track input[data-point='white']::-moz-range-thumb {
   background: #fbfbfb;
+}
+
+/* ---- 3D preview panel -------------------------------------------------------------------- */
+
+.preview3d {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.preview3d-settings {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--bg-row);
+  border-top: 1px solid var(--border);
+}
+
+.preview3d-row {
+  display: flex;
+  gap: 10px;
+}
+
+.preview3d-field {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.preview3d-field[hidden] {
+  display: none;
+}
+
+.preview3d-label {
+  flex: none;
+  color: var(--text-dim);
+}
+
+.preview3d-field > :not(.preview3d-label) {
+  flex: 1;
+  min-width: 0;
+}
+
+.preview3d-stage {
+  position: relative;
+  flex: 1;
+  min-height: 120px;
+}
+
+/* Absolute: the canvas never sizes the stage it measures. */
+.preview3d-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
 }

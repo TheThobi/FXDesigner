@@ -149,7 +149,8 @@ ${resolveIncludes(passSource)}
  * can be remapped generically. Seamless loop (u_loop = [enabled, duration, blend window]):
  * over one period T, out(t) = mix(f(t + T), f(t), w(t)) with w(0) = 0 and w(T) = 1, hence
  * out(T) = f(T) = out(0) for any generator, at the cost of a crossfade (two evaluations)
- * during the last `blend` fraction of the loop.
+ * during the last `blend` fraction of the loop. Generators flagged `nativeLoop` animate only
+ * through loopFlow(): they loop natively instead (u_loop.x = 2, no crossfade).
  */
 export function buildGeneratorShader(def: ShaderGenerator, code = '', pass?: ShaderPass): string {
   // Custom-code generators: the user GLSL replaces the marker (once).
@@ -178,6 +179,17 @@ ${commonChunk}
 ${noiseChunk}
 ${sdfChunk}
 
+// Phase of a rotation-driven animation (rotating noise gradients, orbiting cell points) at
+// \`rate\` radians per second. In a native loop (u_loop.x == 2) the phase is quantized so the
+// loop ends on whole turns of 4π (every fBm octave multiplier 1, 1.5, 2… then closes too):
+// the loop needs no crossfade.
+float loopFlow(float rate) {
+  if (u_loop.x < 1.5 || rate == 0.0) return u_time * rate;
+  float period = max(u_loop.y, 1e-3);
+  float turns = max(1.0, floor(abs(rate) * period / (2.0 * TAU) + 0.5)) * sign(rate);
+  return mod(u_clock, period) / period * turns * 2.0 * TAU;
+}
+
 // ---- generator: ${def.id}${pass ? ` / pass: ${pass.label}` : ''} ----
 ${fragment}
 
@@ -191,6 +203,12 @@ void main() {
   }
   float period = max(u_loop.y, 1e-3);
   float t = mod(u_clock, period);
+  if (u_loop.x > 1.5) {
+    // Native loop: the generator's animation closes by itself (see loopFlow).
+    u_time = t;
+    outColor = generate(uv);
+    return;
+  }
   float w = smoothstep(1.0 - u_loop.z, 1.0, t / period);
   u_time = t + period;
   vec4 a = generate(uv);

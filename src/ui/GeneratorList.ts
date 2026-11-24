@@ -9,6 +9,7 @@ import { openContextMenu } from './ContextMenu';
 import { clear, h } from './dom';
 import { icon } from './icons';
 import { segmentedTabs, type SegmentedTabs } from './Panel';
+import { simGlyph } from './simGlyphs';
 
 /** Where generator tiles can be dropped (the viewport). */
 export interface TileDropTarget {
@@ -226,6 +227,7 @@ export class GeneratorList {
         : h(
             'div',
             { class: 'tile-thumb' },
+            g.kind === 'simulation' ? simGlyph(g.id) : null,
             h('img', { alt: '', width: 64, height: 64, draggable: false }),
           ),
       h('div', { class: 'tile-stripe' }),

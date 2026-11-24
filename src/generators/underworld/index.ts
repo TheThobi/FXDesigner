@@ -9,6 +9,7 @@ import emberMotesFrag from './ember-motes.glsl?raw';
 import impactCrackFrag from './impact-crack.glsl?raw';
 import lavaCracksFrag from './lava-cracks.glsl?raw';
 import soulFlameFrag from './soul-flame.glsl?raw';
+import spectralChainsFrag from './spectral-chains.glsl?raw';
 
 export const soulFlame: ShaderGenerator = {
   kind: 'shader',
@@ -142,4 +143,47 @@ export const emberMotes: ShaderGenerator = {
   featuredPreset: 'Hell embers',
 };
 
-export const UNDERWORLD_GENERATORS = [soulFlame, lavaCracks, divineAura, impactCrack, emberMotes];
+export const spectralChains: ShaderGenerator = {
+  kind: 'shader',
+  id: 'spectral-chains',
+  name: 'Spectral Chains',
+  category: 'light',
+  description: 'Seamless columns of ghostly interlocking chain links, swaying and scrolling.',
+  animated: true,
+  fragment: spectralChainsFrag,
+  params: [
+    param.int('chains', 'Chains', 3, 1, 12),
+    param.int('links', 'Links per cell', 3, 1, 8),
+    param.float('linkWidth', 'Link width', 1, 0.4, 2),
+    param.float('thickness', 'Thickness', 1, 0.3, 3),
+    param.float('sway', 'Sway', 0.5, 0, 2),
+    param.int('waves', 'Sway waves', 1, 1, 6, { visibleWhen: (v) => Number(v.sway) > 0 }),
+    param.float('scroll', 'Scroll', 0.3, -2, 2),
+    param.float('glow', 'Glow', 0.6, 0, 2),
+    param.float('ghostly', 'Ghostly fade', 0.6, 0, 1),
+    param.int('pulses', 'Fade pulses', 2, 1, 8, { visibleWhen: (v) => Number(v.ghostly) > 0 }),
+    param.speed(0.6, 3),
+  ],
+  defaultPost: { alphaMode: 1 },
+  presets: [
+    { name: 'Bound souls', values: { chains: 3, links: 3, sway: 0.5, ghostly: 0.6 } },
+    {
+      name: 'Heavy shackles',
+      values: { chains: 2, links: 2, thickness: 1.8, linkWidth: 1.3, sway: 0.2, glow: 0.3 },
+    },
+    {
+      name: 'Phantom curtain',
+      values: { chains: 8, links: 4, sway: 1, waves: 2, ghostly: 0.9, pulses: 3, glow: 1 },
+    },
+  ],
+  featuredPreset: 'Bound souls',
+};
+
+export const UNDERWORLD_GENERATORS = [
+  soulFlame,
+  spectralChains,
+  lavaCracks,
+  divineAura,
+  impactCrack,
+  emberMotes,
+];

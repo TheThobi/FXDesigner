@@ -1,0 +1,14 @@
+{
+  "name": "FX Designer",
+  "short_name": "FX Designer",
+  "description": "Procedural effect texture generator running on the GPU.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0e0e0e",
+  "theme_color": "#151515",
+  "icons": [
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "favicon.png", "sizes": "500x500", "type": "image/png", "purpose": "any" }
+  ]
+}

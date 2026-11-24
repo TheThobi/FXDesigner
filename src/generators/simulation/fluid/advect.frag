@@ -2,6 +2,11 @@
 // brush). Stable for any time step (Stam 1999).
 void main() {
   vec2 size = vec2(stateSize());
+  if (solidAt(0, 0)) {
+    // Inside an obstacle: still fluid, no ink.
+    outColor = vec4(0.0, 0.0, neighbor(0, 0).b, 0.0);
+    return;
+  }
   vec4 s = neighbor(0, 0);
   vec2 back = v_uv - s.rg * u_dtScale / size;
   vec4 a = sampleState(back);

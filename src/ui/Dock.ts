@@ -3,7 +3,7 @@ import { h } from './dom';
 import { icon, type IconName } from './icons';
 import type { Layout, LayoutPart } from './Layout';
 
-export type PanelId = 'browser' | 'details' | 'viewport' | 'workspace';
+export type PanelId = 'browser' | 'details' | 'viewport' | 'workspace' | 'preview3d';
 
 export interface DockPanelSpec {
   readonly id: PanelId;
@@ -35,7 +35,7 @@ const STORAGE_KEY = 'ptm.ui.dock.v2';
 const DRAG_THRESHOLD = 6;
 /** Edge band (fraction of a stack) that splits instead of stacking. */
 const EDGE = 0.28;
-const PANELS: readonly PanelId[] = ['browser', 'details', 'viewport', 'workspace'];
+const PANELS: readonly PanelId[] = ['browser', 'details', 'viewport', 'workspace', 'preview3d'];
 
 function defaultLayout(): Split {
   return {
@@ -44,7 +44,7 @@ function defaultLayout(): Split {
     children: [
       { kind: 'stack', panels: ['browser'], active: 'browser' },
       { kind: 'stack', panels: ['viewport'], active: 'viewport' },
-      { kind: 'stack', panels: ['details', 'workspace'], active: 'details' },
+      { kind: 'stack', panels: ['details', 'workspace', 'preview3d'], active: 'details' },
     ],
     sizes: [0.2, 0.55, 0.25],
   };
@@ -131,11 +131,12 @@ export class DockManager {
   refresh(): void {
     // Layouts saved by older versions dropped hidden panels: put them back by the viewport.
     for (const id of PANELS) {
-      if (id === 'workspace') continue;
+      if (id === 'workspace' || id === 'preview3d') continue;
       if (!this.find(id))
         this.insertBeside(this.find('viewport')!, id, id === 'browser' ? 'left' : 'right');
     }
     if (!this.find('workspace')) this.find('details')?.panels.push('workspace');
+    if (!this.find('preview3d')) this.find('details')?.panels.push('preview3d');
     this.render();
   }
 

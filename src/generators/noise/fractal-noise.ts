@@ -12,6 +12,8 @@ export const fractalNoise: ShaderGenerator = {
     'Octave sums (fBm, turbulence, ridged) of Perlin, value, simplex, Worley or Perlin-Worley noise.',
   animated: true,
   fragment,
+  // Value noise drifts (not a rotation): it keeps the crossfade.
+  nativeLoop: (v) => Number(v.basis) !== 1,
   params: [
     param.select('noiseType', 'Fractal', ['fBm', 'Turbulence', 'Ridged']),
     param.select(

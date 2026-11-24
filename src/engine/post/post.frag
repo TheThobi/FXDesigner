@@ -106,6 +106,12 @@ vec3 paintLighting(vec3 albedo, vec2 uv, vec2 grad, vec2 o) {
 }
 
 float edgeAt(vec2 uv, vec2 o) {
+  // Ink variation: the line swells and thins along the image like a brush stroke
+  // (seamless noise; never on the pixel-art grid).
+  if (u_outlineVariation > 0.0 && g_block.x <= 0.0) {
+    float n = 0.5 + 0.5 * gradientNoise(uv * 6.0, vec2(6.0), 0.0);
+    o *= mix(1.0, 0.15 + 1.7 * n, u_outlineVariation);
+  }
   vec2 c = toneAt(uv);
   int taps = g_block.x > 0.0 && u_pixelMode == 0 ? 4 : 8;
   float e = 0.0;

@@ -26,6 +26,8 @@ import { bzReaction } from './simulation/bz-reaction/definition';
 import { flowmapPainter } from './simulation/flowmap/definition';
 import { cyclicAutomaton } from './simulation/cyclic-automaton/definition';
 import { marbling } from './simulation/marbling/definition';
+import { erosion } from './simulation/erosion/definition';
+import { differentialGrowth } from './simulation/growth/definition';
 import { physarum } from './simulation/physarum/definition';
 import { reactionDiffusion } from './simulation/reaction-diffusion/definition';
 import { lenia } from './simulation/lenia/definition';
@@ -56,6 +58,8 @@ export const GENERATORS: readonly GeneratorDefinition[] = [
   fluid,
   crystalGrowth,
   causticsSimulation,
+  erosion,
+  differentialGrowth,
   smokeFire,
   paintMask,
   lifeAutomata,

@@ -17,6 +17,7 @@ export const gabor: ShaderGenerator = {
   description: 'Oriented band-limited noise: fibers, brushed metal, fabric, hatching. Seamless.',
   animated: true,
   fragment: gaborFrag,
+  nativeLoop: () => true,
   params: [
     param.float('scale', 'Cells', 8, 1, 24),
     param.int('impulses', 'Impulses / cell', 10, 1, 16),
@@ -56,6 +57,7 @@ export const flowStrokes: ShaderGenerator = {
     'Brush-like streaks following swirling currents (line integral convolution). Seamless.',
   animated: true,
   fragment: flowStrokesFrag,
+  nativeLoop: () => true,
   params: [
     param.float('flowScale', 'Flow scale', 2, 1, 8),
     param.float('density', 'Stroke density', 96, 4, 200),
@@ -89,6 +91,7 @@ export const veins: ShaderGenerator = {
   description: 'Marble veins, wood rings and agate bands from turbulent sines.',
   animated: true,
   fragment: veinsFrag,
+  nativeLoop: () => true,
   params: [
     param.select('pattern', 'Pattern', [
       'Marble (seamless)',
@@ -137,6 +140,7 @@ export const ripples: ShaderGenerator = {
   description: 'Interference of circular waves. Seamless; loops at integer speeds.',
   animated: true,
   fragment: ripplesFrag,
+  nativeLoop: () => true,
   defaultPost: { alphaMode: 1 },
   params: [
     param.int('sources', 'Sources', 6, 1, 16),

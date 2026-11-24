@@ -30,15 +30,24 @@ const DEFAULTS: FlipbookOptions = {
   restart: true,
 };
 
+/**
+ * What the sheet holds: frames of a shader animation, frames of a simulation run, or
+ * variations (one random seed per cell, same time).
+ */
+export type SheetMode = 'shader' | 'simulation' | 'variations';
+
 /** Modal asking for sprite-sheet layout. Resolves null when cancelled. */
 export function askFlipbookOptions(
-  isSimulation: boolean,
+  mode: SheetMode,
   maxSize: number,
   defaults: Partial<FlipbookOptions> = {},
   /** Frame pixel size for a given frame size setting (non-square workspaces). */
   dims: (frameSize: number) => readonly [number, number] = (s) => [s, s],
 ): Promise<FlipbookOptions | null> {
   const initial = { ...DEFAULTS, ...defaults };
+  const isSimulation = mode === 'simulation';
+  const variations = mode === 'variations';
+  const unit = variations ? 'variations' : 'frames';
   return new Promise((resolve) => {
     const num = (name: string, value: number, min: number, max: number, step = 1) =>
       h('input', {
@@ -71,15 +80,19 @@ export function askFlipbookOptions(
     const form = h(
       'form',
       { method: 'dialog' },
-      h('h2', { text: 'Export flipbook' }),
+      h('h2', { text: variations ? 'Export variations' : 'Export flipbook' }),
       field('Columns', columns),
       field('Rows', rows),
-      field('Frame size', frameSize),
-      isSimulation
-        ? field('Sim frames between images', steps)
-        : field('Duration (s) — loop length for a looping sheet', duration),
+      field(variations ? 'Cell size' : 'Frame size', frameSize),
+      variations
+        ? null
+        : isSimulation
+          ? field('Sim frames between images', steps)
+          : field('Duration (s) — loop length for a looping sheet', duration),
       isSimulation ? field('Restart simulation first', restart) : null,
-      field(isSimulation ? 'Warm-up before capture (s)' : 'Start at (s)', start),
+      variations
+        ? field('Time (s)', start)
+        : field(isSimulation ? 'Warm-up before capture (s)' : 'Start at (s)', start),
       info,
       h(
         'div',
@@ -114,7 +127,7 @@ export function askFlipbookOptions(
         isSimulation && o.startTime > 0
           ? ` · ${Math.round(o.startTime * SIM_FRAMES_PER_SECOND)} warm-up frames`
           : '';
-      info.textContent = `${o.columns * o.rows} frames — sheet ${w}×${hgt}px${w > maxSize || hgt > maxSize ? ' (too large!)' : ''}${warmup}`;
+      info.textContent = `${o.columns * o.rows} ${unit} — sheet ${w}×${hgt}px${w > maxSize || hgt > maxSize ? ' (too large!)' : ''}${warmup}`;
     };
     form.addEventListener('input', refresh);
     refresh();

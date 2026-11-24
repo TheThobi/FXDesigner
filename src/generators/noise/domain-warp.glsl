@@ -3,7 +3,7 @@
 vec4 generate(vec2 uv) {
   float scale = u_tileable ? max(1.0, floor(u_scale + 0.5)) : u_scale;
   vec2 period = u_tileable ? vec2(scale) : vec2(0.0);
-  float flow = u_time * u_speed;
+  float flow = loopFlow(u_speed);
   vec2 p = uv * scale;
   vec2 q = vec2(fbm(p, u_octaves, 2.0, 0.5, period, flow, FBM_STANDARD),
                 fbm(p + vec2(5.2, 1.3), u_octaves, 2.0, 0.5, period, flow, FBM_STANDARD));

@@ -50,6 +50,8 @@ import { askExportMaps, type ExportMapsOptions, type MapKind } from '../ui/Expor
 import { CodePanel } from '../ui/CodePanel';
 import { askExport, type ExportChoice } from '../ui/ExportDialog';
 import { askFlipbookOptions, SIM_FRAMES_PER_SECOND } from '../ui/FlipbookDialog';
+import { askVideoOptions } from '../ui/VideoDialog';
+import { Preview3D } from '../ui/Preview3D';
 import { openLibrary } from '../ui/LibraryDialog';
 import { AccountButton } from '../ui/AccountUI';
 import { GeneratorList } from '../ui/GeneratorList';
@@ -90,7 +92,16 @@ import {
   serializeDocument,
   type TextureDocument,
 } from './document';
-import { captureToDataUrl, flipChannels, renderFlipbook, renderPng, renderPng16 } from './exporter';
+import {
+  canRecordVideo,
+  captureToDataUrl,
+  flipChannels,
+  recordVideo,
+  renderFlipbook,
+  renderGif,
+  renderPng,
+  renderPng16,
+} from './exporter';
 import { Cloud } from './cloud';
 import { History } from './history';
 import {
@@ -147,6 +158,8 @@ import { SIM_THUMBNAIL, ThumbnailCache } from './thumbnails';
 import { UserPresets } from './userPresets';
 
 const THUMBNAIL_SIZE = 64;
+/** Seed offset between two cells of a variations atlas (coprime with MAX_SEED + 1). */
+const VARIATION_SEED_STEP = 7919;
 /** Browser thumbnails compiling in the background at once. */
 const THUMBNAIL_COMPILES = 3;
 /**
@@ -313,6 +326,8 @@ export class App {
   private shownKey = '';
 
   private lastFrame = 0;
+  /** A video export is running (it steps the simulations itself). */
+  private recording = false;
   /** Some node of the graph is still compiling (background work waits). */
   private graphPending = false;
   /** What the canvas shows (redrawn only when it changes). */
@@ -337,6 +352,10 @@ export class App {
     );
     const viewport = dockPanel('viewport', 'Viewport', 'viewport', 'main');
     const workspace = dockPanel('workspace', 'Workspace', 'tune', 'aside');
+    const preview3d = dockPanel('preview3d', '3D Preview', 'sun', 'section', () =>
+      this.layout.set('preview3d', false),
+    );
+    preview3d.body.append(this.preview3d.element);
     const details = tabbedPanel('details', { text: 'Details', icon: 'details' }, [
       { id: 'generator', title: 'Generator', icon: 'tune' },
       { id: 'post', title: 'Post Process', icon: 'fx' },
@@ -438,6 +457,7 @@ export class App {
         { id: 'viewport', title: 'Viewport', icon: 'viewport', element: viewport.panel },
         { id: 'details', title: 'Details', icon: 'details', element: details.panel },
         { id: 'workspace', title: 'Workspace', icon: 'tune', element: workspace.panel },
+        { id: 'preview3d', title: '3D Preview', icon: 'sun', element: preview3d.panel },
       ],
       this.layout,
       () => window.dispatchEvent(new Event('resize')),
@@ -2918,6 +2938,22 @@ export class App {
         description: 'Looping sprite sheet',
         ...(this.selectionAnimated ? {} : { disabled: 'Nothing animated' }),
       },
+      {
+        kind: 'video',
+        icon: 'play',
+        title: 'Video / GIF',
+        description: 'Loop as WebM or animated GIF',
+        ...(this.selectionAnimated ? {} : { disabled: 'Nothing animated' }),
+      },
+      {
+        kind: 'variations',
+        icon: 'dice',
+        title: 'Variations',
+        description: 'One random seed per cell',
+        ...(this.simulationsOf(this.exportNode.id).length > 0
+          ? { disabled: 'Simulations vary by running them again' }
+          : {}),
+      },
     ];
     const graph: ExportChoice[] = [
       {
@@ -2949,6 +2985,8 @@ export class App {
     if (kind === 'png') await this.exportPng();
     else if (kind === 'maps') await this.exportMaps();
     else if (kind === 'flipbook') await this.exportFlipbook();
+    else if (kind === 'variations') await this.exportVariations();
+    else if (kind === 'video') await this.exportVideo();
     else if (kind === 'nodes') await this.exportAllNodes();
     else if (kind === 'json') this.saveFile();
     else if (kind === 'share') this.share();
@@ -3139,7 +3177,7 @@ export class App {
     const sims = this.simulationsOf(id);
     const simulated = sims.length > 0;
     const choice = await askFlipbookOptions(
-      simulated,
+      simulated ? 'simulation' : 'shader',
       this.renderer.gpu.caps.maxTextureSize,
       { duration: this.exportLoopDuration() },
       (s) => imageDims(s, this.state.aspect),
@@ -3179,6 +3217,78 @@ export class App {
       toast(`Export failed: ${errorMessage(e)}`, 'error');
     }
     for (const { node } of sims) this.cacheOf(node.id).simVersion++;
+  }
+
+  /** The animation (repeated loop, or a simulation run) recorded as a video. */
+  private async exportVideo(): Promise<void> {
+    const id = this.exportNode.id;
+    const sims = this.simulationsOf(id);
+    const simulated = sims.length > 0;
+    const opts = await askVideoOptions(simulated, canRecordVideo(), {
+      duration: this.exportLoopDuration(),
+    });
+    if (!opts) return;
+    const frames = Math.max(1, Math.round(opts.duration * opts.fps));
+    const steps = Math.max(1, Math.round(SIM_FRAMES_PER_SECOND / opts.fps));
+    const gif = opts.format === 'gif';
+    toast(gif ? 'Rendering GIF…' : `Recording ${(opts.duration * opts.repeats).toFixed(1)} s…`);
+    this.recording = true;
+    try {
+      const blob = await (gif ? renderGif : recordVideo)(
+        this.renderer,
+        imageDims(opts.size, this.state.aspect),
+        frames * opts.repeats,
+        opts.fps,
+        (i) => {
+          if (simulated && i > 0) {
+            for (const { node, def } of sims)
+              if (node.frozenAt === null)
+                for (let k = 0; k < steps; k++) this.liveSim(node, def).step(node.params);
+          }
+          // Frames cover [0, duration): with a seamless loop of that duration, repeats join.
+          return this.chainFor(id, ((i % frames) / frames) * opts.duration, true);
+        },
+      );
+      const ext = gif ? 'gif' : blob.type.includes('mp4') ? 'mp4' : 'webm';
+      downloadBlob(blob, `${this.fileBase()}.${ext}`);
+      toast(gif ? 'Exported GIF' : 'Exported video');
+    } catch (e) {
+      toast(`Export failed: ${errorMessage(e)}`, 'error');
+    } finally {
+      this.recording = false;
+    }
+    for (const { node } of sims) this.cacheOf(node.id).simVersion++;
+  }
+
+  /**
+   * Atlas of variations (particle / decal variants): the same graph rendered with a different
+   * seed in each cell. Every node of the chain shifts its seed (own seeds included).
+   */
+  private async exportVariations(): Promise<void> {
+    const id = this.exportNode.id;
+    const choice = await askFlipbookOptions(
+      'variations',
+      this.renderer.gpu.caps.maxTextureSize,
+      { columns: 4, rows: 4, frameSize: 256, startTime: this.time },
+      (s) => imageDims(s, this.state.aspect),
+    );
+    if (!choice) return;
+    const native = this.nativePixelSize();
+    const opts = native ? { ...choice, frameSize: native } : choice;
+    const chain = this.chainFor(id, opts.startTime, true);
+    try {
+      const frame = imageDims(opts.frameSize, this.state.aspect);
+      const blob = await renderFlipbook(this.renderer, opts, frame, (i) =>
+        chain.map((step) => ({
+          ...step,
+          req: { ...step.req, seed: (step.req.seed + i * VARIATION_SEED_STEP) % (MAX_SEED + 1) },
+        })),
+      );
+      downloadBlob(blob, `${this.fileBase()}-variations-${opts.columns}x${opts.rows}.png`);
+      toast(`Exported ${opts.columns * opts.rows} variations`);
+    } catch (e) {
+      toast(`Export failed: ${errorMessage(e)}`, 'error');
+    }
   }
 
   private share(): void {
@@ -3236,6 +3346,7 @@ export class App {
     });
     if (this.playing && animated && !this.scrubbing) this.advanceTime(dt * this.speed);
     this.draw();
+    this.updatePreview3D();
 
     this.updateTimeline();
     this.updateFps(dt);
@@ -3244,6 +3355,8 @@ export class App {
 
   /** Advances every simulation node (painting on a paused selected one steps it too). */
   private stepSimulations(): void {
+    // A video export steps the simulations itself (in real time): the loop leaves them alone.
+    if (this.recording) return;
     const steps = this.playing ? this.consumeSteps() : 0;
     for (const node of this.state.nodes) {
       const def = getGenerator(node.generator);
@@ -3369,17 +3482,7 @@ export class App {
               );
       const signature = this.signature(node, size, cache);
       if (signature === cache.signature) continue;
-      const inputs: Record<string, RenderTarget> = {};
-      for (const [input, link] of Object.entries(inputLinks(this.state.links, node.id))) {
-        const upstream = this.nodeCaches.get(link.from);
-        const fromNode = nodeById(this.state, link.from);
-        const fromDef = fromNode ? getGenerator(fromNode.generator) : undefined;
-        const out =
-          upstream && fromDef
-            ? this.renderer.outputOf(fromDef, upstream.targets, link.output)
-            : undefined;
-        if (out) inputs[input] = out;
-      }
+      const inputs = this.liveInputs(node.id);
       const [width, height] = imageDims(size, this.state.aspect);
       try {
         this.renderer.renderNode(
@@ -3429,6 +3532,77 @@ export class App {
     }
     this.detectTransparency();
     this.viewport.setRenderSize(imageDims(selectedSize, this.state.aspect)[0]);
+  }
+
+  /** Connected inputs of a node, from the live images of the nodes upstream. */
+  private liveInputs(id: string): Record<string, RenderTarget> {
+    const inputs: Record<string, RenderTarget> = {};
+    for (const [input, link] of Object.entries(inputLinks(this.state.links, id))) {
+      const upstream = this.nodeCaches.get(link.from);
+      const fromNode = nodeById(this.state, link.from);
+      const fromDef = fromNode ? getGenerator(fromNode.generator) : undefined;
+      const out =
+        upstream && fromDef
+          ? this.renderer.outputOf(fromDef, upstream.targets, link.output)
+          : undefined;
+      if (out) inputs[input] = out;
+    }
+    return inputs;
+  }
+
+  // ---- 3D preview ---------------------------------------------------------------------------
+
+  private readonly preview3d = new Preview3D();
+  /** What the 3D preview shows (redrawn when it changes). */
+  private preview3dKey = '';
+  /** Height map of the previewed node (its Post Process height output). */
+  private preview3dTargets: NodeTargets | null = null;
+
+  /**
+   * Renders the 3D preview of the exported node when it is visible and its image, the view or
+   * the panel size changed. Relief comes from the node's height output (Post Process), or
+   * its image when the post is off.
+   */
+  private updatePreview3D(): void {
+    const panel = this.preview3d;
+    if (!panel.visible) return;
+    const node = this.exportNode;
+    const cache = this.nodeCaches.get(node.id);
+    const color = cache?.targets.output;
+    if (!cache || !color || this.failed.has(node.id)) return;
+    const [w, hgt] = panel.size();
+    const key = `${node.id}:${cache.version}:${panel.version}:${w}x${hgt}`;
+    if (key === this.preview3dKey) return;
+    let height = color.texture;
+    if (node.postEnabled) {
+      this.preview3dTargets ??= this.renderer.createTargets();
+      try {
+        const req = this.requestFor(this.liveNode(node), this.time, false);
+        this.renderer.renderNode(
+          {
+            ...req,
+            post: { ...req.post, output: MAP_OUTPUT.height },
+            inputs: this.liveInputs(node.id),
+          },
+          this.preview3dTargets,
+          color.width,
+          color.height,
+        );
+        height = this.preview3dTargets.output?.texture ?? color.texture;
+      } catch (e) {
+        if (e instanceof ProgramPending) return;
+      }
+    }
+    const pixels = this.renderer.renderPreview3D(
+      color.texture,
+      height,
+      panel.view(w / hgt),
+      w,
+      hgt,
+    );
+    if (!pixels) return;
+    this.preview3dKey = key;
+    panel.show(pixels, w, hgt);
   }
 
   /**

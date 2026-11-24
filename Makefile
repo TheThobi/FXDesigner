@@ -9,7 +9,7 @@ DOCKER_RUN = docker run --rm -it -e npm_config_cache=/tmp/.npm -v "$(CURDIR)":/a
 	-v $(NODE_MODULES_VOLUME):/app/node_modules -w /app
 NPM = $(DOCKER_RUN) $(NODE_IMAGE) npm
 
-.PHONY: install dev build test check lint format image up down e2e
+.PHONY: install dev build test check glsl lint format image up down e2e
 
 install:          ## Install dependencies
 	$(NPM) ci
@@ -25,6 +25,9 @@ test:             ## Unit tests
 
 check:            ## Typecheck + lint + unit tests (run before committing)
 	$(NPM) run check
+
+glsl:             ## Compile every shader with glslang (WebGL2 check without a browser)
+	$(DOCKER_RUN) $(NODE_IMAGE) sh scripts/check-glsl.sh
 
 lint:
 	$(NPM) run lint

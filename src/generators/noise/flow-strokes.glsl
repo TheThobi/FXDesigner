@@ -4,7 +4,7 @@ vec4 generate(vec2 uv) {
   float fs = max(1.0, floor(u_flowScale + 0.5));
   vec2 period = vec2(fs);
   float density = max(1.0, floor(u_density + 0.5));
-  float t = u_time * u_speed;
+  float t = loopFlow(u_speed);
   float stepLen = u_length / float(u_steps);
   float acc = 0.0;
   float wsum = 0.0;

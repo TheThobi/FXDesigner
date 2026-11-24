@@ -1,5 +1,17 @@
-// Magic circle: concentric rings, tick band, star polygon, orbiting dots.
+// Magic circle: concentric rings, tick or rune band, star polygon, orbiting dots.
 float ringLine(float r, float radius, float w, float aa) { return strokeMask(r - radius, w, aa); }
+
+// Rune glyph: strokes between points of a 3x3 lattice (f in [0,1]^2), distance in cell units.
+float runeGlyph(vec2 f, float id) {
+  float d = 8.0;
+  for (int k = 0; k < 4; k++) {
+    vec2 h = floor(hash22(vec2(id, float(k) * 7.31)) * 3.0);
+    vec2 h2 = floor(hash22(vec2(id, float(k) * 3.17 + 11.0)) * 3.0);
+    if (h == h2) h2 = vec2(2.0) - h;
+    d = min(d, sdSegment(f, 0.15 + h * 0.35, 0.15 + h2 * 0.35));
+  }
+  return d;
+}
 
 vec4 generate(vec2 uv) {
   vec2 p = rotate2d(centered(uv) / u_scale, radians(u_rotation));
@@ -16,7 +28,20 @@ vec4 generate(vec2 uv) {
     v = max(v, ringLine(r, outer, w, aa));
     v = max(v, ringLine(r, bandInner, w, aa));
   }
-  if (u_outerBand && u_ticks > 0) {
+  if (u_outerBand && u_bandStyle == 1) {
+    // Rune band: one glyph per angular cell, as large as the band allows.
+    vec2 q = rotate2d(p, t * 0.5);
+    float count = float(u_runes);
+    float a = (atan(q.y, q.x) / TAU + 0.5) * count;
+    float mid = (outer + bandInner) * 0.5;
+    float size = min(TAU * mid / count, outer - bandInner) * 0.7;
+    vec2 f = vec2((fract(a) - 0.5) * TAU * mid / count, r - mid) / size + 0.5;
+    if (all(greaterThanEqual(f, vec2(0.0))) && all(lessThanEqual(f, vec2(1.0)))) {
+      float d = runeGlyph(f, mod(floor(a), count)) * size;
+      v = max(v, strokeMask(d, w, aa));
+    }
+  }
+  if (u_outerBand && u_bandStyle == 0 && u_ticks > 0) {
     vec2 q = rotate2d(p, t * 0.5);
     float a = atan(q.y, q.x);
     float sector = TAU / float(u_ticks);

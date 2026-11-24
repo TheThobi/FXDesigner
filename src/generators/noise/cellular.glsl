@@ -3,7 +3,7 @@
 vec4 generate(vec2 uv) {
   float scale = u_tileable ? max(1.0, floor(u_scale + 0.5)) : u_scale;
   vec2 period = u_tileable ? vec2(scale) : vec2(0.0);
-  float flow = u_time * u_speed * TAU;
+  float flow = loopFlow(u_speed * TAU);
   vec2 p = uv * scale;
   vec3 c = voronoi(p, period, u_jitter, flow, u_metric);
   float border = voronoiNearest(p, period, u_jitter, flow).z;

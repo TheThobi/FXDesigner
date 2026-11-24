@@ -19,6 +19,8 @@ import { ShaderCompileError } from './gl/ShaderProgram';
 import channelFragment from './node/channel.frag?raw';
 import copyFragment from './node/copy.frag?raw';
 import displayFragment from './node/display.frag?raw';
+import preview3dFragment from './node/preview3d.frag?raw';
+import preview3dVertex from './node/preview3d.vert?raw';
 import kuwaharaFragment from './post/kuwahara.frag?raw';
 import postFragment from './post/post.frag?raw';
 import { POST_PARAMS } from './post/schema';
@@ -87,6 +89,28 @@ export interface DisplayItem {
   readonly channel?: NodeChannel;
 }
 
+/** Shapes of the 3D preview (index = shader `u_shape`). */
+export const PREVIEW_SHAPES = ['Plane', 'Sphere', 'Cube', 'Cylinder'] as const;
+
+/** One view of the 3D preview. */
+export interface Preview3DView {
+  /** Index into PREVIEW_SHAPES. */
+  readonly shape: number;
+  /** Column-major view-projection matrix. */
+  readonly viewProj: readonly number[];
+  readonly eye: readonly [number, number, number];
+  /** Direction toward the light. */
+  readonly light: readonly [number, number, number];
+  readonly relief: number;
+  readonly tiles: number;
+  /** Glowing sprite (additive over black) instead of a lit material. */
+  readonly additive: boolean;
+}
+
+/** Quads per side of each shape's grid (curved shapes need more). */
+const PREVIEW_SEGMENTS = [1, 64, 1, 64];
+const PREVIEW_FACES = [1, 1, 6, 1];
+
 /** Offscreen renderer at a fixed size, reusable for many frames (exports, thumbnails). */
 export interface Capture {
   readonly width: number;
@@ -141,6 +165,13 @@ function coreSource(key: CorePass): string {
         fragment,
       ].join('\n')
     : [SHADER_HEADER, fragment].join('\n');
+}
+
+/** Sources of every built-in pass, by name (offline shader checks: `make glsl`). */
+export function builtinPassSources(): Record<string, string> {
+  return Object.fromEntries(
+    (Object.keys(CORE_PASSES) as CorePass[]).map((k) => [k, coreSource(k)]),
+  );
 }
 
 const POST_DEFAULTS = defaultValues(POST_PARAMS);
@@ -213,6 +244,8 @@ export class Renderer {
    * come out empty). Otherwise a pending compile throws ProgramPending (retry next frame).
    */
   private waiting = 0;
+  /** 3D preview image (created on first use). */
+  private previewTarget: RenderTarget | null = null;
   /** Small target for grayscale detection (created on first use). */
   private probe: RenderTarget | null = null;
   private readonly simulations = new Map<string, LiveSimulation>();
@@ -473,6 +506,62 @@ export class Renderer {
     return false;
   }
 
+  /**
+   * Renders the 3D preview of a node image (`height`: the image its relief comes from) and
+   * reads it back (straight RGBA8, top-down rows). Null while its program compiles.
+   */
+  renderPreview3D(
+    color: WebGLTexture,
+    height: WebGLTexture,
+    view: Preview3DView,
+    width: number,
+    heightPx: number,
+  ): Uint8ClampedArray<ArrayBuffer> | null {
+    const program = this.gpu.tryProgram(
+      'core:preview3d',
+      () => [SHADER_HEADER, preview3dFragment].join('\n'),
+      [SHADER_HEADER, preview3dVertex].join('\n'),
+    );
+    if (!program) return null;
+    const { gl } = this.gpu;
+    if (!this.previewTarget)
+      this.previewTarget = this.gpu.createTarget({ width, height: heightPx, format: 'rgba8' });
+    else this.previewTarget.resize(width, heightPx);
+    const target = this.previewTarget;
+    this.gpu.bindTarget(target);
+    const bg = view.additive ? 0.02 : 0.13;
+    gl.clearColor(bg, bg, bg + 0.01, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    program
+      .use()
+      .set('u_viewProj', view.viewProj)
+      .set('u_shape', view.shape)
+      .set('u_segments', PREVIEW_SEGMENTS[view.shape] ?? 1)
+      .set('u_eye', view.eye)
+      .set('u_light', view.light)
+      .set('u_relief', view.relief)
+      .set('u_tiles', view.tiles)
+      .set('u_twoSided', view.shape === 0)
+      .set('u_additive', view.additive)
+      .texture('u_color', color, 0)
+      .texture('u_height', height, 1);
+    const segments = PREVIEW_SEGMENTS[view.shape] ?? 1;
+    const count = (PREVIEW_FACES[view.shape] ?? 1) * segments * segments * 6;
+    if (view.additive) this.gpu.drawTriangles(count, 1, true);
+    else {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      this.gpu.drawTriangles(count);
+      gl.disable(gl.BLEND);
+    }
+    const raw = this.gpu.readPixels(target);
+    const rowBytes = width * 4;
+    const out = new Uint8ClampedArray(raw.length);
+    for (let y = 0; y < heightPx; y++)
+      out.set(raw.subarray(y * rowBytes, (y + 1) * rowBytes), (heightPx - 1 - y) * rowBytes);
+    return out;
+  }
+
   /** Draws node images into their cards on the canvas (resized to `width`×`height`). */
   display(items: readonly DisplayItem[], width: number, height: number): void {
     const { gl, canvas } = this.gpu;
@@ -712,7 +801,7 @@ export class Renderer {
       .set('u_resolution', [target.width, target.height])
       .set('u_clock', req.time)
       .set('u_loop', [
-        post.seamlessLoop === true ? 1 : 0,
+        post.seamlessLoop !== true ? 0 : generator.nativeLoop?.(req.params) === true ? 2 : 1,
         getNumber(post, 'loopDuration'),
         getNumber(post, 'loopBlend'),
       ])
@@ -773,6 +862,7 @@ export class Renderer {
     for (const p of this.codePrograms.values()) if ('program' in p) p.program.dispose();
     this.codePrograms.clear();
     this.probe?.dispose();
+    this.previewTarget?.dispose();
     this.gradients.dispose();
     this.images.dispose();
     this.gpu.dispose();

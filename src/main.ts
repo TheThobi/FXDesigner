@@ -18,3 +18,16 @@ try {
   box.textContent = message;
   root.replaceChildren(box);
 }
+
+// Offline use and instant reloads (production builds only; tests run without it).
+if (
+  import.meta.env.PROD &&
+  'serviceWorker' in navigator &&
+  !new URLSearchParams(window.location.search).has('e2e')
+) {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('./sw.js').catch((e: unknown) => {
+      console.warn('Service worker registration failed', e);
+    });
+  });
+}

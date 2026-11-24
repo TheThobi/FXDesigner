@@ -37,8 +37,11 @@ npm scripts need Node ≥ 20 (local Node 22 works); `make <target>` runs the sam
   `PW_BASE_URL=http://localhost:5173` runs against the dev server (no build). Keep the
   Playwright image tag in Makefile and CI in sync with `@playwright/test`.
 - `npm run dev` (editor) and `npm run dev:server` (API with the `DEV_` settings of `.env`).
+- `make glsl`: compiles every shader (generators, passes, simulations, post) with glslang in
+  a few seconds (`scripts/check-glsl.sh`, `tests/unit/glsl-dump.test.ts`). Run it after any
+  GLSL change.
 - AI assistants never run the e2e suite locally (slow, costly): GitHub CI runs it and the user
-  reports failures. Local verification stops at `npm run check`.
+  reports failures. Local verification stops at `npm run check` + `make glsl`.
 
 ## Architecture rules
 

@@ -52,7 +52,8 @@ sync across devices.
 materials, shapes and patterns, plus imported images. Each comes with presets.
 
 **Simulations** — reaction-diffusion, Physarum, fluids, smoke & fire, Lenia, cellular
-automata, crystals, caustics… Most can be painted directly in their preview.
+automata, crystals, caustics, hydraulic erosion, differential growth… Most can be painted
+directly in their preview; fluids flow around connected obstacles.
 
 **Operators** — Blend, Mask, Levels & Math, Transform, Warp, Blur, Slope Blur, Distance,
 Edge Detect, Pack / Unpack RGBA, Custom Code.
@@ -66,6 +67,9 @@ outlines, anti-aliasing. Look presets combine them.
 
 **GLSL** — the **Code** view edits any node's shader, with custom parameters. Code compiles
 in the background: errors stay on their node.
+
+**3D Preview** — a dockable panel shows the result on a plane, sphere, cube or cylinder,
+lit with its own relief, or as an additive sprite.
 
 **Library** — systems in folders, autosaved in the browser, exportable as JSON, shareable as
 links. Signing in syncs them across devices.
@@ -82,6 +86,8 @@ The full list of nodes and parameters is in the [node reference](docs/developmen
 | Maps            | Color, normal (OpenGL / DirectX) and height, PNGs or ZIP   |
 | 16-bit height   | Grayscale PNG with full precision                          |
 | Flipbook        | Sprite sheet with grid, time offset and simulation warm-up |
+| Video           | WebM of the loop (repeated) or of a simulation run         |
+| Variations      | Sprite sheet with one random seed per cell                 |
 | Nodes as ZIP    | Every node's image                                         |
 | Document / link | Editable JSON, or a URL containing the document            |
 
@@ -118,6 +124,7 @@ make dev        # http://localhost:5173
 | Command      | Purpose                                         |
 | ------------ | ----------------------------------------------- |
 | `make check` | Typecheck, lint and unit tests (before commits) |
+| `make glsl`  | Compile every shader (fast, no browser)         |
 | `make e2e`   | Browser tests (Playwright, run by CI)           |
 | `make build` | Client in `dist/`, server in `server-dist/`     |
 | `make up`    | Static site on port 8080                        |

@@ -5,6 +5,7 @@ export const LAYOUT_PARTS = [
   { id: 'browser', label: 'Generator browser', shortcut: '' },
   { id: 'details', label: 'Details panel', shortcut: '' },
   { id: 'timeline', label: 'Timeline', shortcut: 'T' },
+  { id: 'preview3d', label: '3D preview', shortcut: '' },
   { id: 'stats', label: 'Stats', shortcut: '' },
 ] as const;
 

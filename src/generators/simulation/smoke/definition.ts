@@ -5,6 +5,7 @@ import { param } from '../../../params/define';
 import { getNumber } from '../../../params/values';
 import type { ParamDef, ParamValues } from '../../../params/types';
 import pressure from '../fluid/pressure.frag?raw';
+import obstacles from '../fluid/obstacles.glsl?raw';
 import project from '../fluid/project.frag?raw';
 import advect from './advect.frag?raw';
 import forces from './forces.frag?raw';
@@ -28,6 +29,13 @@ const INPUTS: readonly NodeInputDef[] = [
     description: 'Flowmap (RG around 0.5) pushing the fluid, e.g. the Flowmap Painter.',
     color: '#ff6fd0',
     value: 'vec2',
+  },
+  {
+    key: 'obstacles',
+    label: 'Obstacles',
+    description: 'Bright areas are walls the smoke flows around (paint them with Paint Mask).',
+    color: '#9ad1ff',
+    value: 'float',
   },
 ];
 
@@ -102,13 +110,13 @@ export const smokeFire: SimulationGenerator = {
       seed,
       step: [
         { label: 'forces', source: forces },
-        { label: 'advect', source: advect },
+        { label: 'advect', source: `${obstacles}\n${advect}` },
         {
           label: 'pressure',
-          source: pressure,
+          source: `${obstacles}\n${pressure}`,
           repeat: (p: ParamValues) => getNumber(p, 'pressureIterations', 20),
         },
-        { label: 'project', source: project },
+        { label: 'project', source: `${obstacles}\n${project}` },
       ],
       render,
       inputs: INPUTS,

@@ -4,6 +4,7 @@ import type { Capture, ChainStep, FrameRequest, Renderer } from '../engine/Rende
 type ImageRequest = FrameRequest | readonly ChainStep[];
 import type { FlipbookOptions } from '../ui/FlipbookDialog';
 import { canvasToBlob } from '../util/download';
+import { encodeGif } from '../util/gif';
 import { encodeGray16Png } from '../util/png16';
 
 function canvas2d(
@@ -93,6 +94,88 @@ export async function renderFlipbook(
       if (i % 8 === 7) await new Promise((r) => setTimeout(r, 0));
     }
     return await canvasToBlob(canvas);
+  } finally {
+    capture.dispose();
+  }
+}
+
+/** Video formats tried in order (WebM where supported, MP4 on Safari). */
+const VIDEO_TYPES = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+
+/** True when this browser can record a canvas to a video file. */
+export function canRecordVideo(): boolean {
+  return (
+    typeof MediaRecorder !== 'undefined' &&
+    VIDEO_TYPES.some((t) => MediaRecorder.isTypeSupported(t)) &&
+    'captureStream' in HTMLCanvasElement.prototype
+  );
+}
+
+/**
+ * Records `count` frames as a video. MediaRecorder timestamps frames with the wall clock, so
+ * frames are pushed in real time at `fps` (rendering must keep up; previews do).
+ */
+export async function recordVideo(
+  renderer: Renderer,
+  frame: readonly [number, number],
+  count: number,
+  fps: number,
+  frameAt: (index: number) => ImageRequest,
+): Promise<Blob> {
+  const [fw, fh] = frame;
+  const type = VIDEO_TYPES.find((t) => MediaRecorder.isTypeSupported(t));
+  if (!type) throw new Error('Video recording is not supported by this browser');
+  const capture = renderer.createCapture(fw, fh);
+  const { canvas, ctx } = canvas2d(fw, fh);
+  const stream = canvas.captureStream(0);
+  const track = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined;
+  const recorder = new MediaRecorder(stream, {
+    mimeType: type,
+    videoBitsPerSecond: Math.round(fw * fh * fps * 0.25),
+  });
+  const chunks: Blob[] = [];
+  recorder.ondataavailable = (e) => {
+    if (e.data.size > 0) chunks.push(e.data);
+  };
+  const stopped = new Promise<void>((resolve) => {
+    recorder.onstop = () => resolve();
+  });
+  try {
+    recorder.start();
+    const start = performance.now();
+    for (let i = 0; i < count; i++) {
+      ctx.putImageData(new ImageData(capture.render(frameAt(i)), fw, fh), 0, 0);
+      track?.requestFrame();
+      const wait = start + ((i + 1) * 1000) / fps - performance.now();
+      await new Promise((r) => setTimeout(r, Math.max(0, wait)));
+    }
+  } finally {
+    if (recorder.state !== 'inactive') recorder.stop();
+    capture.dispose();
+  }
+  await stopped;
+  stream.getTracks().forEach((t) => t.stop());
+  return new Blob(chunks, { type: type.split(';')[0] });
+}
+
+/** Renders `count` frames offline and encodes them as a looping GIF at `fps`. */
+export async function renderGif(
+  renderer: Renderer,
+  frame: readonly [number, number],
+  count: number,
+  fps: number,
+  frameAt: (index: number) => ImageRequest,
+): Promise<Blob> {
+  const [fw, fh] = frame;
+  const capture = renderer.createCapture(fw, fh);
+  try {
+    const frames: Uint8ClampedArray[] = [];
+    for (let i = 0; i < count; i++) {
+      frames.push(capture.render(frameAt(i)));
+      if (i % 4 === 3) await new Promise((r) => setTimeout(r, 0));
+    }
+    const bytes = encodeGif(frames, fw, fh, Math.max(2, Math.round(100 / fps)));
+    return new Blob([bytes], { type: 'image/gif' });
   } finally {
     capture.dispose();
   }

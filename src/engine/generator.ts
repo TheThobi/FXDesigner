@@ -139,6 +139,11 @@ export interface ShaderPass {
 export interface ShaderGenerator extends GeneratorBase {
   readonly kind: 'shader';
   /**
+   * True when, with these params, time reaches the shader only through `loopFlow()`: a forced
+   * seamless loop then closes natively (whole turns) instead of crossfading.
+   */
+  readonly nativeLoop?: (params: ParamValues) => boolean;
+  /**
    * Non-square workspaces: 'centered' keeps uv in [0,1] and corrects centered() (shapes stay
    * round), 'tiled' repeats the pattern a whole number of times along the long axis.
    * Default: 'centered' when the fragment calls centered(), else 'tiled'.

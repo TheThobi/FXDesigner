@@ -3,6 +3,11 @@
 void main() {
   vec4 l = neighbor(-1, 0), r = neighbor(1, 0), d = neighbor(0, -1), u = neighbor(0, 1);
   vec4 s = neighbor(0, 0);
+  // Walls: no flow through them, and no pressure jump across them (Neumann).
+  if (solidAt(-1, 0)) l = vec4(0.0, 0.0, s.b, 0.0);
+  if (solidAt(1, 0)) r = vec4(0.0, 0.0, s.b, 0.0);
+  if (solidAt(0, -1)) d = vec4(0.0, 0.0, s.b, 0.0);
+  if (solidAt(0, 1)) u = vec4(0.0, 0.0, s.b, 0.0);
   float div = 0.5 * ((r.r - l.r) + (u.g - d.g));
   float p = (l.b + r.b + d.b + u.b - div) * 0.25;
   outColor = vec4(s.rg, p, s.a);

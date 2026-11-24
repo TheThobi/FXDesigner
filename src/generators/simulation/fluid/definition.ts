@@ -1,9 +1,11 @@
 import type { SimulationGenerator } from '../../../engine/generator';
+import type { NodeInputDef } from '../../../engine/nodes';
 import { GridSimulation } from '../../../engine/simulation/GridSimulation';
 import { param } from '../../../params/define';
 import { getNumber } from '../../../params/values';
 import type { ParamDef, ParamValues } from '../../../params/types';
 import advect from './advect.frag?raw';
+import obstacles from './obstacles.glsl?raw';
 import pressure from './pressure.frag?raw';
 import project from './project.frag?raw';
 import render from './render.frag?raw';
@@ -41,6 +43,16 @@ const PARAMS: readonly ParamDef[] = [
   param.brushSize(0.04),
 ];
 
+const INPUTS: readonly NodeInputDef[] = [
+  {
+    key: 'obstacles',
+    label: 'Obstacles',
+    description: 'Bright areas are walls the fluid flows around (paint them with Paint Mask).',
+    color: '#9ad1ff',
+    value: 'float',
+  },
+];
+
 export const fluid: SimulationGenerator = {
   kind: 'simulation',
   id: 'fluid',
@@ -50,17 +62,19 @@ export const fluid: SimulationGenerator = {
     'Incompressible 2D fluid (stable fluids) advecting ink: swirls, plumes and rolls. Drag to push the fluid.',
   animated: true,
   params: PARAMS,
+  inputs: INPUTS,
   create: (gpu) =>
     new GridSimulation(gpu, 'fluid', PARAMS, {
+      inputs: INPUTS,
       seed,
       step: [
-        { label: 'advect', source: advect },
+        { label: 'advect', source: `${obstacles}\n${advect}` },
         {
           label: 'pressure',
-          source: pressure,
+          source: `${obstacles}\n${pressure}`,
           repeat: (p: ParamValues) => getNumber(p, 'pressureIterations', 20),
         },
-        { label: 'project', source: project },
+        { label: 'project', source: `${obstacles}\n${project}` },
       ],
       render,
     }),

@@ -165,6 +165,10 @@ export const POST_PROCESS_PARAMS: readonly ParamDef[] = [
   param.float('outlineWidth', 'Width', 1.5, 0.5, 8, { group: 'Outline', unit: 'px' }),
   param.select('outlineSide', 'Side', OUTLINE_SIDES, 1, { group: 'Outline' }),
   param.float('outlineThreshold', 'Edge threshold', 0.08, 0.01, 0.5, { group: 'Outline' }),
+  param.float('outlineVariation', 'Ink variation', 0, 0, 1, {
+    group: 'Outline',
+    description: 'Line width swells and thins along the image, like an inked stroke.',
+  }),
   param.color('outlineColor', 'Color', '#1a1420', { group: 'Outline' }),
 
   param.toggle('antialiasOn', 'Anti-aliasing'),
@@ -262,7 +266,7 @@ export const POST_MODULES: readonly ParamGroupInfo[] = [
     icon: 'outline',
     description: 'Ink lines on tone and alpha edges.',
     summary: (v) =>
-      `${n(v, 'outlineWidth').toFixed(1)} px · ${opt(OUTLINE_SIDES, v, 'outlineSide')}`,
+      `${n(v, 'outlineWidth').toFixed(1)} px · ${opt(OUTLINE_SIDES, v, 'outlineSide')}${n(v, 'outlineVariation') > 0 ? ' · inked' : ''}`,
   },
   {
     name: 'Anti-aliasing',

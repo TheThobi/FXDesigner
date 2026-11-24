@@ -152,6 +152,7 @@ const TYPES: Readonly<Record<string, string>> = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -218,7 +219,17 @@ export async function serveStatic(
 }
 
 /** Text assets worth compressing (images and fonts already are). */
-const COMPRESSIBLE = new Set(['.html', '.js', '.css', '.json', '.svg', '.txt', '.map', '.wasm']);
+const COMPRESSIBLE = new Set([
+  '.html',
+  '.js',
+  '.css',
+  '.json',
+  '.webmanifest',
+  '.svg',
+  '.txt',
+  '.map',
+  '.wasm',
+]);
 
 type Encoding = 'br' | 'gzip';
 

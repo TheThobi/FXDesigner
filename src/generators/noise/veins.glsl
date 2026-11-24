@@ -5,7 +5,7 @@ float veins(float x) { return pow(abs(sin(PI * x)), 1.0 / u_sharpness); }
 vec4 generate(vec2 uv) {
   float scale = max(1.0, floor(u_scale + 0.5));
   vec2 period = vec2(scale);
-  float t = u_time * u_speed;
+  float t = loopFlow(u_speed);
   float n = fbm(uv * scale, u_octaves, 2.0, 0.5, period, t, FBM_TURBULENCE);
   float bands = float(u_bands);
   float v;

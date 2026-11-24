@@ -11,6 +11,7 @@ export const cellular: ShaderGenerator = {
   description: 'Worley / Voronoi noise: distances, cell edges, flat cells, stones.',
   animated: true,
   fragment,
+  nativeLoop: () => true,
   params: [
     param.select('mode', 'Output', ['Distance F1', 'Distance F2', 'Edges', 'Flat cells', 'Stones']),
     param.float('scale', 'Scale', 6, 1, 32),

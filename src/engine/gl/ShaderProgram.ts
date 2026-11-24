@@ -133,6 +133,9 @@ export class ShaderProgram {
       case gl.FLOAT_VEC4:
         if (arr) gl.uniform4f(location, arr[0] ?? 0, arr[1] ?? 0, arr[2] ?? 0, arr[3] ?? 0);
         break;
+      case gl.FLOAT_MAT4:
+        if (arr?.length === 16) gl.uniformMatrix4fv(location, false, arr as number[]);
+        break;
       default:
         throw new Error(`Unsupported uniform type 0x${type.toString(16)} for ${name}`);
     }

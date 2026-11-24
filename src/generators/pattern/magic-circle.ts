@@ -7,13 +7,13 @@ export const magicCircle: ShaderGenerator = {
   id: 'magic-circle',
   name: 'Magic Circle',
   category: 'light',
-  description: 'Summoning-circle decal: rings, ticks, star, orbiting dots.',
+  description: 'Summoning-circle decal: rings, ticks or a rune band, star, orbiting dots.',
   animated: true,
   fragment,
   params: [
     param.int('sides', 'Star points', 6, 3, 12),
     param.float('pointiness', 'Pointiness', 0.7, 0, 0.95),
-    param.int('ticks', 'Ticks', 72, 0, 180),
+
     param.float('innerRadius', 'Inner radius', 0.35, 0.1, 0.6),
     param.float('lineWidth', 'Line width', 0.012, 0.002, 0.05),
     param.float('glow', 'Glow', 0.2, 0, 1),
@@ -28,6 +28,15 @@ export const magicCircle: ShaderGenerator = {
     param.float('bandWidth', 'Band width', 0.12, 0.02, 0.35, {
       group: 'Outer band',
       limit: [0.001, 0.8],
+    }),
+    param.select('bandStyle', 'Band content', ['Ticks', 'Runes'], 0, { group: 'Outer band' }),
+    param.int('ticks', 'Ticks', 72, 0, 180, {
+      group: 'Outer band',
+      visibleWhen: (v) => Number(v.bandStyle) === 0,
+    }),
+    param.int('runes', 'Runes', 24, 6, 64, {
+      group: 'Outer band',
+      visibleWhen: (v) => Number(v.bandStyle) === 1,
     }),
     param.toggle('starOn', 'Star', true),
     param.float('starRadius', 'Star radius', 0.8, 0.1, 0.95, { group: 'Star', limit: [0.01, 1] }),
@@ -64,6 +73,10 @@ export const magicCircle: ShaderGenerator = {
     {
       name: 'Astral compass',
       values: { sides: 8, ticks: 48, dotCount: 16, spokes: 8, orbitSpeed: -0.5 },
+    },
+    {
+      name: 'Rune seal',
+      values: { sides: 7, pointiness: 0.6, bandStyle: 1, runes: 28, bandWidth: 0.16, glow: 0.3 },
     },
   ],
   featuredPreset: 'Summoning',

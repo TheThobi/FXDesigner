@@ -1,7 +1,8 @@
 import { h } from './dom';
 import { icon, type IconName } from './icons';
 
-export type ExportKind = 'png' | 'maps' | 'flipbook' | 'nodes' | 'json' | 'share';
+export type ExportKind =
+  'png' | 'maps' | 'flipbook' | 'video' | 'variations' | 'nodes' | 'json' | 'share';
 
 export interface ExportChoice {
   readonly kind: ExportKind;

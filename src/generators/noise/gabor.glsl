@@ -19,7 +19,7 @@ vec4 generate(vec2 uv) {
         float w = hash12(cell + fk * 3.31) * 2.0 - 1.0;
         float ang = base + (hash12(cell + fk * 5.77) - 0.5) * TAU * u_isotropy;
         float env = exp(-PI * u_bandwidth * u_bandwidth * dot(d, d));
-        sum += w * env * cos(TAU * u_frequency * dot(vec2(cos(ang), sin(ang)), d) + u_time * u_speed);
+        sum += w * env * cos(TAU * u_frequency * dot(vec2(cos(ang), sin(ang)), d) + loopFlow(u_speed));
       }
     }
   }

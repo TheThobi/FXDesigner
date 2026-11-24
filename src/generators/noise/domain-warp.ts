@@ -11,6 +11,7 @@ export const domainWarp: ShaderGenerator = {
   description: 'fBm sampled through layers of fBm displacement: marble, smoke, alien surfaces.',
   animated: true,
   fragment,
+  nativeLoop: () => true,
   params: [
     param.float('scale', 'Scale', 3, 1, 16),
     param.float('warp', 'Warp strength', 2, 0, 6),

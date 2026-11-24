@@ -86,52 +86,43 @@ Priorités indicatives. Cocher au fil de l'eau.
       nodes en code ; compilation du code custom en arrière-plan (une erreur ne bloque plus
       le viewport) ; galerie de couleurs ; dégradé d'accent unifié ; Crystal refait d'après
       Crystal 2.
-
-## Court terme
-
-- [ ] Boucles « natives » sans fondu pour les bruits (phase 0..1, rotation de 2π du bruit
-      « flow » par boucle) quand le fondu générique abîme l'effet.
-- [x] Bibliothèque de presets utilisateur dans `localStorage` (liste, renommer, supprimer).
-- [x] Graine depuis une **image** (ou n'importe quelle node) pour la réaction-diffusion et la
-      marbrure (entrée Seed).
-- [x] « Nourriture » Physarum depuis n'importe quelle node (entrée Food).
-- [x] Carte f/k de la réaction-diffusion depuis une image, comme Karl Sims (entrée f/k map).
-- [x] Physarum multi-espèces (jusqu'à 3 populations qui s'évitent → rendu RGB).
-- [ ] Contours toon plus riches : épaisseur variable, contour intérieur/extérieur séparés.
-
-## Pistes (direction Silksong / Dead Cells)
-
-- [x] Chaîne de nœuds simple : blend de deux générateurs, masques, warp (graphe de nœuds).
-- [x] Flowmap : export avec flip X/Y (fenêtre d'export : flip R / G). (Import d'une texture :
-      node Image ; flowmap peinte appliquée à un autre générateur : opérateur Warp ou entrée Flow.)
-- [ ] Particules : fumée « wispy », gouttes/éclaboussures d'eau, feuilles, lueurs magiques.
-- [x] Export multi-maps en un clic (couleur, height, normal) en ZIP.
+- [x] Démarrage et fluidité : shaders compilés en arrière-plan et en parallèle (cache de
+      programmes partagé), miniatures du navigateur conservées (IndexedDB), canvas redessiné
+      seulement quand il change, assets compressés (brotli / gzip) par le serveur Node.
+- [x] Graines et entrées de simulation : Seed (réaction-diffusion, marbrure), Food (Physarum),
+      carte f/k façon Karl Sims, Physarum multi-espèces ; presets utilisateur.
+- [x] Chaîne de nœuds, flowmap avec flip X/Y à l'export, ZIP multi-maps, export PNG 16 bits,
+      rapports non carrés ; particules (volutes de fumée, éclaboussures, feuilles, orbes).
+- [x] Communauté (étape 1) : partage de **systèmes** (découverte, catégories, tags,
+      abonnements, versions) ; voir [community.md](community.md).
+- [x] **Érosion hydraulique** (simulation : pluie, transport de sédiments, entrée Terrain,
+      vues hauteur / relief / eau / érosion) ; anneau de **runes** dans le Magic Circle ;
+      **PWA** (installable, hors-ligne, rechargement instantané).
+- [x] **Boucles natives** des bruits (Fractal Noise sauf Value, Domain Warp, Cellular) : avec
+      « Force seamless loop », la rotation du bruit finit sur des tours entiers, sans fondu ;
+      contours à **épaisseur variable** (« Ink variation ») ; érosion **thermique** (angle de
+      talus) et entrée **Hardness** ; **Spectral Chains** ;
+      `make glsl` (compilation de tous les shaders sans navigateur).
+- [x] **Atlas de variations** (export : une graine par case) ; export **vidéo WebM** des
+      boucles et des simulations ; boucles natives étendues (Gabor, Flow Strokes, Veins,
+      Ripples) ; érosion à **strates** (canyons en terrasses).
+- [x] Panneau **3D Preview** (plan, sphère, cube, cylindre ; matériau éclairé avec le relief de
+      la height map, ou sprite additif ; répétitions, orbite) ; export **GIF** (encodeur maison,
+      palette commune, boucle infinie) ; simulation **Differential Growth** ; entrée
+      **Obstacles** pour Ink Fluid et Smoke & Fire.
 
 ## Simulations candidates
 
-- [ ] **Croissance différentielle** (lignes qui se plissent, motifs de cerveau) — CPU + rendu de lignes.
-- [ ] Fluide : couleurs d'encre multiples (RGB), obstacles peints. (Vorticité : Smoke & Fire.)
-- [ ] Érosion hydraulique pour heightmaps (plus réaliste, utile avec l'export normal map).
-
-## Effets stylisés candidats
-
-- [ ] Impact frames en négatif, traînées de vitesse « anime ».
-- [ ] Runes intégrées au cercle magique (anneau de glyphes en option).
-- [ ] Underworld FX : sol de dalles gravées, chaînes spectrales, portail d'âme.
+- [ ] Fluide : encres de plusieurs couleurs (RGB). Demande un second état par cellule (render
+      targets multiples dans `GridSimulation`).
 
 ## Moyen terme
 
-- [x] **Graphe de nœuds / calques** : combiner plusieurs générateurs (blend modes, masques, warp
-      d'un générateur par un autre).
-- [x] Rapports non carrés (format de l'espace de travail).
-- [x] Export PNG 16 bits pour les height maps (fenêtre d'export). EXR : à faire si besoin.
-- [ ] i18n de l'interface (FR/EN).
-- [ ] PWA (manifest + service worker) pour usage hors-ligne.
+- [ ] Node **Material Output** (entrées Color / Normal / Height / Roughness) que le panneau 3D
+      afficherait en priorité, pour composer un matériau depuis plusieurs branches.
 
 ## Long terme
 
-- [ ] Bibliothèque communautaire (presets et shaders custom, comptes) : voir
-      [community.md](community.md) pour le découpage. Étapes 1-2 sans serveur : presets
-      utilisateur locaux (fait), puis générateur « Custom shader » (GLSL ; le module Custom code
-      des ajustements en est la première brique).
+- [ ] Communauté, étapes suivantes : nodes de shaders custom different des systems actuels, signalements, modération
+      (voir [community.md](community.md)).
 - [ ] WebGPU (compute shaders) si les simulations deviennent limitantes.
