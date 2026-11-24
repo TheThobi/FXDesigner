@@ -4,7 +4,7 @@
 </h1>
 
 <p align="center">
-  <strong>Procedural textures · Animated effects · Node-based creation</strong><br />
+  <strong>A node-based tool to make animated procedural textures for game developpers</strong><br />
   A GPU-powered creative workspace, right in your browser.
 </p>
 
@@ -139,15 +139,17 @@ PostgreSQL database, and run `npm run dev:server` beside `npm run dev`.
 
 ## Hosting
 
-Rendering always happens in the browser; the server only serves files and accounts.
+Rendering always happens in the browser. The Docker image runs a small Node server:
 
-| Mode          | Setup                              | Provides                                               |
-| ------------- | ---------------------------------- | ------------------------------------------------------ |
-| Static        | `Dockerfile`, `docker-compose.yml` | nginx on port 8080, local library only                 |
-| With accounts | `deploy/autoupdate/` + PostgreSQL  | Accounts, sync, Discord sign-in, auto-updates from Git |
+```bash
+docker compose up -d --build    # http://localhost:8080
+```
 
-Guides (in French): [server deployment](docs/deployment/server.md) ·
-[static hosting on OpenMediaVault](docs/deployment/static.md).
+Without a `.env` it serves the editor alone (local library). With PostgreSQL settings in
+`.env` (copy `.env.example`) it adds accounts, sync, Discord sign-in and the community.
+
+Guides (in French): [accounts and PostgreSQL](docs/deployment/server.md) ·
+[OpenMediaVault](docs/deployment/static.md).
 
 <br />
 

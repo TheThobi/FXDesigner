@@ -512,8 +512,13 @@ export class App {
       close: () => this.layout.set('timeline', false),
     });
     viewport.body.append(this.timeline.element);
+    let preview3dShown = this.layout.isVisible('preview3d');
     this.layout.onChange = () => {
       this.dock.refresh();
+      // Shown from the Layout menu: bring its tab to the front (it shares a stack).
+      const shown = this.layout.isVisible('preview3d');
+      if (shown && !preview3dShown) this.dock.activate('preview3d');
+      preview3dShown = shown;
       this.refreshFilmstrip();
     };
     this.loadPlayback();

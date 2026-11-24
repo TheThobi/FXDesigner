@@ -34,7 +34,8 @@ test(
     await page.locator('.dock-tab[data-panel="details"]').click();
 
     const tile = (id: string) => page.locator(`.generator-item[data-id="${id}"]`);
-    await tile('magic-circle').click();
+    // A generator without randomness (no seed to shuffle).
+    await tile('polygon').click();
     await expect(first.getByRole('button', { name: 'Shuffle node seed' })).toHaveCount(0);
     await page
       .getByRole('button', { name: 'Code', exact: false })

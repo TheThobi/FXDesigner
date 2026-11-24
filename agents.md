@@ -16,8 +16,8 @@ docs: [docs/README.md](docs/README.md).
   `generators/**/<id>.ts + .glsl` are the nodes (`registry.ts` lists them).
 - `server/src/`: accounts + library API and static file server (Node ESM, `pg` only).
 - `tests/unit` (vitest), `tests/server` (vitest, Node), `tests/e2e` (Playwright, SwiftShader).
-- `deploy/`: `nginx.conf` (static image), `autoupdate/` (server image redeploying from GitHub),
-  `postgres/init.sql`.
+- `Dockerfile` / `docker-compose.yml`: one image running the Node server (port 8080): the app
+  alone without `.env`, accounts with PostgreSQL settings.
 - `docs/`: `development/`, `deployment/`, `project/` (see docs/README.md).
 
 ## Commands
@@ -143,6 +143,9 @@ npm scripts need Node ≥ 20 (local Node 22 works); `make <target>` runs the sam
    `GL_INVALID_*` console output and probes pixels to catch these.
 
 SwiftShader (e2e) is slow with SSAA materials: judge performance on a real GPU.
+Simulation defaults must stay affordable on SwiftShader too (CI renders on the CPU): grid 256,
+a few steps per frame, and fetch a stencil once rather than per neighbour; heavier settings
+belong in presets. A 512² grid × 8 steps × ~30 fetches stalled the e2e page for minutes.
 
 ## Server
 

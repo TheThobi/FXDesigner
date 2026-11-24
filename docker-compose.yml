@@ -1,11 +1,17 @@
 # Usable as-is with the OpenMediaVault "Compose" plugin (Services > Compose > Files) or with
-# `docker compose up -d --build` on any Docker host.
+# `docker compose up -d --build` on any Docker host. Without a .env the app runs alone (no
+# accounts); with one (copy .env.example), the PostgreSQL settings enable accounts.
 services:
   texture-maker:
     build: .
     image: fx-designer:latest
     container_name: fx-designer
     restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PORT: 8080
     ports:
       - '8080:8080'
     read_only: true

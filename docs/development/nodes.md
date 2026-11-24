@@ -276,8 +276,8 @@ Rain carves river channels and deposits sediment into a height map. Paint pours 
 | Layers `layers` | — | int | 2 … 32 (typed: 2 … 62) | 8 |  |
 | Talus angle `talus` | — | float | 15 … 85 (typed: 15 … 295) | 50 | Steeper slopes crumble (thermal erosion): lower gives rounder screes. |
 | Softening `softening` | — | float | 0 … 1 (typed: 0 … 4) | 0.05 | Thermal smoothing of sharp spikes and pits. |
-| Steps / frame `stepsPerFrame` | — | int | 1 … 64 (typed: 1 … 127) | 8 |  |
-| Grid size `simResolution` | — | select | 128 128, 256 256, 512 512, 1024 1024 | 512 | Larger grids give finer detail (slower). |
+| Steps / frame `stepsPerFrame` | — | int | 1 … 64 (typed: 1 … 127) | 4 |  |
+| Grid size `simResolution` | — | select | 128 128, 256 256, 512 512, 1024 1024 | 256 | Larger grids give finer detail (slower). |
 | Brush size `brushSize` | — | float | 0.005 … 0.2 (typed: 0.005 … 0.785) | 0.03 |  |
 
 ### Differential Growth `differential-growth`

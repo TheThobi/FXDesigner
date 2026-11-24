@@ -1,7 +1,7 @@
 /**
  * Accounts and library sync with the FX Designer server (server/). The static app works
- * without it: `available` stays false when /api/health doesn't answer (e.g. the nginx-only
- * image). Signed in, every local library change is pushed (debounced), and a full
+ * without it: `available` stays false when /api/health doesn't answer (e.g. a plain static
+ * host). Signed in, every local library change is pushed (debounced), and a full
  * reconciliation runs at sign-in and when the tab regains focus: last write wins by
  * `updated`, deletions travel as tombstones.
  */

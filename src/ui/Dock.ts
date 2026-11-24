@@ -153,6 +153,15 @@ export class DockManager {
       : node.children.some((c) => this.shown(c));
   }
 
+  /** Brings panel `id` to the front of its tab stack. */
+  activate(id: PanelId): void {
+    const stack = this.find(id);
+    if (!stack || stack.active === id) return;
+    stack.active = id;
+    this.save();
+    this.render();
+  }
+
   /** Back to the default arrangement (Layout → Reset). */
   reset(): void {
     this.root = defaultLayout();

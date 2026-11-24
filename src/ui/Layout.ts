@@ -12,8 +12,12 @@ export const LAYOUT_PARTS = [
 export type LayoutPart = (typeof LAYOUT_PARTS)[number]['id'];
 
 const STORAGE_KEY = 'ptm.ui.layout.v2';
+/** Parts that existed when the stored preference was saved (newer ones get their default). */
+const KNOWN_KEY = 'ptm.ui.layout.known';
+/** Parts saved before KNOWN_KEY existed. */
+const LEGACY_PARTS: readonly string[] = ['browser', 'details', 'timeline', 'stats'];
 /** Hidden until the user shows them. */
-const HIDDEN_BY_DEFAULT: readonly LayoutPart[] = ['stats'];
+const HIDDEN_BY_DEFAULT: readonly LayoutPart[] = ['stats', 'preview3d'];
 
 /**
  * Visibility of the optional editor parts, persisted per browser. Applied as `hide-<part>`
@@ -33,6 +37,10 @@ export class Layout {
       if (Array.isArray(saved)) {
         for (const id of saved) if (LAYOUT_PARTS.some((p) => p.id === id)) this.hidden.add(id);
       }
+      // A part added since the preference was saved starts with its default visibility.
+      const known = JSON.parse(readStorage(KNOWN_KEY) ?? 'null') as unknown;
+      const knownIds = Array.isArray(known) ? (known as unknown[]) : LEGACY_PARTS;
+      for (const id of HIDDEN_BY_DEFAULT) if (!knownIds.includes(id)) this.hidden.add(id);
     } catch {
       // Corrupted preference: default layout.
     }
@@ -49,6 +57,7 @@ export class Layout {
     else this.hidden.add(part);
     this.apply();
     writeStorage(STORAGE_KEY, JSON.stringify([...this.hidden]));
+    writeStorage(KNOWN_KEY, JSON.stringify(LAYOUT_PARTS.map((p) => p.id)));
     this.onChange?.();
   }
 

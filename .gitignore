@@ -17,8 +17,7 @@ test-results/
 .env.*
 !.env.example
 
-# Deployment and GitHub configuration
-deploy
+# GitHub configuration
 .github
 
 # AI assistant configuration

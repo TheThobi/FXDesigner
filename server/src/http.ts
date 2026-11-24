@@ -140,7 +140,7 @@ export function redirect(res: ServerResponse, location: string): void {
   res.end();
 }
 
-/** Headers sent with every response (same as deploy/nginx.conf). */
+/** Headers sent with every response. */
 export function securityHeaders(res: ServerResponse): void {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');

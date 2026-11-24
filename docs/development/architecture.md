@@ -1,7 +1,7 @@
 # Architecture
 
 Single-page app, **TypeScript + WebGL2**, no UI framework, built with Vite into static files.
-Everything runs in the browser: the server only serves files (nginx).
+Everything runs in the browser: the server only serves files and, optionally, accounts.
 
 ## Layers
 
@@ -332,8 +332,8 @@ grayscale PNGs (`Capture.renderRed` on a float target + `util/png16.ts`, zlib by
 ## Server and accounts
 
 `server/src` is a small Node server (no framework, `pg` only; built by `tsconfig.server.json`
-into `server-dist/`, started with `npm start`). It serves the built app (`dist/`, same cache
-headers as `deploy/nginx.conf`) and, when PostgreSQL is configured (`DATABASE_URL` or `PG*`),
+into `server-dist/`, started with `npm start`). It serves the built app (`dist/`: fingerprinted
+assets cached for a year, compressed) and, when PostgreSQL is configured (`DATABASE_URL` or `PG*`),
 the API:
 
 - `auth.ts`: email / password accounts (pseudo, email, scrypt hashes) and Discord OAuth
@@ -371,8 +371,8 @@ filter (All / Local / Published), and the community button (Publish · Up to dat
 update). Previews are rendered by `App.previewSource` (16 frames over the loop, simulations
 stepped, or 1 frame) and framed in `ui/PreviewStudio.ts` (zoom, pan, poster frame,
 background); updates reuse the last framing.
-Deployment: [deployment/server.md](../deployment/server.md) (`deploy/autoupdate`: build next to the live
-version, swap on success, health check and rollback).
+Deployment: the root `Dockerfile` runs this server (port 8080); see
+[deployment/server.md](../deployment/server.md).
 
 ## Voronoi
 

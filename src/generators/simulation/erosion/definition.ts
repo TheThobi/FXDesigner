@@ -40,8 +40,8 @@ const PARAMS: readonly ParamDef[] = [
     group: 'Erosion',
     description: 'Thermal smoothing of sharp spikes and pits.',
   }),
-  param.stepsPerFrame(8, 64),
-  param.simResolution(512),
+  param.stepsPerFrame(4, 64),
+  param.simResolution(256),
   param.brushSize(0.03),
 ];
 
@@ -106,7 +106,10 @@ export const erosion: SimulationGenerator = {
       name: 'Terraced canyon',
       values: { terrainScale: 3, relief: 220, capacity: 8, strata: 0.9, layers: 10, talus: 75 },
     },
-    { name: 'Height map', values: { view: 0, terrainScale: 3, stepsPerFrame: 16 } },
+    {
+      name: 'Height map',
+      values: { view: 0, terrainScale: 3, simResolution: 512, stepsPerFrame: 8 },
+    },
   ],
   featuredPreset: 'River valleys',
 };

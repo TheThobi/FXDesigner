@@ -1,7 +1,9 @@
 # Déploiement sur OpenMediaVault
 
-L'application est un site statique servi par nginx dans un conteneur (image ~75 Mo,
-utilisateur non-root, système de fichiers en lecture seule, port **8080**, `GET /healthz`).
+L'application est servie par le petit serveur Node du projet, dans un conteneur (utilisateur
+non-root, système de fichiers en lecture seule, port **8080**, `GET /healthz`, fichiers
+compressés). Sans `.env`, il sert seulement l'application : pas de comptes, tout reste dans le
+navigateur. Les comptes s'ajoutent plus tard avec PostgreSQL : voir [server.md](server.md).
 
 ## Prérequis
 
@@ -50,8 +52,8 @@ services:
 
 ## Option C — sans Docker
 
-`npm run build` puis copier `dist/` dans n'importe quel serveur web statique (nginx d'OMV,
-Caddy…). Le build utilise des chemins **relatifs** : il fonctionne aussi dans un sous-dossier
+`npm run build` puis copier `dist/` dans n'importe quel serveur web statique (nginx, Caddy…).
+Servir `index.html` pour les chemins inconnus et `sw.js` sans cache long. Le build utilise des chemins **relatifs** : il fonctionne aussi dans un sous-dossier
 (`https://nas.local/textures/`).
 
 ## HTTPS (recommandé)

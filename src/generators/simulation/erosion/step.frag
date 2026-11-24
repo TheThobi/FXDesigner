@@ -5,17 +5,25 @@
 // a = initial terrain.
 const ivec2 DIRS[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
 
+// The diamond of radius 2 around this cell, fetched once (13 texels): every outflow below is
+// computed from it. Index (dy + 2) * 5 + (dx + 2); corners stay unused.
+vec4 g[25];
+
+vec4 cell(ivec2 o) {
+  return g[(o.y + 2) * 5 + (o.x + 2)];
+}
+
 float pick(vec4 v, int i) {
   return dot(v, vec4(equal(ivec4(i), ivec4(0, 1, 2, 3))));
 }
 
-// Water leaving cell p toward each of its 4 neighbours this step.
-vec4 outflows(ivec2 p) {
-  vec4 c = stateAt(p);
+// Water leaving the cell at offset `o` toward each of its 4 neighbours this step.
+vec4 outflows(ivec2 o) {
+  vec4 c = cell(o);
   float h = c.r + c.g;
   vec4 drop;
   for (int i = 0; i < 4; i++) {
-    vec4 n = stateAt(p + DIRS[i]);
+    vec4 n = cell(o + DIRS[i]);
     drop[i] = max(0.0, h - n.r - n.g);
   }
   float total = dot(drop, vec4(1.0));
@@ -26,9 +34,12 @@ vec4 outflows(ivec2 p) {
 
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
-  vec4 c = stateAt(p);
+  for (int dy = -2; dy <= 2; dy++)
+    for (int dx = -2; dx <= 2; dx++)
+      if (abs(dx) + abs(dy) <= 2) g[(dy + 2) * 5 + (dx + 2)] = stateAt(p + ivec2(dx, dy));
+  vec4 c = cell(ivec2(0));
 
-  vec4 out4 = outflows(p);
+  vec4 out4 = outflows(ivec2(0));
   float outSum = dot(out4, vec4(1.0));
   float water = c.g - outSum;
   float sediment = c.g > 1e-7 ? c.b * (1.0 - outSum / c.g) : c.b;
@@ -40,9 +51,8 @@ void main() {
   float talus = tan(radians(u_talus)) / u_relief;
   float slide = 0.0;
   for (int i = 0; i < 4; i++) {
-    ivec2 q = p + DIRS[i];
-    vec4 n = stateAt(q);
-    float f = pick(outflows(q), i ^ 1);
+    vec4 n = cell(DIRS[i]);
+    float f = pick(outflows(DIRS[i]), i ^ 1);
     inSum += f;
     water += f;
     if (n.g > 1e-7) sediment += n.b * f / n.g;
