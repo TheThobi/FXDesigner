@@ -3781,6 +3781,7 @@ export class App {
     const def = getGenerator(id);
     if (
       LITE ||
+      id === 'image' ||
       !this.thumbnailsLoaded ||
       !def ||
       def.kind !== 'shader' ||

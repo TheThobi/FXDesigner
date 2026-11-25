@@ -227,8 +227,10 @@ export class GeneratorList {
         : h(
             'div',
             { class: 'tile-thumb' },
-            g.kind === 'simulation' ? simGlyph(g.id) : null,
-            h('img', { alt: '', width: 64, height: 64, draggable: false }),
+            simGlyph(g.id),
+            g.id === 'image'
+              ? null
+              : h('img', { alt: '', width: 64, height: 64, draggable: false }),
           ),
       h('div', { class: 'tile-stripe' }),
       h('div', { class: 'tile-name', text: g.name }),
@@ -300,7 +302,7 @@ export class GeneratorList {
     el.title += '\nClick: use on the selected node · Double-click or drag: new node';
     this.items.set(g.id, el);
     this.observer.observe(el);
-    if (g.presets?.length && g.kind === 'shader') {
+    if (g.id !== 'image' && g.presets?.length && g.kind === 'shader') {
       el.addEventListener('pointerenter', () => this.startCycle(g.id));
       el.addEventListener('pointerleave', () => this.stopCycle());
       el.title += `\nHover to preview ${g.presets.length} presets`;
