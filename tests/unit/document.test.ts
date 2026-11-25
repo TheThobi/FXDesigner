@@ -463,3 +463,25 @@ describe('v6 -> v7: Surface Wear split', () => {
     expect(c!.params).toMatchObject({ cracks: 20, length: 1.5 });
   });
 });
+
+describe('comment frames', () => {
+  it('round-trip with the document, sanitized; documents without frames stay valid', () => {
+    const node = createNode(noise, 'n1', 0, 0);
+    const base = { ...state, nodes: [node], links: [], selectedId: node.id };
+    const frames = [{ id: 'f1', x: 10, y: 20, w: 400, h: 300, title: 'Fire', color: 2 }];
+    const doc = documentFromState({ ...base, frames }, getGenerator);
+    const parsed = parseDocument(JSON.parse(JSON.stringify(doc)), getGenerator);
+    expect(parsed.frames).toEqual(frames);
+    // No frames: the field is left out (older apps read the file unchanged).
+    expect('frames' in documentFromState(base, getGenerator)).toBe(false);
+    const raw = JSON.parse(JSON.stringify(doc)) as Record<string, unknown>;
+    raw.frames = [
+      { id: 'f1', x: 0, y: 0, w: 5, h: 99999, title: 'x'.repeat(100), color: 42 },
+      { id: 'f1', x: 1, y: 1, w: 200, h: 200 },
+      { id: 'bad', x: 'no' },
+    ];
+    expect(parseDocument(raw, getGenerator).frames).toEqual([
+      { id: 'f1', x: 0, y: 0, w: 120, h: 20000, title: 'x'.repeat(64), color: 4 },
+    ]);
+  });
+});

@@ -32,6 +32,7 @@ import {
   type DisplayItem,
   type FrameRequest,
   type NodeTargets,
+  type Preview3DMaps,
 } from '../engine/Renderer';
 import {
   ADDABLE_GENERATORS,
@@ -99,6 +100,7 @@ import {
   recordVideo,
   renderFlipbook,
   renderGif,
+  renderMotionVectors,
   renderPng,
   renderPng16,
 } from './exporter';
@@ -153,6 +155,10 @@ import {
   type EditorState,
   type GraphLink,
   type GraphNode,
+  type GraphFrame,
+  FRAME_COLORS,
+  MAX_FRAMES,
+  MIN_FRAME_SIZE,
 } from './state';
 import { SIM_THUMBNAIL, ThumbnailCache } from './thumbnails';
 import { UserPresets } from './userPresets';
@@ -488,6 +494,18 @@ export class App {
       },
       onInsertReroute: (link, world) => this.insertReroute(link, world),
       onContextMenu: (menu) => this.graphMenu(menu),
+      onFrameChange: (view, moves) => {
+        const frame = this.state.frames?.find((f) => f.id === view.id);
+        if (!frame) return;
+        const moved = moves.reduce((s, m) => withNode(s, m.id, { x: m.x, y: m.y }), this.state);
+        this.commit({
+          ...moved,
+          frames: (moved.frames ?? []).map((f) =>
+            f.id === view.id ? { ...f, x: view.x, y: view.y, w: view.w, h: view.h } : f,
+          ),
+        });
+      },
+      onFrameRename: (id) => void this.renameFrame(id),
     });
     this.timeline = new Timeline({
       togglePlay: () => this.togglePlay(),
@@ -1307,6 +1325,12 @@ export class App {
       };
     });
     this.viewport.setGraph(nodes, this.state.links, this.state.selectedId);
+    this.viewport.setFrames(
+      (this.state.frames ?? []).map((f) => ({
+        ...f,
+        color: FRAME_COLORS[f.color]?.value ?? FRAME_COLORS[0]!.value,
+      })),
+    );
     this.updateInputParams();
     const ids = new Set(this.state.nodes.map((n) => n.id));
     for (const [id, cache] of this.nodeCaches) {
@@ -1463,6 +1487,15 @@ export class App {
           run: () => this.viewport.frameSelected(),
         },
         {
+          label: 'Add comment frame around',
+          icon: 'layout',
+          shortcut: 'C',
+          run: () => {
+            const box = this.viewport.nodesBounds(ids);
+            if (box) void this.addFrame(box.x - 24, box.y - 56, box.w + 48, box.h + 80);
+          },
+        },
+        {
           label: 'Collapse into new system…',
           icon: 'library',
           run: () => void this.collapseIntoSystem(ids),
@@ -1480,6 +1513,27 @@ export class App {
           icon: 'close',
           shortcut: 'Del',
           run: () => this.commit(withoutLink(this.state, link.to, link.input)),
+        },
+      ];
+    } else if (target.kind === 'frame') {
+      const frame = this.state.frames?.find((f) => f.id === target.id);
+      if (!frame) return;
+      entries = [
+        { label: 'Rename…', run: () => void this.renameFrame(frame.id) },
+        null,
+        ...FRAME_COLORS.map((c, i) => ({
+          label: `${i === frame.color ? '● ' : ''}${c.name}`,
+          run: () => this.updateFrame({ ...frame, color: i }),
+        })),
+        null,
+        {
+          label: 'Delete frame',
+          icon: 'close' as const,
+          run: () =>
+            this.commit({
+              ...this.state,
+              frames: (this.state.frames ?? []).filter((f) => f.id !== frame.id),
+            }),
         },
       ];
     } else {
@@ -1506,6 +1560,11 @@ export class App {
             }),
         },
         paste,
+        {
+          label: 'Add comment frame',
+          icon: 'layout',
+          run: () => void this.addFrame(Viewport.snap(world[0]), Viewport.snap(world[1]), 480, 320),
+        },
         null,
         {
           label: 'Fit all nodes',
@@ -2834,11 +2893,16 @@ export class App {
   // ---- Requests -----------------------------------------------------------------------------
 
   /** The frame request of `node` (inputs are resolved by the caller). */
+  /**
+   * What to render for `node`: its output (output overrides applied, plus export overrides
+   * when exporting), or with `display` what its card shows (display-only settings kept).
+   */
   private requestFor(
     node: GraphNode,
     time: number,
     forExport: boolean,
     seed = this.state.seed,
+    display = false,
   ): FrameRequest {
     const base = getGenerator(node.generator) ?? GENERATORS[0]!;
     // Custom parameters are uniforms of the node's own program (code path).
@@ -2848,7 +2912,10 @@ export class App {
       (base.kind === 'shader' && (node.customParams?.length || node.baseParamEdits)
         ? base.fragment
         : undefined);
-    const overrides = forExport ? def.exportOverrides : undefined;
+    const overrides =
+      display || (!def.outputOverrides && !(forExport && def.exportOverrides))
+        ? undefined
+        : { ...def.outputOverrides, ...(forExport ? def.exportOverrides : {}) };
     return {
       ...(code !== undefined ? { code } : {}),
       generator: def,
@@ -3206,18 +3273,36 @@ export class App {
         }
       }
       const frame = imageDims(opts.frameSize, this.state.aspect);
-      const blob = await renderFlipbook(this.renderer, opts, frame, (i) => {
-        if (simulated) {
-          if (i > 0) for (let k = 0; k < opts.stepsBetweenFrames; k++) stepAll();
-          // Simulations advance by steps; animated nodes after them follow the clock.
+      const frames: Uint8ClampedArray[] = [];
+      const blob = await renderFlipbook(
+        this.renderer,
+        opts,
+        frame,
+        (i) => {
+          if (simulated) {
+            if (i > 0) for (let k = 0; k < opts.stepsBetweenFrames; k++) stepAll();
+            // Simulations advance by steps; animated nodes after them follow the clock.
+            return this.chainFor(id, opts.startTime + (i / count) * opts.duration, true);
+          }
+          // Frames cover [0, duration): with a seamless loop of the same duration, the sheet
+          // loops perfectly.
           return this.chainFor(id, opts.startTime + (i / count) * opts.duration, true);
-        }
-        // Frames cover [0, duration): with a seamless loop of the same duration, the sheet
-        // loops perfectly.
-        return this.chainFor(id, opts.startTime + (i / count) * opts.duration, true);
-      });
-      downloadBlob(blob, `${this.fileBase()}-flipbook-${opts.columns}x${opts.rows}.png`);
-      toast(`Exported ${count}-frame flipbook`);
+        },
+        opts.motionVectors ? frames : undefined,
+      );
+      const base = `${this.fileBase()}-flipbook-${opts.columns}x${opts.rows}`;
+      downloadBlob(blob, `${base}.png`);
+      if (opts.motionVectors) {
+        toast('Computing motion vectors…');
+        // Shader loops close (last frame → first); a simulation run does not.
+        const motion = await renderMotionVectors(frames, frame, opts.columns, !simulated);
+        downloadBlob(motion.blob, `${base}-motion.png`);
+        toast(
+          `Exported ${count}-frame flipbook + motion vectors (strength ${motion.strength}, Y up)`,
+          'info',
+          8000,
+        );
+      } else toast(`Exported ${count}-frame flipbook`);
     } catch (e) {
       toast(`Export failed: ${errorMessage(e)}`, 'error');
     }
@@ -3496,6 +3581,16 @@ export class App {
           width,
           height,
         );
+        // Display-only settings (preview overlays): the card shows a second render.
+        if (getGenerator(node.generator)?.outputOverrides) {
+          this.renderer.renderNode(
+            { ...this.requestFor(node, this.time, false, this.state.seed, true), inputs },
+            cache.targets,
+            width,
+            height,
+            cache.targets.get('display', width, height),
+          );
+        }
         cache.signature = signature;
         cache.version++;
         rendered = true;
@@ -3514,7 +3609,10 @@ export class App {
     for (const [id, rect] of rects) {
       const node = nodeById(this.state, id);
       if (!node) continue;
-      const texture = this.nodeCaches.get(node.id)?.targets.output?.texture;
+      const targets = this.nodeCaches.get(node.id)?.targets;
+      const def = getGenerator(node.generator);
+      const texture = ((def?.outputOverrides ? targets?.display : undefined) ?? targets?.output)
+        ?.texture;
       if (!rect || !texture) continue;
       const selected = node.id === this.state.selectedId;
       const preview = this.pinPreview?.id === node.id ? this.pinPreview.channel : undefined;
@@ -3571,13 +3669,29 @@ export class App {
   private updatePreview3D(): void {
     const panel = this.preview3d;
     if (!panel.visible) return;
-    const node = this.exportNode;
+    // A Material Output (its inputs) goes first, else the exported node.
+    const material = this.state.nodes.find((n) => n.generator === 'material-output');
+    const node = material ?? this.exportNode;
     const cache = this.nodeCaches.get(node.id);
     const color = cache?.targets.output;
     if (!cache || !color || this.failed.has(node.id)) return;
     const [w, hgt] = panel.size();
     const key = `${node.id}:${cache.version}:${panel.version}:${w}x${hgt}`;
     if (key === this.preview3dKey) return;
+    if (material) {
+      const inputs = this.liveInputs(material.id);
+      this.showPreview3D(
+        {
+          color: color.texture,
+          height: inputs.height?.texture ?? color.texture,
+          normal: inputs.normal?.texture ?? null,
+          roughness: inputs.roughness?.texture ?? null,
+          roughnessValue: 0.6,
+        },
+        key,
+      );
+      return;
+    }
     let height = color.texture;
     if (node.postEnabled) {
       this.preview3dTargets ??= this.renderer.createTargets();
@@ -3598,16 +3712,90 @@ export class App {
         if (e instanceof ProgramPending) return;
       }
     }
-    const pixels = this.renderer.renderPreview3D(
-      color.texture,
-      height,
-      panel.view(w / hgt),
-      w,
-      hgt,
+    this.showPreview3D(
+      { color: color.texture, height, normal: null, roughness: null, roughnessValue: 0.6 },
+      key,
     );
+  }
+
+  private showPreview3D(maps: Preview3DMaps, key: string): void {
+    const panel = this.preview3d;
+    const [w, hgt] = panel.size();
+    const pixels = this.renderer.renderPreview3D(maps, panel.view(w / hgt), w, hgt);
     if (!pixels) return;
     this.preview3dKey = key;
     panel.show(pixels, w, hgt);
+  }
+
+  // ---- Comment frames -----------------------------------------------------------------------
+
+  /** Adds a frame; asks its title unless given (C key: "Comment", renamed by double-click). */
+  private async addFrame(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    given?: string,
+  ): Promise<void> {
+    const frames = this.state.frames ?? [];
+    if (frames.length >= MAX_FRAMES) {
+      toast(`At most ${MAX_FRAMES} frames`, 'error');
+      return;
+    }
+    const title =
+      given ??
+      (await promptDialog({
+        title: 'New comment frame',
+        label: 'Title',
+        confirmLabel: 'Add',
+      }));
+    if (title === null) return;
+    const id = `f${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
+    this.commit({
+      ...this.state,
+      frames: [
+        ...frames,
+        {
+          id,
+          x: Math.round(x),
+          y: Math.round(y),
+          w: Math.max(MIN_FRAME_SIZE, Math.round(w)),
+          h: Math.max(MIN_FRAME_SIZE, Math.round(h)),
+          title: title.trim().slice(0, 64),
+          color: frames.length % FRAME_COLORS.length,
+        },
+      ],
+    });
+  }
+
+  /** C: a comment frame around the selected nodes, or at the pointer when none is selected. */
+  private commentSelection(): void {
+    const box = this.viewport.nodesBounds(this.viewport.selectedIds());
+    if (box) {
+      void this.addFrame(box.x - 24, box.y - 56, box.w + 48, box.h + 80, 'Comment');
+      return;
+    }
+    const at = this.viewport.pointerWorld();
+    if (at) void this.addFrame(Viewport.snap(at[0]), Viewport.snap(at[1]), 480, 320, 'Comment');
+  }
+
+  private updateFrame(frame: GraphFrame): void {
+    this.commit({
+      ...this.state,
+      frames: (this.state.frames ?? []).map((f) => (f.id === frame.id ? frame : f)),
+    });
+  }
+
+  private async renameFrame(id: string): Promise<void> {
+    const frame = this.state.frames?.find((f) => f.id === id);
+    if (!frame) return;
+    const title = await promptDialog({
+      title: 'Rename frame',
+      label: 'Title',
+      value: frame.title,
+      confirmLabel: 'Rename',
+    });
+    if (title !== null) this.updateFrame({ ...frame, title: title.trim().slice(0, 64) });
   }
 
   /**
@@ -3701,8 +3889,10 @@ export class App {
       seed: 7,
       key: 'thumbnail',
     };
-    const overrides = def.exportOverrides;
-    return overrides ? { ...req, params: { ...req.params, ...overrides } } : req;
+    const overrides = { ...def.outputOverrides, ...def.exportOverrides };
+    return Object.keys(overrides).length
+      ? { ...req, params: { ...req.params, ...overrides } }
+      : req;
   }
 
   /** Hover preview in the browser: thumbnails of every preset of `id` (rendered once). */
@@ -3860,6 +4050,8 @@ export class App {
         this.togglePlay();
       } else if (!mod && (e.key === 't' || e.key === 'T')) {
         this.layout.toggle('timeline');
+      } else if (!mod && (e.key === 'c' || e.key === 'C')) {
+        this.commentSelection();
       } else if (!mod && (e.key === ',' || e.key === '.')) {
         this.stepFrame(e.key === '.' ? 1 : -1);
       } else if (mod && e.key.toLowerCase() === 'd') {

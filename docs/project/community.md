@@ -3,8 +3,9 @@
 > **État** : le partage de **systèmes** est en place (fenêtre Community : découverte par
 > tendances / popularité / nouveautés, catégories, tags, recherche, abonnements, publication
 > et édition, versions). Voir `server/src/community.ts` et
-> [architecture.md](../development/architecture.md#server-and-accounts). Le reste de ce document
-> (paquets de shaders custom, signalements, modération) reste à faire.
+> [architecture.md](../development/architecture.md#server-and-accounts). Signalements et
+> modération aussi (motifs, masquage automatique, file des modérateurs `MODERATORS`). Le reste
+> de ce document (paquets de shaders custom) reste à faire.
 
 But : parcourir, publier et réutiliser des **effets** créés par d'autres (presets d'effets
 existants ou nouveaux générateurs en shader), depuis l'application.

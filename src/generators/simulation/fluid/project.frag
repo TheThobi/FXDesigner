@@ -9,4 +9,7 @@ void main() {
   vec2 vel = s.rg - 0.5 * vec2(r.b - l.b, u.b - d.b);
   if (solidAt(0, 0)) vel = vec2(0.0);
   outColor = vec4(vel, s.b * 0.98, s.a);
+#ifdef SIM_EXTRA_STATE
+  outColor2 = neighbor2(0, 0);
+#endif
 }

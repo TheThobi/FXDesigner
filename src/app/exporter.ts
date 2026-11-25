@@ -5,6 +5,7 @@ type ImageRequest = FrameRequest | readonly ChainStep[];
 import type { FlipbookOptions } from '../ui/FlipbookDialog';
 import { canvasToBlob } from '../util/download';
 import { encodeGif } from '../util/gif';
+import { flowIntensity, opticalFlow } from '../util/opticalFlow';
 import { encodeGray16Png } from '../util/png16';
 
 function canvas2d(
@@ -77,6 +78,8 @@ export async function renderFlipbook(
   opts: FlipbookOptions,
   frame: readonly [number, number],
   frameAt: (index: number) => ImageRequest,
+  /** Receives every frame's pixels (motion vectors need them). */
+  keep?: Uint8ClampedArray[],
 ): Promise<Blob> {
   const { columns, rows } = opts;
   const [fw, fh] = frame;
@@ -85,6 +88,7 @@ export async function renderFlipbook(
     const { canvas, ctx } = canvas2d(columns * fw, rows * fh);
     for (let i = 0; i < columns * rows; i++) {
       const pixels = capture.render(frameAt(i));
+      keep?.push(pixels);
       ctx.putImageData(
         new ImageData(pixels, fw, fh),
         (i % columns) * fw,
@@ -97,6 +101,49 @@ export async function renderFlipbook(
   } finally {
     capture.dispose();
   }
+}
+
+/**
+ * Motion vector sheet of a flipbook (same layout): for each frame, the optical flow to the next
+ * one (the last to the first when `loop`), in frame UV units with Y up, stored as
+ * RG = 0.5 + vector / (2 × strength). `strength` (the largest component) goes to the material.
+ */
+export async function renderMotionVectors(
+  frames: readonly Uint8ClampedArray[],
+  frame: readonly [number, number],
+  columns: number,
+  loop: boolean,
+): Promise<{ blob: Blob; strength: number }> {
+  const [fw, fh] = frame;
+  const rows = Math.ceil(frames.length / columns);
+  const count = fw * fh;
+  const intensity = frames.map((f) => flowIntensity(f, count));
+  const flows: { u: Float32Array; v: Float32Array }[] = [];
+  for (let i = 0; i < frames.length; i++) {
+    const next = i + 1 < frames.length ? i + 1 : loop ? 0 : -1;
+    flows.push(
+      next >= 0
+        ? opticalFlow(intensity[i]!, intensity[next]!, fw, fh)
+        : (flows.at(-1) ?? { u: new Float32Array(count), v: new Float32Array(count) }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  let strength = 0;
+  for (const { u, v } of flows)
+    for (let p = 0; p < count; p++)
+      strength = Math.max(strength, Math.abs(u[p]! / fw), Math.abs(v[p]! / fh));
+  strength = Math.max(0.001, Math.ceil(strength * 1000) / 1000);
+  const { canvas, ctx } = canvas2d(columns * fw, rows * fh);
+  flows.forEach(({ u, v }, i) => {
+    const px = new Uint8ClampedArray(count * 4);
+    for (let p = 0; p < count; p++) {
+      px[p * 4] = Math.round((0.5 + u[p]! / fw / (2 * strength)) * 255);
+      px[p * 4 + 1] = Math.round((0.5 - v[p]! / fh / (2 * strength)) * 255);
+      px[p * 4 + 3] = 255;
+    }
+    ctx.putImageData(new ImageData(px, fw, fh), (i % columns) * fw, Math.floor(i / columns) * fh);
+  });
+  return { blob: await canvasToBlob(canvas), strength };
 }
 
 /** Video formats tried in order (WebM where supported, MP4 on Safari). */

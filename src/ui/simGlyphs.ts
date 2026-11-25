@@ -4,6 +4,12 @@
  * Silhouettes describe the resulting pattern; subdued fills separate overlapping forms.
  */
 const GLYPHS: Readonly<Record<string, string>> = {
+  // Sheet with a burnt, glowing corner.
+  'burning-paper':
+    '<path d="M8 6h18l-3 6 4 4-4 5 4 5-3 5 4 5-2 6H8z"/><path d="M34 40c-6 0-9-4-7-9 1-3 4-4 4-9 3 3 4 6 3 9 2-1 3-3 3-5 4 3 6 7 4 10-1 3-4 4-7 4z"/>',
+  // Cracks branching away from an impact.
+  'crack-growth':
+    '<path d="M24 24 14 16l-4-8M14 16l-8 2M24 24l12-6 6 2M36 18l2-8M24 24l4 12-3 6M28 36l8 4M24 24l-12 8-6 8M12 32l-6-2"/><circle cx="24" cy="24" r="2.5" fill="currentColor" stroke="none"/>',
   // Framed landscape identifies an image source before a file is imported.
   image:
     '<rect x="6" y="8" width="36" height="32" rx="3"/><circle cx="16" cy="18" r="3"/><path d="m7 33 10-9 8 7 7-11 10 13v4a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3Z" fill="currentColor" fill-opacity=".18"/>',

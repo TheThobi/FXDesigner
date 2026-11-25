@@ -52,6 +52,8 @@ const VALUE_LABELS: Readonly<Record<NodeValueType, string>> = {
 };
 /** Drag distance (px) before a press on a card becomes a move. */
 const DRAG_THRESHOLD = 4;
+/** Smallest frame side (world units). */
+const MIN_FRAME = 120;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 type Rect = readonly [number, number, number, number];
@@ -225,12 +227,29 @@ export interface ViewportCallbacks {
    * `world` graph units / `client` screen pixels (quick-add menu).
    */
   readonly onLinkDrop: (drop: LinkDrop) => void;
+  /** A frame was dragged (with the nodes inside it) or resized. */
+  readonly onFrameChange: (frame: GraphViewFrame, moves: readonly NodeMove[]) => void;
+  /** Double-click on a frame title. */
+  readonly onFrameRename: (id: string) => void;
+}
+
+/** A comment frame of the graph (world units). */
+export interface GraphViewFrame {
+  readonly id: string;
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+  readonly title: string;
+  /** CSS color of its tint. */
+  readonly color: string;
 }
 
 export interface GraphContextMenu {
   readonly target:
     | { readonly kind: 'nodes'; readonly ids: readonly string[]; readonly clickedId: string }
     | { readonly kind: 'link'; readonly link: GraphViewLink }
+    | { readonly kind: 'frame'; readonly id: string }
     | { readonly kind: 'background' };
   readonly world: readonly [number, number];
   readonly client: readonly [number, number];
@@ -344,12 +363,14 @@ export class Viewport {
     this.dragPath = document.createElementNS(SVG_NS, 'path');
     this.dragPath.classList.add('vp-link', 'dragging');
     this.world = h('div', { class: 'vp-world' });
+    this.frameWorld = h('div', { class: 'vp-world vp-frame-world' });
     this.linkWorld = h('div', { class: 'vp-world vp-link-world' });
     this.linkWorld.append(this.linkLayer as unknown as HTMLElement);
-    // Stacking: links, then the canvas (node images), then the cards (headers, pins).
+    // Stacking: frames, links, then the canvas (node images), then the cards (headers, pins).
     this.stage = h(
       'div',
       { class: 'vp-stage' },
+      this.frameWorld,
       this.linkWorld,
       this.canvas,
       this.world,
@@ -597,6 +618,147 @@ export class Viewport {
     this.renderLinks();
     this.updateOcclusion();
     if (!this.fitted && this.stage.clientWidth > 0) this.fit();
+  }
+
+  // ---- Frames -------------------------------------------------------------------------------
+
+  private readonly frameWorld: HTMLElement;
+  private frames: readonly GraphViewFrame[] = [];
+  private readonly frameEls = new Map<string, HTMLElement>();
+
+  /** Reconciles the comment frames (drawn behind links and nodes). */
+  setFrames(frames: readonly GraphViewFrame[]): void {
+    this.frames = frames;
+    const ids = new Set(frames.map((f) => f.id));
+    for (const [id, el] of this.frameEls) {
+      if (ids.has(id)) continue;
+      el.remove();
+      this.frameEls.delete(id);
+    }
+    for (const frame of frames) {
+      let el = this.frameEls.get(frame.id);
+      if (!el) {
+        el = this.createFrame(frame.id);
+        this.frameEls.set(frame.id, el);
+        this.frameWorld.append(el);
+      }
+      this.placeFrame(el, frame);
+      el.querySelector('.graph-frame-title')!.textContent = frame.title || 'Frame';
+    }
+  }
+
+  /** World box around the given nodes (null when none is shown). */
+  nodesBounds(ids: readonly string[]): { x: number; y: number; w: number; h: number } | null {
+    const cards = ids.map((id) => this.cards.get(id)).filter((c): c is Card => c !== undefined);
+    if (!cards.length) return null;
+    const x0 = Math.min(...cards.map((c) => c.data.x));
+    const y0 = Math.min(...cards.map((c) => c.data.y));
+    const x1 = Math.max(...cards.map((c) => c.data.x + this.cardWidth(c)));
+    const y1 = Math.max(...cards.map((c) => c.data.y + this.cardHeight(c)));
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+
+  private placeFrame(el: HTMLElement, f: GraphViewFrame): void {
+    el.style.transform = `translate(${f.x}px, ${f.y}px)`;
+    el.style.width = `${f.w}px`;
+    el.style.height = `${f.h}px`;
+    el.style.setProperty('--frame', f.color);
+  }
+
+  private createFrame(id: string): HTMLElement {
+    const head = h(
+      'div',
+      { class: 'graph-frame-head', 'data-frame': id, title: 'Drag to move with its nodes' },
+      h('span', { class: 'graph-frame-title' }),
+    );
+    const grip = h('div', { class: 'graph-frame-grip', title: 'Drag to resize' });
+    const el = h('div', { class: 'graph-frame' }, head, grip);
+    const frameOf = () => this.frames.find((f) => f.id === id);
+
+    head.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      this.callbacks.onFrameRename(id);
+    });
+    head.addEventListener('pointerdown', (e) => {
+      const frame = frameOf();
+      if (e.button !== 0 || e.altKey || !frame) return;
+      e.preventDefault();
+      e.stopPropagation();
+      head.setPointerCapture(e.pointerId);
+      const grab = this.toWorld(e.clientX, e.clientY);
+      // Nodes entirely inside the frame move with it.
+      const inside = [...this.cards.values()]
+        .filter(
+          (c) =>
+            c.data.x >= frame.x &&
+            c.data.y >= frame.y &&
+            c.data.x + this.cardWidth(c) <= frame.x + frame.w &&
+            c.data.y + this.cardHeight(c) <= frame.y + frame.h,
+        )
+        .map((c) => ({ card: c, origin: [c.data.x, c.data.y] as const }));
+      let moved: GraphViewFrame = frame;
+      const move = (ev: PointerEvent) => {
+        const p = this.toWorld(ev.clientX, ev.clientY);
+        let dx = p[0] - grab[0];
+        let dy = p[1] - grab[1];
+        if (!ev.ctrlKey) {
+          dx = Viewport.snap(frame.x + dx) - frame.x;
+          dy = Viewport.snap(frame.y + dy) - frame.y;
+        }
+        moved = { ...frame, x: Math.round(frame.x + dx), y: Math.round(frame.y + dy) };
+        this.placeFrame(el, moved);
+        for (const { card: c, origin } of inside) {
+          const x = Math.round(origin[0] + dx);
+          const y = Math.round(origin[1] + dy);
+          c.data = { ...c.data, x, y };
+          c.element.style.transform = `translate(${x}px, ${y}px)`;
+        }
+        this.renderLinks();
+        this.updateOcclusion();
+      };
+      const up = () => {
+        head.removeEventListener('pointermove', move);
+        head.removeEventListener('pointerup', up);
+        head.removeEventListener('pointercancel', up);
+        if (moved === frame) return;
+        this.callbacks.onFrameChange(
+          moved,
+          inside.map(({ card: c }) => ({ id: c.id, x: c.data.x, y: c.data.y })),
+        );
+      };
+      head.addEventListener('pointermove', move);
+      head.addEventListener('pointerup', up);
+      head.addEventListener('pointercancel', up);
+    });
+    grip.addEventListener('pointerdown', (e) => {
+      const frame = frameOf();
+      if (e.button !== 0 || !frame) return;
+      e.preventDefault();
+      e.stopPropagation();
+      grip.setPointerCapture(e.pointerId);
+      const grab = this.toWorld(e.clientX, e.clientY);
+      let resized: GraphViewFrame = frame;
+      const move = (ev: PointerEvent) => {
+        const p = this.toWorld(ev.clientX, ev.clientY);
+        const snap = (v: number) => (ev.ctrlKey ? Math.round(v) : Viewport.snap(v));
+        resized = {
+          ...frame,
+          w: Math.max(MIN_FRAME, snap(frame.w + p[0] - grab[0])),
+          h: Math.max(MIN_FRAME, snap(frame.h + p[1] - grab[1])),
+        };
+        this.placeFrame(el, resized);
+      };
+      const up = () => {
+        grip.removeEventListener('pointermove', move);
+        grip.removeEventListener('pointerup', up);
+        grip.removeEventListener('pointercancel', up);
+        if (resized !== frame) this.callbacks.onFrameChange(resized, []);
+      };
+      grip.addEventListener('pointermove', move);
+      grip.addEventListener('pointerup', up);
+      grip.addEventListener('pointercancel', up);
+    });
+    return el;
   }
 
   /** Ids of the selected nodes (the selected one included). */
@@ -1569,6 +1731,7 @@ export class Viewport {
     const transform = `translate(${this.pan[0]}px, ${this.pan[1]}px) scale(${this.zoom})`;
     this.world.style.transform = transform;
     this.linkWorld.style.transform = transform;
+    this.frameWorld.style.transform = transform;
     this.stage.style.setProperty('--zoom', String(this.zoom));
     this.applyBackground();
     this.refreshZoomLabel();
@@ -1630,6 +1793,11 @@ export class Viewport {
         });
         return;
       }
+      const frameId = target.closest<HTMLElement>('.graph-frame-head')?.dataset.frame;
+      if (frameId) {
+        this.callbacks.onContextMenu({ target: { kind: 'frame', id: frameId }, world, client });
+        return;
+      }
       if (target.classList.contains('vp-link-hit')) {
         const key = (target as SVGElement).dataset.key;
         const link = this.links.find((l) => linkKey(l) === key);
@@ -1649,7 +1817,7 @@ export class Viewport {
         if (link) this.callbacks.onInsertReroute(link, this.toWorld(e.clientX, e.clientY));
         return;
       }
-      if (!target.closest('.node')) this.fit();
+      if (!target.closest('.node, .graph-frame-head, .graph-frame-grip')) this.fit();
     });
     // Capture phase: middle / Alt drags pan even over cards; left-drag on the background
     // draws a selection box.
@@ -1660,7 +1828,7 @@ export class Viewport {
         const active = document.activeElement;
         if (active instanceof HTMLElement && !this.stage.contains(active)) active.blur();
         const target = e.target as Element;
-        const onCard = target.closest('.node') !== null;
+        const onCard = target.closest('.node, .graph-frame-head, .graph-frame-grip') !== null;
         if (e.button === 0 && !e.altKey && target.classList.contains('vp-link-hit')) {
           e.preventDefault();
           this.selectLink((target as SVGElement).dataset.key ?? null);

@@ -107,6 +107,18 @@ export interface Preview3DView {
   readonly additive: boolean;
 }
 
+/** Images the 3D preview lights (a Material Output's inputs, or one node). */
+export interface Preview3DMaps {
+  readonly color: WebGLTexture;
+  /** Relief (luminance); used for normals when there is no normal map. */
+  readonly height: WebGLTexture;
+  /** Tangent-space normal map (OpenGL, Y up), or null. */
+  readonly normal: WebGLTexture | null;
+  /** Roughness (luminance), or null for `roughnessValue`. */
+  readonly roughness: WebGLTexture | null;
+  readonly roughnessValue: number;
+}
+
 /** Quads per side of each shape's grid (curved shapes need more). */
 const PREVIEW_SEGMENTS = [1, 64, 1, 64];
 const PREVIEW_FACES = [1, 1, 6, 1];
@@ -218,6 +230,11 @@ export class NodeTargets {
   /** The node's final image (valid after a render). */
   get output(): RenderTarget | undefined {
     return this.targets.get('output');
+  }
+
+  /** What the node's card shows when it differs from its output (display-only settings). */
+  get display(): RenderTarget | undefined {
+    return this.targets.get('display');
   }
 
   dispose(): void {
@@ -511,8 +528,7 @@ export class Renderer {
    * reads it back (straight RGBA8, top-down rows). Null while its program compiles.
    */
   renderPreview3D(
-    color: WebGLTexture,
-    height: WebGLTexture,
+    maps: Preview3DMaps,
     view: Preview3DView,
     width: number,
     heightPx: number,
@@ -543,8 +559,13 @@ export class Renderer {
       .set('u_tiles', view.tiles)
       .set('u_twoSided', view.shape === 0)
       .set('u_additive', view.additive)
-      .texture('u_color', color, 0)
-      .texture('u_height', height, 1);
+      .set('u_hasNormal', maps.normal !== null)
+      .set('u_hasRoughness', maps.roughness !== null)
+      .set('u_roughnessValue', maps.roughnessValue)
+      .texture('u_color', maps.color, 0)
+      .texture('u_height', maps.height, 1)
+      .texture('u_normal', maps.normal ?? this.gpu.blankTexture, 2)
+      .texture('u_roughness', maps.roughness ?? this.gpu.blankTexture, 3);
     const segments = PREVIEW_SEGMENTS[view.shape] ?? 1;
     const count = (PREVIEW_FACES[view.shape] ?? 1) * segments * segments * 6;
     if (view.additive) this.gpu.drawTriangles(count, 1, true);

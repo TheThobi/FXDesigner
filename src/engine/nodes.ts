@@ -27,8 +27,11 @@ export interface NodeInputDef {
   readonly preview?: NodeChannel;
 }
 
-/** Channel of an image: 0 = R, 1 = G, 2 = B, 3 = A (opaque grayscale), 4 = RGB (opaque). */
-export type NodeChannel = 0 | 1 | 2 | 3 | 4;
+/**
+ * Channel of an image: 0 = R, 1 = G, 2 = B, 3 = A (opaque grayscale), 4 = RGB (opaque),
+ * 5 = RG (flow vectors, B = 0, opaque).
+ */
+export type NodeChannel = 0 | 1 | 2 | 3 | 4 | 5;
 
 /**
  * Value carried by a pin, Shader Graph-like: one channel (float), two (vec2: flow vectors),
@@ -38,7 +41,7 @@ export type NodeValueType = 'float' | 'vec2' | 'vec3' | 'vec4';
 
 /** Value type of an output channel (null = the main RGBA output). */
 export function channelType(channel: NodeChannel | null): NodeValueType {
-  return channel === null ? 'vec4' : channel === 4 ? 'vec3' : 'float';
+  return channel === null ? 'vec4' : channel === 4 ? 'vec3' : channel === 5 ? 'vec2' : 'float';
 }
 
 export function inputsOf(def: GeneratorDefinition): readonly NodeInputDef[] {

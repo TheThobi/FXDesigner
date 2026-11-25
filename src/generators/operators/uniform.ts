@@ -16,10 +16,4 @@ export const uniform: ShaderGenerator = {
   outputs: [
     { key: 'value', label: 'Value', description: 'Constant float.', color: '#6bb5ff', channel: 0 },
   ],
-  presets: [
-    { name: 'Black', values: { value: 0 } },
-    { name: 'Mid gray', values: { value: 0.5 } },
-    { name: 'White', values: { value: 1 } },
-  ],
-  featuredPreset: 'Mid gray',
 };

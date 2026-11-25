@@ -15,6 +15,8 @@ export interface FlipbookOptions {
   readonly startTime: number;
   /** Simulations: restart from the seed before the warm-up (otherwise continue the live run). */
   readonly restart: boolean;
+  /** Also bake a motion vector sheet (optical flow from each frame to the next). */
+  readonly motionVectors: boolean;
 }
 
 /** Simulation frames per second of warm-up (one step per displayed frame at 60 Hz). */
@@ -28,6 +30,7 @@ const DEFAULTS: FlipbookOptions = {
   stepsBetweenFrames: 10,
   startTime: 0,
   restart: true,
+  motionVectors: false,
 };
 
 /**
@@ -73,6 +76,12 @@ export function askFlipbookOptions(
     const steps = num('steps', initial.stepsBetweenFrames, 1, 500);
     const start = num('start', initial.startTime, 0, 600, 0.1);
     const restart = h('input', { type: 'checkbox', name: 'restart', checked: initial.restart });
+    const motion = h('input', {
+      type: 'checkbox',
+      name: 'motionVectors',
+      checked: initial.motionVectors,
+      title: 'A second sheet of motion vectors, for smooth frame blending in game engines',
+    });
     const info = h('p', { class: 'dialog-info' });
 
     const field = (label: string, input: HTMLElement) =>
@@ -90,6 +99,7 @@ export function askFlipbookOptions(
           ? field('Sim frames between images', steps)
           : field('Duration (s) — loop length for a looping sheet', duration),
       isSimulation ? field('Restart simulation first', restart) : null,
+      variations ? null : field('Motion vectors sheet', motion),
       variations
         ? field('Time (s)', start)
         : field(isSimulation ? 'Warm-up before capture (s)' : 'Start at (s)', start),
@@ -117,6 +127,7 @@ export function askFlipbookOptions(
       stepsBetweenFrames: Number(steps.value),
       startTime: Math.max(0, Number(start.value) || 0),
       restart: restart.checked,
+      motionVectors: !variations && motion.checked,
     });
     const refresh = () => {
       const o = read();

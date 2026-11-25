@@ -90,6 +90,19 @@ export const MIGRATIONS: readonly string[] = [
   CREATE INDEX community_systems_animated ON community_systems (animated, created_at DESC);
   ALTER TABLE systems ADD COLUMN published jsonb;
   `,
+  // 4: moderation: reports by signed-in users, systems hidden pending review.
+  `
+  ALTER TABLE community_systems ADD COLUMN hidden boolean NOT NULL DEFAULT false;
+  CREATE TABLE community_reports (
+    system_id text NOT NULL REFERENCES community_systems ON DELETE CASCADE,
+    user_id uuid NOT NULL REFERENCES users ON DELETE CASCADE,
+    reason text NOT NULL,
+    details text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (system_id, user_id)
+  );
+  CREATE INDEX community_reports_system ON community_reports (system_id);
+  `,
 ];
 
 export type Db = pg.Pool;

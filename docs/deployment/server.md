@@ -112,5 +112,12 @@ La fenêtre Community utilise la même base : la migration 2 crée `community_sy
 `community_subscriptions` au démarrage, rien à configurer. Sans base de données, la fenêtre
 affiche « The community is unavailable ». Les catégories se modifient dans
 `server/src/community.ts` (`COMMUNITY_CATEGORIES`) ; leurs identifiants sont stockés, ne pas les
-renommer sans migration. Il n'y a pas encore de modération : un système se supprime à la main
-(`DELETE FROM community_systems WHERE id = '…'`).
+renommer sans migration.
+
+**Modération.** Les utilisateurs connectés peuvent signaler un système (« Report… » sur sa
+carte ou sa page). À partir de 3 signalements de personnes différentes, il est masqué en
+attendant une décision : seuls son auteur et les modérateurs le voient encore. Les modérateurs
+sont les pseudos listés dans `MODERATORS` (`.env`, séparés par des virgules) : un bouton
+« Moderation » apparaît alors dans la fenêtre Community, avec la file des systèmes signalés et
+leurs motifs. Pour chacun : masquer, rétablir (efface les signalements), ignorer les
+signalements ou supprimer.

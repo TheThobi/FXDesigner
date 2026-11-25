@@ -316,6 +316,15 @@ node's Post Process height output, back faces discarded (convex shapes, no depth
 renders into an offscreen target read back to the panel's 2D canvas, only when the image, the
 view or the panel size changed, and only while the panel is visible.
 
+**Comment frames.** `EditorState.frames` (`GraphFrame`: box, title, color index into
+`FRAME_COLORS`), optional in documents (left out when empty, so older apps read the file).
+`Viewport.setFrames` draws them behind links and nodes; dragging a title moves the frame and
+the nodes entirely inside it (`onFrameChange`), the corner grip resizes it.
+
+**Flipbook extras.** Motion vectors: `util/opticalFlow.ts` (pyramidal Lucas–Kanade on
+alpha-weighted luminance) from each frame to the next, encoded as RG = 0.5 + v / (2 ×
+strength), Y up; the strength is reported to the user.
+
 **Offline.** Production builds register `public/sw.js` (not under `?e2e`): fingerprinted
 `assets/` cache first, the page network first, `/api` never cached. Bump its `CACHE` name only
 if the caching rules change.
@@ -349,7 +358,12 @@ the API:
   version), delete, subscribe. Trending = subscriptions of the last 7 days. Systems are
   `animated` or static (`?kind=`); animated ones carry a hover strip (`preview`,
   `preview_frames` frames side by side, `GET /api/community/:id/preview`). Library systems
-  store their publication link (`systems.published`, see below).
+  store their publication link (`systems.published`, see below). Moderation:
+  `POST /:id/report` (reason, details; one per user and system); `AUTO_HIDE_REPORTS` distinct
+  reports set `hidden` (only the author and moderators still see it). Moderators are the
+  pseudos of `MODERATORS`: `GET /reports` (queue), `PUT /:id/moderation` (hide / restore,
+  dismiss reports), and they may delete any system. The router prefers literal paths over
+  `:params`.
 - Writes require `Content-Type: application/json` and, when present, an `Origin` equal to
   `PUBLIC_URL` (CSRF). `db.ts` holds the ordered `MIGRATIONS`, applied at startup under an
   advisory lock.

@@ -8,7 +8,7 @@ uniform float u_tiles;
 uniform bool u_nearest;
 uniform float u_checker;   // checker cell size in device pixels
 uniform float u_dim;       // 0..1 darkening (unselected nodes)
-uniform int u_channel;     // -1: the image; 0-3: one channel as grayscale; 4: opaque RGB
+uniform int u_channel;     // -1: the image; 0-3: one channel; 4: opaque RGB; 5: RG
 
 void main() {
   vec2 uv = fract(v_uv * u_tiles);
@@ -20,6 +20,7 @@ void main() {
     c = texture(u_source, uv);
   }
   if (u_channel == 4) c.a = 1.0;
+  else if (u_channel == 5) c = vec4(c.rg, 0.0, 1.0);
   else if (u_channel >= 0) c = vec4(vec3(c[u_channel]), 1.0);
   vec2 cell = floor(gl_FragCoord.xy / u_checker);
   float k = mod(cell.x + cell.y, 2.0);

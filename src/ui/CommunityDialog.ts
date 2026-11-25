@@ -8,7 +8,10 @@ import type {
   CommunitySummary,
   CommunitySystem,
   PublishFields,
+  ReportedSystem,
+  ReportReason,
 } from '../app/community';
+import { REPORT_REASONS } from '../app/community';
 import type { PreviewFraming, PublishedLink, PublishState } from '../app/library';
 import { publicationVersion } from '../app/library';
 import { confirmDialog } from './ConfirmDialog';
@@ -257,6 +260,8 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
               label: item.subscribed ? 'Unsubscribe' : 'Subscribe',
               run: () => void toggleSubscription(item),
             },
+            null,
+            { label: 'Report…', run: () => void report(item) },
           ]),
     ];
     openContextMenu(e.clientX, e.clientY, entries, dialog);
@@ -304,6 +309,13 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
       item.thumb ? h('img', { src: item.thumb, alt: '', draggable: false }) : null,
       updated ? h('span', { class: 'community-badge', text: 'Update' }) : null,
       item.mine ? h('span', { class: 'community-badge mine', text: 'Yours' }) : null,
+      item.hidden
+        ? h('span', {
+            class: 'community-badge hidden',
+            text: 'Hidden',
+            title: 'Hidden after reports: under review, only you and moderators see it',
+          })
+        : null,
       item.animated
         ? h('span', { class: 'community-kind-badge', title: 'Animated' }, icon('film', 11))
         : null,
@@ -402,6 +414,176 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
     }
   }
 
+  // ---- Reports and moderation --------------------------------------------------------------
+
+  /** Asks why `item` should be reviewed, then sends the report. */
+  async function report(item: CommunitySummary): Promise<void> {
+    if (!requireAccount('report a system')) return;
+    const reason = h(
+      'select',
+      { name: 'reason', 'aria-label': 'Reason' },
+      ...REPORT_REASONS.map((r) => h('option', { value: r.id, text: r.label })),
+    );
+    const details = h('textarea', {
+      name: 'details',
+      maxLength: 500,
+      rows: 3,
+      placeholder: 'Details (optional)',
+      'aria-label': 'Details',
+    });
+    const field = (text: string, input: HTMLElement) =>
+      h('label', { class: 'dialog-field' }, h('span', { text }), input);
+    const form = h(
+      'form',
+      { method: 'dialog' },
+      h('h2', { text: `Report "${item.name}"` }),
+      h('p', {
+        class: 'dialog-info',
+        text: 'Moderators review reported systems. Several reports hide it in the meantime.',
+      }),
+      field('Reason', reason),
+      field('Details', details),
+      h(
+        'div',
+        { class: 'dialog-buttons' },
+        h('button', {
+          type: 'button',
+          class: 'btn',
+          text: 'Cancel',
+          onclick: () => box.close('cancel'),
+        }),
+        h('button', { type: 'submit', class: 'btn btn-primary', value: 'ok', text: 'Report' }),
+      ),
+    );
+    const box = h('dialog', { class: 'dialog' }, form);
+    const sent = await new Promise<boolean>((resolve) => {
+      box.addEventListener('close', () => {
+        box.remove();
+        resolve(box.returnValue === 'ok');
+      });
+      dialog.append(box);
+      box.showModal();
+    });
+    if (!sent) return;
+    try {
+      await community.report(item.id, reason.value as ReportReason, details.value);
+      toast('Thanks: moderators will review it');
+    } catch (e) {
+      toast(`Report failed: ${errorText(e)}`, 'error');
+    }
+  }
+
+  const reasonLabel = (id: string) => REPORT_REASONS.find((r) => r.id === id)?.label ?? id;
+
+  /** Moderators: reported or hidden systems, with their reports and the decisions. */
+  async function showModeration(): Promise<void> {
+    bar.hidden = true;
+    body.replaceChildren(message('Loading…'));
+    let list: ReportedSystem[];
+    try {
+      list = await community.reports();
+    } catch (e) {
+      body.replaceChildren(message(errorText(e)));
+      return;
+    }
+    const decide = async (run: () => Promise<void>, done: string) => {
+      try {
+        await run();
+        toast(done);
+      } catch (e) {
+        toast(errorText(e), 'error');
+      }
+      void showModeration();
+    };
+    const row = (item: ReportedSystem) =>
+      h(
+        'div',
+        { class: 'moderation-row' },
+        h(
+          'span',
+          { class: 'library-thumb' },
+          item.thumb ? h('img', { src: item.thumb, alt: '', draggable: false }) : null,
+        ),
+        h(
+          'div',
+          { class: 'moderation-info' },
+          h('strong', { text: item.name }),
+          h('span', {
+            class: 'library-date',
+            text: `${item.author} · ${item.reportCount} report${item.reportCount === 1 ? '' : 's'}${item.hidden ? ' · hidden' : ''}`,
+          }),
+          h(
+            'ul',
+            { class: 'moderation-reports' },
+            ...item.reports.map((r) =>
+              h('li', {
+                text: `${reasonLabel(r.reason)} — ${r.by}, ${when(r.at)}${r.details ? `: ${r.details}` : ''}`,
+              }),
+            ),
+          ),
+        ),
+        h(
+          'div',
+          { class: 'moderation-actions' },
+          h('button', {
+            type: 'button',
+            class: 'btn btn-small',
+            text: 'View',
+            onclick: () => void showDetail(item.id),
+          }),
+          h('button', {
+            type: 'button',
+            class: 'btn btn-small',
+            text: item.hidden ? 'Restore' : 'Hide',
+            title: item.hidden ? 'Show it again and dismiss its reports' : 'Hide it from everyone',
+            onclick: () =>
+              void decide(
+                () => community.moderate(item.id, !item.hidden, item.hidden),
+                item.hidden ? 'Restored' : 'Hidden',
+              ),
+          }),
+          item.hidden
+            ? null
+            : h('button', {
+                type: 'button',
+                class: 'btn btn-small',
+                text: 'Dismiss',
+                title: 'Keep it visible and clear its reports',
+                onclick: () =>
+                  void decide(() => community.moderate(item.id, false, true), 'Reports dismissed'),
+              }),
+          h('button', {
+            type: 'button',
+            class: 'btn btn-small',
+            text: 'Delete',
+            onclick: () =>
+              void confirmDialog({
+                title: `Delete "${item.name}"?`,
+                message: `The publication of ${item.author} is removed for everyone.`,
+                confirmLabel: 'Delete',
+                irreversible: true,
+              }).then((ok) => {
+                if (ok) void decide(() => community.remove(item.id), 'Deleted');
+              }),
+          }),
+        ),
+      );
+    body.replaceChildren(
+      h(
+        'div',
+        { class: 'moderation-head' },
+        h('button', {
+          type: 'button',
+          class: 'btn btn-small',
+          text: '← Back',
+          onclick: () => void load(),
+        }),
+        h('strong', { text: 'Moderation' }),
+      ),
+      ...(list.length ? list.map(row) : [message('Nothing to review.')]),
+    );
+  }
+
   // ---- Detail ------------------------------------------------------------------------------
 
   async function showDetail(id: string): Promise<void> {
@@ -458,6 +640,7 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
             }),
         ),
       );
+      buttons.push(button('Report…', () => void report(system)));
     }
     const status = linked
       ? h('p', {
@@ -1058,6 +1241,24 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
   renderTabs();
   renderPublishButton();
   dialog.showModal();
+  // Moderators get the review queue.
+  if (actions.signedIn())
+    void community.isModerator().then((moderator) => {
+      if (!moderator || !dialog.isConnected) return;
+      bar.append(
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'btn btn-small community-moderation',
+            title: 'Reported and hidden systems',
+            onclick: () => void showModeration(),
+          },
+          icon('details', 12),
+          'Moderation',
+        ),
+      );
+    });
   void ensureCategories();
   if (opts.edit) void showEditById(opts.edit);
   else if (opts.view) void showDetail(opts.view);

@@ -51,15 +51,19 @@ sync across devices.
 **Generators** — fire and smoke, light and magic, impacts, water and particles, noises,
 materials, shapes and patterns, plus imported images. Each comes with presets.
 
-**Simulations** — reaction-diffusion, Physarum, fluids, smoke & fire, Lenia, cellular
-automata, crystals, caustics, hydraulic erosion, differential growth… Most can be painted
-directly in their preview; fluids flow around connected obstacles.
+**Simulations** — reaction-diffusion, Physarum, fluids (colored inks), smoke & fire, Lenia,
+cellular automata, crystals, caustics, hydraulic erosion, differential growth, burning paper,
+growing cracks, flowmap painting… Most can be painted in their preview; fluids flow around
+connected obstacles.
 
-**Operators** — Blend, Mask, Levels & Math, Transform, Warp, Blur, Slope Blur, Distance,
-Edge Detect, Pack / Unpack RGBA, Custom Code.
+**Operators** — compositing (Blend, Mask, Height Blend, Levels, Math), shaping (Transform,
+Warp, Polar, Make It Tile), filters (Blur, Glow, Radial and Slope Blur), analysis (Distance,
+Curvature & Occlusion, Edge Detect), Substance-style Tile Sampler and Flood Fill family,
+Trim Sheet, channel Pack / Unpack, Custom Code.
 
-**Animation** — timeline with per-node loops, frame stepping, and animation operators
-(Hue Shift, Color Cycle, Flicker, Scroll, Dissolve).
+**Animation** — timeline with per-node loops (noises loop natively), frame stepping,
+animated Tile Sampler copies and animation operators (Hue Shift, Color Cycle, Flicker,
+Scroll, Dissolve).
 
 **Post Process** — one color ramp per node and stackable modules: slope blur, Kuwahara,
 grading, relief lighting, watercolor, posterize, dithering, halftone, pixel art, grain,
@@ -68,11 +72,16 @@ outlines, anti-aliasing. Look presets combine them.
 **GLSL** — the **Code** view edits any node's shader, with custom parameters. Code compiles
 in the background: errors stay on their node.
 
-**3D Preview** — a dockable panel shows the result on a plane, sphere, cube or cylinder,
-lit with its own relief, or as an additive sprite.
+**3D Preview** — a dockable panel (Layout menu) shows the result on a plane, sphere, cube or
+cylinder, lit with its relief, or as an additive sprite; a Material Output node feeds it
+color, normal, height and roughness.
+
+**Graph** — comment frames (`C` around the selection) group and name parts of a system;
+dragging a frame moves its nodes.
 
 **Library** — systems in folders, autosaved in the browser, exportable as JSON, shareable as
-links. Signing in syncs them across devices.
+links. Signing in syncs them across devices and opens the **community** (publish, subscribe,
+report). Installable as an app; works offline.
 
 The full list of nodes and parameters is in the [node reference](docs/development/nodes.md).
 
@@ -80,16 +89,16 @@ The full list of nodes and parameters is in the [node reference](docs/developmen
 
 ## Export
 
-| Output          | Contents                                                   |
-| --------------- | ---------------------------------------------------------- |
-| PNG             | Selected node (or connected Output) with alpha             |
-| Maps            | Color, normal (OpenGL / DirectX) and height, PNGs or ZIP   |
-| 16-bit height   | Grayscale PNG with full precision                          |
-| Flipbook        | Sprite sheet with grid, time offset and simulation warm-up |
-| Video           | WebM of the loop (repeated) or of a simulation run         |
-| Variations      | Sprite sheet with one random seed per cell                 |
-| Nodes as ZIP    | Every node's image                                         |
-| Document / link | Editable JSON, or a URL containing the document            |
+| Output          | Contents                                                           |
+| --------------- | ------------------------------------------------------------------ |
+| PNG             | Selected node (or connected Output) with alpha                     |
+| Maps            | Color, normal (OpenGL / DirectX) and height, PNGs or ZIP           |
+| 16-bit height   | Grayscale PNG with full precision                                  |
+| Flipbook        | Sprite sheet (grid, time offset, warm-up), optional motion vectors |
+| Video / GIF     | The loop (repeated) or a simulation run, WebM or animated GIF      |
+| Variations      | Sprite sheet with one random seed per cell                         |
+| Nodes as ZIP    | Every node's image                                                 |
+| Document / link | Editable JSON, or a URL containing the document                    |
 
 Exports go from **128 to 4096 px** on the long side; previews are capped at 1024 px.
 
@@ -107,6 +116,7 @@ Exports go from **128 to 4096 px** on the long side; previews are capped at 1024
 | Pan                     | Middle drag, `Alt` + drag |
 | Add to selection        | `Shift` + click           |
 | Duplicate               | `Ctrl+D`                  |
+| Comment frame           | `C`                       |
 | Delete node or link     | `Delete`                  |
 | Undo / redo             | `Ctrl+Z` / `Ctrl+Shift+Z` |
 

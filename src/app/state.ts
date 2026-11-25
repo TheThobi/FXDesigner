@@ -317,9 +317,59 @@ export interface GraphLink {
  * Editable state: the node graph shown in the viewport, the selected node (edited in the
  * Details panel, driven by the timeline, exported) and global settings.
  */
+/** A titled, colored box behind nodes of the graph (organization only, no effect on images). */
+export interface GraphFrame {
+  readonly id: string;
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+  readonly title: string;
+  /** Index into FRAME_COLORS. */
+  readonly color: number;
+}
+
+/** Frame tints (muted, the UI stays neutral). */
+export const FRAME_COLORS: readonly { readonly name: string; readonly value: string }[] = [
+  { name: 'Slate', value: '#5b6b7f' },
+  { name: 'Violet', value: '#7a5b8f' },
+  { name: 'Green', value: '#4f7f6a' },
+  { name: 'Amber', value: '#8a6a3f' },
+  { name: 'Red', value: '#8a4f4f' },
+];
+
+export const MAX_FRAMES = 64;
+export const MIN_FRAME_SIZE = 120;
+
+/** Validates untrusted frames (documents, storage): finite boxes, short titles, known colors. */
+export function sanitizeFrames(raw: unknown): GraphFrame[] {
+  if (!Array.isArray(raw)) return [];
+  const out: GraphFrame[] = [];
+  for (const r of raw.slice(0, MAX_FRAMES)) {
+    if (typeof r !== 'object' || r === null) continue;
+    const o = r as Record<string, unknown>;
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : NaN);
+    const [x, y, w, h] = [num(o.x), num(o.y), num(o.w), num(o.h)];
+    if (typeof o.id !== 'string' || ![x, y, w, h].every(Number.isFinite)) continue;
+    if (out.some((f) => f.id === o.id)) continue;
+    out.push({
+      id: o.id.slice(0, 32),
+      x: Math.round(x),
+      y: Math.round(y),
+      w: Math.round(Math.min(20000, Math.max(MIN_FRAME_SIZE, w))),
+      h: Math.round(Math.min(20000, Math.max(MIN_FRAME_SIZE, h))),
+      title: typeof o.title === 'string' ? o.title.slice(0, 64) : '',
+      color: Math.min(FRAME_COLORS.length - 1, Math.max(0, Math.round(num(o.color)) || 0)),
+    });
+  }
+  return out;
+}
+
 export interface EditorState {
   readonly nodes: readonly GraphNode[];
   readonly links: readonly GraphLink[];
+  /** Comment frames of the graph (absent = none). */
+  readonly frames?: readonly GraphFrame[];
   readonly selectedId: string;
   readonly resolution: number;
   readonly seed: number;

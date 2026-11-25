@@ -11,4 +11,7 @@ void main() {
   float div = 0.5 * ((r.r - l.r) + (u.g - d.g));
   float p = (l.b + r.b + d.b + u.b - div) * 0.25;
   outColor = vec4(s.rg, p, s.a);
+#ifdef SIM_EXTRA_STATE
+  outColor2 = neighbor2(0, 0);
+#endif
 }

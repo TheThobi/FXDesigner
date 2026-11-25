@@ -36,6 +36,30 @@ vec4 sampleState(vec2 uv) {
              mix(stateAt(i + ivec2(0, 1)), stateAt(i + ivec2(1, 1)), f.x), f.y);
 }
 
+#ifdef SIM_EXTRA_STATE
+// Second state texture (same grid): every step pass must also write outColor2.
+vec4 stateAt2(ivec2 p) {
+  ivec2 size = stateSize();
+  if (openEdges()) {
+    ivec2 edge = clamp(p, ivec2(0), size - 1);
+    return any(notEqual(p, edge)) ? vec4(0.0) : texelFetch(u_state2, edge, 0);
+  }
+  return texelFetch(u_state2, ((p % size) + size) % size, 0);
+}
+
+vec4 neighbor2(int dx, int dy) { return stateAt2(ivec2(gl_FragCoord.xy) + ivec2(dx, dy)); }
+
+vec4 sampleState2(vec2 uv) {
+  vec2 size = vec2(stateSize());
+  vec2 p = uv * size - 0.5;
+  if (openEdges()) p = clamp(p, vec2(0.0), size - 1.0);
+  ivec2 i = ivec2(floor(p));
+  vec2 f = fract(p);
+  return mix(mix(stateAt2(i), stateAt2(i + ivec2(1, 0)), f.x),
+             mix(stateAt2(i + ivec2(0, 1)), stateAt2(i + ivec2(1, 1)), f.x), f.y);
+}
+#endif
+
 // Mean of the 3x3 neighbourhood (including the center).
 vec4 boxAverage() {
   vec4 sum = vec4(0.0);

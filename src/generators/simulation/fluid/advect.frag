@@ -5,13 +5,18 @@ void main() {
   if (solidAt(0, 0)) {
     // Inside an obstacle: still fluid, no ink.
     outColor = vec4(0.0, 0.0, neighbor(0, 0).b, 0.0);
+    outColor2 = vec4(0.0);
     return;
   }
   vec4 s = neighbor(0, 0);
   vec2 back = v_uv - s.rg * u_dtScale / size;
   vec4 a = sampleState(back);
   vec2 vel = a.rg * (1.0 - u_viscosity * 0.02);
-  float dye = a.a * (1.0 - u_dissipation * 0.002);
+  float fade = 1.0 - u_dissipation * 0.002;
+  float dye = a.a * fade;
+  // Ink color, premultiplied by the dye: advected and faded exactly like it.
+  vec3 ink = sampleState2(back).rgb * fade;
+  vec3 brushInk = u_brushInk == 0 ? u_inkA : u_brushInk == 1 ? u_inkB : u_inkC;
 
   float t = u_frame * 0.004 * u_stirSpeed;
   if (u_force == 0) {
@@ -24,7 +29,10 @@ void main() {
     d.x -= round(d.x);
     float source = exp(-dot(d, d) / 0.002);
     vel.y += (source * 0.6 + dye * 0.02) * u_stirStrength;
-    dye = max(dye, source);
+    if (source > dye) {
+      ink = mix(ink, u_inkA, (source - dye) / max(1.0 - dye, 1e-4));
+      dye = source;
+    }
   } else if (u_force == 2) {
     // Two opposing jets (Kelvin–Helmholtz rolls).
     float band = smoothstep(0.08, 0.0, abs(v_uv.y - 0.5));
@@ -37,11 +45,14 @@ void main() {
     if (u_brush.w < 1.5) {
       vel += u_brushDir * size * f * 0.5;
       dye = mix(dye, 1.0, f * 0.5);
+      ink = mix(ink, brushInk, f * 0.5);
     } else {
       dye *= 1.0 - f;
+      ink *= 1.0 - f;
     }
   }
   float speed = length(vel);
   if (speed > 4.0) vel *= 4.0 / speed; // keep the solver tame
   outColor = vec4(vel, s.b, clamp(dye, 0.0, 1.0));
+  outColor2 = vec4(clamp(ink, 0.0, 1.0), 0.0);
 }

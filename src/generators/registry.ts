@@ -28,6 +28,8 @@ import { cyclicAutomaton } from './simulation/cyclic-automaton/definition';
 import { marbling } from './simulation/marbling/definition';
 import { erosion } from './simulation/erosion/definition';
 import { differentialGrowth } from './simulation/growth/definition';
+import { burningPaper } from './simulation/burn/definition';
+import { crackGrowth } from './simulation/cracks/definition';
 import { physarum } from './simulation/physarum/definition';
 import { reactionDiffusion } from './simulation/reaction-diffusion/definition';
 import { lenia } from './simulation/lenia/definition';
@@ -60,6 +62,8 @@ export const GENERATORS: readonly GeneratorDefinition[] = [
   causticsSimulation,
   erosion,
   differentialGrowth,
+  burningPaper,
+  crackGrowth,
   smokeFire,
   paintMask,
   lifeAutomata,

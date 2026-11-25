@@ -58,6 +58,8 @@ npm scripts need Node ≥ 20 (local Node 22 works); `make <target>` runs the sam
   Data generators: `dataOutput`.
 - Outputs: every node has RGBA plus `STANDARD_OUTPUTS` (rgb, r, g, b, a), extracted on demand
   by `Renderer.outputOf`; declared `outputs` replace them (Unpack RGBA). Links carry `output`.
+- Display-only settings (preview overlays, arrows) go in `outputOverrides`: the card shows a
+  second render without them, linked nodes / exports / thumbnails get the output only.
 - Exports and the library thumbnail use the connected Output node, else the selection
   (`App.exportNode`). Output / Reroute are pass-through operators marked by `role`. The
   selection may be empty (`selectedId` = '').

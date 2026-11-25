@@ -346,6 +346,20 @@ function typeLabel(category: GeneratorCategory): string {
 
 /** Symbols shown on operator tiles (operators have no meaningful thumbnail on their own). */
 const OPERATOR_GLYPHS: Readonly<Record<string, string>> = {
+  'op-tile-sampler': '⁘',
+  'op-flood-fill': '▦',
+  'op-flood-gradient': '◩',
+  'op-flood-size': '▣',
+  'op-flood-color': '▤',
+  'op-flood-mapper': '▧',
+  'op-make-tile': '⊞',
+  'op-radial-blur': '✺',
+  'op-polar': '◎',
+  'op-curvature': '◠',
+  'op-height-blend': '▲',
+  'op-glow': '✷',
+  'op-trim-sheet': '☰',
+  'material-output': '◆',
   'op-blend': '⧉',
   'op-mask': '◐',
   'op-math': 'π',

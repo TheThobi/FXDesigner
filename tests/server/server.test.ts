@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { likePattern, normalizeTags, orderBy, parsePublishInput } from '../../server/src/community';
+import {
+  likePattern,
+  normalizeTags,
+  orderBy,
+  parsePublishInput,
+  parseReport,
+} from '../../server/src/community';
 import { parsePublished } from '../../server/src/library';
-import { applyDevOverrides, loadConfig } from '../../server/src/config';
+import { applyDevOverrides, loadConfig, parseModerators } from '../../server/src/config';
 import { parseCookies, Router, serializeCookie } from '../../server/src/http';
 import {
   hashPassword,
@@ -49,6 +55,16 @@ describe('http helpers', () => {
     expect(r.match('PUT', '/api/library/systems/abc')?.params).toEqual({ id: 'abc' });
     expect(r.match('GET', '/api/library/systems/abc')).toBeNull();
     expect(r.knows('/api/library/systems/abc')).toBe(true);
+  });
+
+  it('prefers literal paths over parameters, whatever the order', () => {
+    const r = new Router();
+    const byId = () => undefined;
+    const reports = () => undefined;
+    r.add('GET', '/api/community/:id', byId);
+    r.add('GET', '/api/community/reports', reports);
+    expect(r.match('GET', '/api/community/reports')?.handler).toBe(reports);
+    expect(r.match('GET', '/api/community/abcdef123')?.handler).toBe(byId);
   });
 
   it('parses and writes cookies', () => {
@@ -149,5 +165,24 @@ describe('community', () => {
     expect(orderBy('new')).toContain('created_at');
     expect(orderBy('popular')).toContain('subscribers');
     expect(orderBy('; DROP TABLE users')).toContain('recent');
+  });
+});
+
+describe('moderation', () => {
+  it('validates reports', () => {
+    expect(parseReport({ reason: 'spam', details: '  ads  ' })).toEqual({
+      reason: 'spam',
+      details: 'ads',
+    });
+    expect(parseReport({ reason: 'broken' })).toEqual({ reason: 'broken', details: '' });
+    expect(() => parseReport({ reason: 'nope' })).toThrow('Invalid reason');
+    expect(() => parseReport(null)).toThrow('Invalid reason');
+    expect(() => parseReport({ reason: 'other', details: 'x'.repeat(501) })).toThrow('too long');
+  });
+
+  it('reads moderators from the environment (case-insensitive pseudos)', () => {
+    expect([...parseModerators(' Alice, bob ,,')]).toEqual(['alice', 'bob']);
+    expect(parseModerators(undefined).size).toBe(0);
+    expect(loadConfig({ MODERATORS: 'Zed' }).moderators.has('zed')).toBe(true);
   });
 });

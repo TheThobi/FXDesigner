@@ -284,11 +284,22 @@ export class DockManager {
       (sum, child, i) => sum + (this.shown(child) ? 0 : (node.sizes[i] ?? 1)),
       0,
     );
+    // Without the viewport in this split, the shown children share the released space in
+    // proportion (flex-grow values summing below 1 would leave part of the split empty).
+    const shownSum = node.children.reduce(
+      (sum, child, i) => sum + (this.shown(child) ? (node.sizes[i] ?? 1) : 0),
+      0,
+    );
+    const share = (i: number) => {
+      const size = node.sizes[i] ?? 1;
+      if (viewport >= 0) return size + (i === viewport ? released : 0);
+      return shownSum > 0 ? size + (released * size) / shownSum : size;
+    };
     let prev: { index: number; el: HTMLElement } | null = null;
     node.children.forEach((child, i) => {
       if (!this.shown(child)) return;
       const childEl = this.renderNode(child);
-      childEl.style.flex = `${(node.sizes[i] ?? 1) + (i === viewport ? released : 0)} 1 0`;
+      childEl.style.flex = `${share(i)} 1 0`;
       if (prev) el.append(this.splitter(node, [prev.index, i], [prev.el, childEl], el));
       el.append(childEl);
       prev = { index: i, el: childEl };

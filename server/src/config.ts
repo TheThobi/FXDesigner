@@ -15,6 +15,18 @@ export interface Config {
   readonly trustProxy: boolean;
   /** New email / password accounts allowed. */
   readonly registration: boolean;
+  /** Pseudos (lowercase) allowed to moderate the community. */
+  readonly moderators: ReadonlySet<string>;
+}
+
+/** `MODERATORS=alice, Bob` → {'alice', 'bob'}. */
+export function parseModerators(raw: string | undefined): ReadonlySet<string> {
+  return new Set(
+    (raw ?? '')
+      .split(',')
+      .map((p) => p.trim().toLowerCase())
+      .filter(Boolean),
+  );
 }
 
 /** Variables replaced in local development (`npm run dev:server`) by their `DEV_` version. */
@@ -80,5 +92,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     discord,
     trustProxy: flag(env.TRUST_PROXY, false),
     registration: flag(env.ALLOW_REGISTRATION, true),
+    moderators: parseModerators(env.MODERATORS),
   };
 }

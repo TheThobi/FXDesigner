@@ -156,8 +156,8 @@ test('pixel-art mode renders uniform blocks', part(2), async ({ page }) => {
 test('flowmap painter encodes the stroke direction', part(3), async ({ page }) => {
   await page.goto('/?e2e&paused');
   await select(page, 'flowmap-painter', 500);
-  // Neutral start (the default has a gentle base flow), preview off, no arrows: the
-  // viewport shows the plain encoded flowmap.
+  // Neutral start (the default has a gentle base flow), preview off (default) and no arrows:
+  // the card shows exactly the output, the plain encoded flowmap.
   await page.locator('.param-row[data-key="initial"] select').selectOption({ label: 'Neutral' });
   await page.locator('.module-toggle[data-key="preview"]').uncheck();
   await page.locator('.param-row[data-key="arrows"] input').uncheck();

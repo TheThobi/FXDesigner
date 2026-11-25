@@ -36,6 +36,28 @@ export interface CommunitySummary {
   readonly mine: boolean;
   readonly subscribers: number;
   readonly subscribed: boolean;
+  /** Hidden by reports or a moderator (only its author and moderators see it). */
+  readonly hidden: boolean;
+}
+
+export const REPORT_REASONS = [
+  { id: 'inappropriate', label: 'Inappropriate content' },
+  { id: 'spam', label: 'Spam or advertising' },
+  { id: 'copyright', label: "Someone else's work" },
+  { id: 'broken', label: 'Broken or empty' },
+  { id: 'other', label: 'Other' },
+] as const;
+export type ReportReason = (typeof REPORT_REASONS)[number]['id'];
+
+/** A system in the moderation queue, with its reports (newest first). */
+export interface ReportedSystem extends CommunitySummary {
+  readonly reportCount: number;
+  readonly reports: readonly {
+    readonly reason: ReportReason;
+    readonly details: string;
+    readonly by: string;
+    readonly at: number;
+  }[];
 }
 
 export interface CommunitySystem extends CommunitySummary {
@@ -195,6 +217,34 @@ export class Community {
   async subscribe(id: string, on: boolean): Promise<void> {
     await call(`community/${encodeURIComponent(id)}/subscription`, {
       method: on ? 'PUT' : 'DELETE',
+    });
+  }
+
+  async report(id: string, reason: ReportReason, details: string): Promise<void> {
+    await call(`community/${encodeURIComponent(id)}/report`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, details }),
+    });
+  }
+
+  /** Whether the signed-in user moderates the community (false on any error). */
+  async isModerator(): Promise<boolean> {
+    try {
+      return (await call<{ moderator: boolean }>('community/moderator')).moderator;
+    } catch {
+      return false;
+    }
+  }
+
+  async reports(): Promise<ReportedSystem[]> {
+    return (await call<{ items: ReportedSystem[] }>('community/reports')).items;
+  }
+
+  /** Moderator decision: hide or show `id`, optionally dismissing its reports. */
+  async moderate(id: string, hidden: boolean, dismiss = false): Promise<void> {
+    await call(`community/${encodeURIComponent(id)}/moderation`, {
+      method: 'PUT',
+      body: JSON.stringify({ hidden, dismiss }),
     });
   }
 

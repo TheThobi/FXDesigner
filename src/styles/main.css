@@ -5325,3 +5325,102 @@ body.dragging-tab * {
   cursor: grab;
   touch-action: none;
 }
+
+/* ---- Community moderation ------------------------------------------------------------------ */
+
+.community-badge.hidden {
+  background: #7a2e2e;
+}
+
+.community-moderation {
+  margin-left: auto;
+}
+
+.moderation-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.moderation-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.moderation-row .library-thumb {
+  width: 72px;
+  aspect-ratio: 1;
+}
+
+.moderation-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.moderation-reports {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  color: var(--text-dim);
+}
+
+.moderation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+  max-width: 220px;
+}
+
+/* ---- Graph comment frames ------------------------------------------------------------------ */
+
+.vp-frame-world {
+  pointer-events: none;
+}
+
+.graph-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 1px solid color-mix(in srgb, var(--frame) 70%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--frame) 14%, transparent);
+}
+
+.graph-frame-head {
+  height: 28px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  border-radius: 5px 5px 0 0;
+  background: color-mix(in srgb, var(--frame) 45%, transparent);
+  color: var(--text-strong);
+  font-weight: 600;
+  cursor: grab;
+  pointer-events: auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.graph-frame-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  pointer-events: auto;
+  background: linear-gradient(
+    135deg,
+    transparent 50%,
+    color-mix(in srgb, var(--frame) 80%, transparent) 50%
+  );
+  border-radius: 0 0 5px 0;
+}

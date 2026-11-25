@@ -26,6 +26,23 @@ import edgeFadeFrag from './edge-fade.glsl?raw';
 import maskFrag from './mask.glsl?raw';
 import packFrag from './pack.glsl?raw';
 import passthroughFrag from './passthrough.glsl?raw';
+import materialOutputFrag from './material-output.glsl?raw';
+import tileSamplerFrag from './tile-sampler.glsl?raw';
+import floodSeedFrag from './flood-seed.glsl?raw';
+import floodSpreadFrag from './flood-spread.glsl?raw';
+import floodFillFrag from './flood-fill.glsl?raw';
+import floodCommon from './flood-common.glsl?raw';
+import floodGradientFrag from './flood-gradient.glsl?raw';
+import floodSizeFrag from './flood-size.glsl?raw';
+import floodColorFrag from './flood-color.glsl?raw';
+import floodMapperFrag from './flood-mapper.glsl?raw';
+import makeTileFrag from './make-tile.glsl?raw';
+import radialBlurFrag from './radial-blur.glsl?raw';
+import polarFrag from './polar.glsl?raw';
+import curvatureFrag from './curvature.glsl?raw';
+import heightBlendFrag from './height-blend.glsl?raw';
+import glowFrag from './glow.glsl?raw';
+import trimSheetFrag from './trim-sheet.glsl?raw';
 import slopeBlurFrag from './slope-blur.glsl?raw';
 import transformFrag from './transform.glsl?raw';
 import unpackFrag from './unpack.glsl?raw';
@@ -69,7 +86,8 @@ function operator(spec: {
   fragment: string;
   inputs: readonly NodeInputDef[];
   params: readonly ParamDef[];
-  presets: readonly Preset[];
+  /** None for plumbing nodes (Output, Pack…): no preset gallery. */
+  presets?: readonly Preset[];
   codeParam?: string;
   passes?: readonly ShaderPass[];
   outputs?: readonly NodeOutputDef[];
@@ -87,7 +105,7 @@ function operator(spec: {
     animated: false,
     layout: 'centered',
     defaultPost: PASS_THROUGH,
-    featuredPreset: spec.presets[0]?.name,
+    ...(spec.presets?.[0] ? { featuredPreset: spec.presets[0].name } : {}),
     ...spec,
   };
 }
@@ -415,7 +433,6 @@ export const unpackOp = operator({
     output('a', 'Alpha', 3, '#e8e8e8'),
   ],
   params: [],
-  presets: [{ name: 'Split channels', values: {} }],
 });
 
 export const packOp = operator({
@@ -455,7 +472,6 @@ export const packOp = operator({
     param.float('blueValue', 'Blue', 0, 0, 1, { group: 'Unconnected inputs', limit: [0, 1] }),
     param.float('alphaValue', 'Alpha', 1, 0, 1, { group: 'Unconnected inputs', limit: [0, 1] }),
   ],
-  presets: [{ name: 'Packed', values: {} }],
 });
 
 export const outputOp = operator({
@@ -468,7 +484,39 @@ export const outputOp = operator({
   startCollapsed: true,
   inputs: [input('image', 'Image', 'The image to export.', '#e8e8e8')],
   params: [],
-  presets: [{ name: 'Output', values: {} }],
+});
+
+export const materialOutputOp = operator({
+  id: 'material-output',
+  name: 'Material Output',
+  description:
+    'Gathers a material for the 3D Preview: color, normal map, height and roughness from any nodes.',
+  fragment: materialOutputFrag,
+  inputs: [
+    input('color', 'Color', 'Albedo (also what this node shows and exports).', '#e8e8e8'),
+    input(
+      'normal',
+      'Normal',
+      'Tangent-space normal map (OpenGL, Y up). Default: from Height.',
+      '#ffd166',
+      'vec3',
+    ),
+    input(
+      'height',
+      'Height',
+      'Relief (bright = high). Default: the color brightness.',
+      '#6bb5ff',
+      'float',
+    ),
+    input(
+      'roughness',
+      'Roughness',
+      'Bright = rough (dull), dark = glossy. Unconnected: 0.6 (connect a Uniform for a constant).',
+      '#6bb5ff',
+      'float',
+    ),
+  ],
+  params: [],
 });
 
 export const rerouteOp = operator({
@@ -479,7 +527,6 @@ export const rerouteOp = operator({
   role: 'reroute',
   inputs: [input('image', 'In', 'Passed through.', '#e8e8e8')],
   params: [],
-  presets: [{ name: 'Reroute', values: {} }],
 });
 
 export const customOp = operator({
@@ -679,6 +726,375 @@ export const edgeFadeOp = operator({
   ],
 });
 
+// ---- Substance / FluidNinja-inspired operators -----------------------------------------------
+
+export const tileSamplerOp: ShaderGenerator = {
+  ...operator({
+    id: 'op-tile-sampler',
+    name: 'Tile Sampler',
+    description:
+      'Scatters copies of a shape on a seamless grid with random offset, scale, rotation and ' +
+      'brightness; a mask thins them out. Copies can move: drift, spin, wobble, pulse, ' +
+      'twinkle or pop in and fade out, each with its own phase (loops with the timeline).',
+    fragment: tileSamplerFrag,
+    animated: true,
+    inputs: [
+      input('shape', 'Shape', 'The copied image (a soft disc when unconnected).', '#e8e8e8'),
+      input('mask', 'Mask', 'Where copies may appear (bright = dense).', '#6bb5ff', 'float'),
+    ],
+    params: [
+      param.int('count', 'Grid', 6, 1, 32, { description: 'Copies per row (and column).' }),
+      param.float('density', 'Density', 1, 0, 1),
+      param.float('jitter', 'Position jitter', 0.5, 0, 1),
+      param.float('scale', 'Scale', 0.8, 0.1, 2),
+      param.float('scaleRandom', 'Scale variation', 0.3, 0, 1),
+      param.angle('rotation', 'Rotation', 0),
+      param.float('rotationRandom', 'Rotation variation', 45, 0, 180, { unit: '°' }),
+      param.float('lumRandom', 'Brightness variation', 0.3, 0, 1),
+      param.select('combine', 'Combine', ['Max', 'Add'], 0),
+      param.float('driftX', 'Drift X', 0, -4, 4, {
+        group: 'Animation',
+        description: 'Cells per second (the whole grid scrolls).',
+      }),
+      param.float('driftY', 'Drift Y', 0, -4, 4, { group: 'Animation' }),
+      param.float('spin', 'Spin', 0, -360, 360, { group: 'Animation', unit: '°/s' }),
+      param.float('spinRandom', 'Spin variation', 0, 0, 1, {
+        group: 'Animation',
+        description: 'Each copy spins at its own speed (some the other way).',
+      }),
+      param.float('animSpeed', 'Cycle speed', 0.5, 0, 4, {
+        group: 'Animation',
+        description: 'Cycles per second of wobble, pulse, twinkle and life cycle.',
+      }),
+      param.float('wobble', 'Wobble', 0, 0, 0.5, { group: 'Animation' }),
+      param.float('pulse', 'Pulse', 0, 0, 1, { group: 'Animation' }),
+      param.float('twinkle', 'Twinkle', 0, 0, 1, { group: 'Animation' }),
+      param.float('lifecycle', 'Pop in / fade out', 0, 0, 1, { group: 'Animation' }),
+    ],
+    presets: [
+      {
+        name: 'Scattered',
+        values: { count: 6, jitter: 0.6, scaleRandom: 0.4, rotationRandom: 180 },
+      },
+      {
+        name: 'Neat grid',
+        values: { count: 4, jitter: 0, scaleRandom: 0, rotationRandom: 0, lumRandom: 0 },
+      },
+      {
+        name: 'Sparse confetti',
+        values: { count: 10, density: 0.4, scale: 0.6, rotationRandom: 180 },
+      },
+      {
+        name: 'Dense pile',
+        values: { count: 8, scale: 1.6, scaleRandom: 0.5, rotationRandom: 180 },
+      },
+      {
+        name: 'Sparkle field',
+        values: { count: 8, density: 0.6, scale: 0.5, lifecycle: 1, twinkle: 0.5, animSpeed: 0.8 },
+      },
+      {
+        name: 'Falling leaves',
+        values: {
+          count: 5,
+          driftY: -0.5,
+          spin: 90,
+          spinRandom: 1,
+          wobble: 0.2,
+          rotationRandom: 180,
+        },
+      },
+      {
+        name: 'Floating motes',
+        values: { count: 7, density: 0.7, scale: 0.4, driftY: 0.25, wobble: 0.3, pulse: 0.4 },
+      },
+    ],
+  }),
+  nativeLoop: () => true,
+};
+
+/** Spread passes until an island of this size shares one label (16 px per pass and side). */
+const floodPasses = (width: number, height: number) =>
+  Math.min(96, Math.ceil(Math.max(width, height) / 12) + 4);
+
+export const floodFillOp = operator({
+  id: 'op-flood-fill',
+  name: 'Flood Fill',
+  description:
+    'Gives every island of a mask (bricks, plates, cells, shards) its own random value or ' +
+    'color, or outputs the Data the "Flood Fill to…" nodes read (gradients, sizes, colors, ' +
+    'patterns per island). Islands crossing the edges join.',
+  fragment: floodFillFrag,
+  passes: [
+    {
+      label: 'seed',
+      fragment: floodSeedFrag,
+      precise: true,
+      repeat: (_v, _w, _h, inputs) => (inputs?.mask ? 1 : 0),
+    },
+    {
+      label: 'spread',
+      fragment: floodSpreadFrag,
+      precise: true,
+      repeat: (_v, w, h, inputs) => (inputs?.mask ? floodPasses(w, h) : 0),
+    },
+  ],
+  inputs: [input('mask', 'Mask', 'Bright islands separated by dark lines.', '#6bb5ff', 'float')],
+  params: [
+    param.select(
+      'output',
+      'Output',
+      ['Random gray', 'Random color', 'Data (for Flood Fill to…)'],
+      0,
+    ),
+    param.float('minValue', 'Darkest', 0.2, 0, 1, { visibleWhen: (v) => Number(v.output) === 0 }),
+    param.float('maxValue', 'Brightest', 1, 0, 1, { visibleWhen: (v) => Number(v.output) === 0 }),
+    param.float('threshold', 'Threshold', 0.5, 0.01, 0.99, {
+      description: 'Mask brightness above which a pixel belongs to an island.',
+    }),
+  ],
+  presets: [
+    { name: 'Gray per island', values: { output: 0 } },
+    { name: 'Color per island', values: { output: 1 } },
+    { name: 'Subtle variation', values: { output: 0, minValue: 0.6, maxValue: 0.9 } },
+    { name: 'Data', values: { output: 2 } },
+  ],
+});
+
+const FLOOD_DATA = input(
+  'data',
+  'Flood Fill',
+  'The Data output of a Flood Fill node (Output: Data).',
+  '#c58cff',
+);
+
+export const floodGradientOp = operator({
+  id: 'op-flood-gradient',
+  name: 'Flood Fill to Gradient',
+  description:
+    'A gradient across each island at a random angle and levels: tilted bricks, beveled ' +
+    'plates, shading of shards. Reads a Flood Fill node set to Data.',
+  fragment: `${floodCommon}\n${floodGradientFrag}`,
+  inputs: [FLOOD_DATA],
+  params: [
+    param.angle('angle', 'Angle', 90),
+    param.float('angleRandom', 'Angle variation', 180, 0, 180, { unit: '°' }),
+    param.float('levelRandom', 'Level variation', 0.5, 0, 1),
+  ],
+  presets: [
+    { name: 'Random tilt', values: { angleRandom: 180, levelRandom: 0.5 } },
+    { name: 'Top lit', values: { angle: 90, angleRandom: 10, levelRandom: 0.2 } },
+  ],
+});
+
+export const floodSizeOp = operator({
+  id: 'op-flood-size',
+  name: 'Flood Fill to Size',
+  description:
+    'Each island valued by its size: separate big and small pieces (Data from a Flood Fill).',
+  fragment: `${floodCommon}\n${floodSizeFrag}`,
+  inputs: [FLOOD_DATA],
+  params: [
+    param.select('mode', 'Measure', ['Largest side', 'Area'], 0),
+    param.float('scale', 'Scale', 4, 0.1, 32),
+    param.bool('invert', 'Invert', false),
+  ],
+  presets: [
+    { name: 'Big bright', values: { scale: 4 } },
+    { name: 'Small bright', values: { scale: 4, invert: true } },
+  ],
+});
+
+export const floodColorOp = operator({
+  id: 'op-flood-color',
+  name: 'Flood Fill to Color',
+  description:
+    'Each island takes the color of an image at its center (mosaic, stained glass); random ' +
+    'brightness per island. Reads a Flood Fill node set to Data.',
+  fragment: `${floodCommon}\n${floodColorFrag}`,
+  inputs: [FLOOD_DATA, input('image', 'Image', 'Colors sampled at island centers.', '#e8e8e8')],
+  params: [
+    param.float('lumRandom', 'Brightness variation', 0.2, 0, 1),
+    param.bool('keepLines', 'Opaque lines', true, {
+      description: 'Lines between islands black (off: transparent).',
+    }),
+  ],
+  presets: [
+    { name: 'Mosaic', values: { lumRandom: 0.2 } },
+    { name: 'Stained glass', values: { lumRandom: 0.4, keepLines: true } },
+  ],
+});
+
+export const floodMapperOp = operator({
+  id: 'op-flood-mapper',
+  name: 'Flood Fill Mapper',
+  description:
+    'Places a pattern in every island (fitted to its box) with random quarter turns, ' +
+    'mirroring, offset and brightness: varied stone faces, planks, tiles.',
+  fragment: `${floodCommon}\n${floodMapperFrag}`,
+  inputs: [FLOOD_DATA, input('pattern', 'Pattern', 'Placed in each island.', '#e8e8e8')],
+  params: [
+    param.float('scale', 'Scale', 1, 0.1, 4),
+    param.float('rotateRandom', 'Random turns', 0.5, 0, 1),
+    param.float('mirrorRandom', 'Random mirror', 0.5, 0, 1),
+    param.float('offsetRandom', 'Random offset', 0, 0, 1),
+    param.float('lumRandom', 'Brightness variation', 0.3, 0, 1),
+    param.bool('keepLines', 'Opaque lines', true),
+  ],
+  presets: [
+    { name: 'Varied faces', values: { rotateRandom: 0.5, mirrorRandom: 0.5, lumRandom: 0.3 } },
+    { name: 'Aligned', values: { rotateRandom: 0, mirrorRandom: 0, lumRandom: 0.15 } },
+  ],
+});
+
+export const makeTileOp = operator({
+  id: 'op-make-tile',
+  name: 'Make It Tile',
+  description:
+    'Makes any image seamless: near the borders it crossfades with itself shifted by half a ' +
+    'tile (best on organic images, e.g. an imported photo).',
+  fragment: makeTileFrag,
+  inputs: [IMAGE],
+  params: [param.float('blend', 'Blend width', 0.3, 0.02, 1)],
+  presets: [
+    { name: 'Soft seams', values: { blend: 0.4 } },
+    { name: 'Narrow seams', values: { blend: 0.12 } },
+  ],
+});
+
+export const radialBlurOp = operator({
+  id: 'op-radial-blur',
+  name: 'Radial Blur',
+  description: 'Zoom blur (streaks toward a center: god rays, impact rush) or spin blur around it.',
+  fragment: radialBlurFrag,
+  inputs: [IMAGE],
+  params: [
+    param.select('mode', 'Mode', ['Zoom', 'Spin'], 0),
+    param.float('strength', 'Strength', 0.3, 0, 1),
+    param.vec2('center', 'Center', [0.5, 0.5], 0, 1),
+    param.bool('wrap', 'Wrap', false, { description: 'Sample across the edges (tiled images).' }),
+  ],
+  presets: [
+    { name: 'God rays', values: { mode: 0, strength: 0.6 } },
+    { name: 'Rush', values: { mode: 0, strength: 0.25 } },
+    { name: 'Spin', values: { mode: 1, strength: 0.4 } },
+  ],
+});
+
+export const polarOp = operator({
+  id: 'op-polar',
+  name: 'Polar Coordinates',
+  description:
+    'To polar: wraps the image around the center (stripes become rings, lines radiate). ' +
+    'From polar: unrolls rings into stripes.',
+  fragment: polarFrag,
+  inputs: [IMAGE],
+  params: [
+    param.select('mode', 'Mode', ['To polar', 'From polar'], 0),
+    param.int('repeat', 'Repeats', 1, 1, 16, { description: 'Copies around the circle.' }),
+    param.float('radius', 'Radius', 1, 0.1, 2),
+    param.float('twist', 'Twist', 0, -4, 4, { visibleWhen: (v) => Number(v.mode) === 0 }),
+    param.bool('invert', 'Invert radius', false, {
+      description: 'The image bottom goes to the rim instead of the center.',
+    }),
+  ],
+  presets: [
+    { name: 'Rings', values: { mode: 0, repeat: 1 } },
+    { name: 'Radial burst', values: { mode: 0, repeat: 6, twist: 0 } },
+    { name: 'Swirl', values: { mode: 0, repeat: 3, twist: 1.5 } },
+    { name: 'Unroll', values: { mode: 1 } },
+  ],
+});
+
+export const curvatureOp = operator({
+  id: 'op-curvature',
+  name: 'Curvature & Occlusion',
+  description:
+    'From a height map: curvature (bright convex edges for wear, dark cavities) or ambient ' +
+    'occlusion (dark where the surroundings are higher, for dirt in crevices).',
+  fragment: curvatureFrag,
+  inputs: [input('height', 'Height', 'Bright = high.', '#6bb5ff', 'float')],
+  params: [
+    param.select('output', 'Output', ['Curvature', 'Occlusion'], 0),
+    param.float('radius', 'Radius', 4, 0.5, 64, { unit: 'px' }),
+    param.float('intensity', 'Intensity', 1, 0, 4),
+  ],
+  presets: [
+    { name: 'Edge wear', values: { output: 0, radius: 3 } },
+    { name: 'Crevice dirt', values: { output: 1, radius: 12 } },
+    { name: 'Broad shading', values: { output: 1, radius: 40, intensity: 0.7 } },
+  ],
+});
+
+export const heightBlendOp = operator({
+  id: 'op-height-blend',
+  name: 'Height Blend',
+  description:
+    'Mixes two materials by their heights: the highest wins with a soft transition (lava ' +
+    'between stones, moss on bricks). Heights default to each image brightness.',
+  fragment: heightBlendFrag,
+  inputs: [
+    input('a', 'A', 'First material.', '#e8e8e8'),
+    input('b', 'B', 'Second material (raised by Offset).', '#e8e8e8'),
+    input('heightA', 'Height A', 'Default: brightness of A.', '#6bb5ff', 'float'),
+    input('heightB', 'Height B', 'Default: brightness of B.', '#6bb5ff', 'float'),
+  ],
+  params: [
+    param.float('offset', 'Offset', 0, -1, 1, { description: 'Raises (or lowers) B.' }),
+    param.float('contrast', 'Transition', 0.2, 0.01, 1),
+    param.select('output', 'Output', ['Blend', 'Mask', 'Height'], 0),
+  ],
+  presets: [
+    { name: 'Rising B', values: { offset: 0.1, contrast: 0.15 } },
+    { name: 'Sharp', values: { contrast: 0.03 } },
+    { name: 'Mask', values: { output: 1 } },
+  ],
+});
+
+export const glowOp = operator({
+  id: 'op-glow',
+  name: 'Glow',
+  description: 'Blooms the bright parts of an image (above the threshold) with a tinted halo.',
+  fragment: glowFrag,
+  inputs: [IMAGE],
+  params: [
+    param.float('threshold', 'Threshold', 0.6, 0, 1),
+    param.float('radius', 'Radius', 24, 1, 128, { unit: 'px' }),
+    param.float('intensity', 'Intensity', 1, 0, 4),
+    param.color('tint', 'Tint', '#ffffff'),
+  ],
+  presets: [
+    { name: 'Soft bloom', values: { threshold: 0.6, radius: 24 } },
+    { name: 'Wide halo', values: { threshold: 0.4, radius: 80, intensity: 0.8 } },
+    { name: 'Hot core', values: { threshold: 0.85, radius: 10, intensity: 2 } },
+  ],
+});
+
+const stripInput = (n: number) => ({
+  ...input(`s${n}`, `Strip ${n}`, `Strip ${n} (from the top).`, '#e8e8e8'),
+  params: [`size${n}`],
+});
+
+export const trimSheetOp = operator({
+  id: 'op-trim-sheet',
+  name: 'Trim Sheet',
+  description:
+    'Stacks the connected nodes top-down as horizontal strips in one texture (sizes by ' +
+    'weight). Repeat keeps texels square, so seamless inputs tile along the strips.',
+  fragment: trimSheetFrag,
+  inputs: [1, 2, 3, 4, 5, 6].map(stripInput),
+  params: [
+    param.select('mode', 'Fit', ['Repeat', 'Stretch'], 0),
+    param.float('gutter', 'Gutter', 4, 0, 32, {
+      unit: 'px',
+      description: 'Between strips, filled with their edge rows (no bleeding in mipmaps).',
+    }),
+    ...[1, 2, 3, 4, 5, 6].map((n) =>
+      param.float(`size${n}`, `Strip ${n} size`, 1, 0.1, 4, { group: 'Strip sizes' }),
+    ),
+  ],
+});
+
+/** Operators, most used first (the browser shows them in this order). */
 export const OPERATORS: readonly ShaderGenerator[] = [
   outputOp,
   rerouteOp,
@@ -686,17 +1102,31 @@ export const OPERATORS: readonly ShaderGenerator[] = [
   maskOp,
   manualLevelsOp,
   mathOp,
-  autoLevelsOp,
   transformOp,
   warpOp,
+  tileSamplerOp,
+  heightBlendOp,
   blurOp,
-  slopeBlurOp,
-  distanceOp,
-  edgesOp,
-  edgeFadeOp,
+  glowOp,
   unpackOp,
   packOp,
   uniform,
+  radialBlurOp,
+  slopeBlurOp,
+  autoLevelsOp,
+  edgesOp,
+  distanceOp,
+  edgeFadeOp,
+  curvatureOp,
+  floodFillOp,
+  floodGradientOp,
+  floodSizeOp,
+  floodColorOp,
+  floodMapperOp,
+  polarOp,
+  makeTileOp,
   customOp,
+  trimSheetOp,
+  materialOutputOp,
   ...ANIMATION_OPERATORS,
 ];

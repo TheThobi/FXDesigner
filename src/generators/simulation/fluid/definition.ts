@@ -37,6 +37,29 @@ const PARAMS: readonly ParamDef[] = [
   param.int('dyeBands', 'Bands', 6, 1, 24, { group: 'Ink', resetOnChange: true }),
   param.float('dissipation', 'Ink fade', 0.2, 0, 5, { group: 'Ink' }),
   param.float('inkContrast', 'Ink contrast', 1.5, 1, 12, { group: 'Ink' }),
+  param.bool('colorInk', 'Colored inks', false, {
+    group: 'Ink',
+    description: 'Inks of several colors mixing in the flow (Post Process color mode: Source).',
+  }),
+  param.color('inkA', 'Color 1', '#2f6fd6', {
+    group: 'Ink',
+    resetOnChange: true,
+    visibleWhen: (v) => v.colorInk === true,
+  }),
+  param.color('inkB', 'Color 2', '#e2513a', {
+    group: 'Ink',
+    resetOnChange: true,
+    visibleWhen: (v) => v.colorInk === true,
+  }),
+  param.color('inkC', 'Color 3', '#f2c14e', {
+    group: 'Ink',
+    resetOnChange: true,
+    visibleWhen: (v) => v.colorInk === true,
+  }),
+  param.select('brushInk', 'Brush color', ['Color 1', 'Color 2', 'Color 3'], 0, {
+    group: 'Ink',
+    visibleWhen: (v) => v.colorInk === true,
+  }),
   param.select('view', 'View', ['Ink', 'Speed', 'Vorticity'], 0, { group: 'Ink' }),
   param.stepsPerFrame(1, 4),
   param.simResolution(256, [128, 256, 512]),
@@ -66,6 +89,7 @@ export const fluid: SimulationGenerator = {
   create: (gpu) =>
     new GridSimulation(gpu, 'fluid', PARAMS, {
       inputs: INPUTS,
+      extraState: true,
       seed,
       step: [
         { label: 'advect', source: `${obstacles}\n${advect}` },
@@ -106,6 +130,18 @@ export const fluid: SimulationGenerator = {
     {
       name: 'Paint it yourself',
       values: { force: 3, dyeStart: 0, dissipation: 0.1, brushSize: 0.05 },
+    },
+    {
+      name: 'Colored inks',
+      values: {
+        force: 0,
+        stirStrength: 1,
+        dyeStart: 1,
+        dyeBands: 9,
+        inkContrast: 3,
+        colorInk: true,
+      },
+      post: { colorMode: 0 },
     },
     {
       name: 'Silky clouds',

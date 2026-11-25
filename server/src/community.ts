@@ -38,6 +38,22 @@ const MAX_PREVIEW = 2 * 1024 * 1024;
 const BODY_LIMIT = MAX_DOCUMENT + MAX_THUMB + MAX_PREVIEW + 64 * 1024;
 const MAX_TAGS = 8;
 const ID_RE = /^[a-z0-9]{8,32}$/;
+/** Reports from this many different users hide a system until a moderator reviews it. */
+export const AUTO_HIDE_REPORTS = 3;
+export const REPORT_REASONS = ['inappropriate', 'spam', 'copyright', 'broken', 'other'] as const;
+export type ReportReason = (typeof REPORT_REASONS)[number];
+const MAX_REPORT_DETAILS = 500;
+
+/** Validates a report body: a known reason and optional details (trimmed, capped). */
+export function parseReport(body: unknown): { reason: ReportReason; details: string } {
+  const o = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+  const reason = o.reason;
+  if (typeof reason !== 'string' || !(REPORT_REASONS as readonly string[]).includes(reason))
+    throw new HttpError(400, 'Invalid reason');
+  const details = typeof o.details === 'string' ? o.details.trim() : '';
+  if (details.length > MAX_REPORT_DETAILS) throw new HttpError(400, 'Details are too long');
+  return { reason: reason as ReportReason, details };
+}
 
 export interface PublishInput {
   readonly name: string;
@@ -136,7 +152,7 @@ export function orderBy(sort: string): string {
 
 const SUMMARY = `
   c.id, c.name, c.description, c.category, c.tags, c.thumb, c.version, c.uses, c.animated,
-  c.preview_frames, (c.preview IS NOT NULL) AS has_preview,
+  c.preview_frames, (c.preview IS NOT NULL) AS has_preview, c.hidden,
   (extract(epoch FROM c.created_at) * 1000)::bigint AS created,
   (extract(epoch FROM c.updated_at) * 1000)::bigint AS updated,
   u.pseudo AS author,
@@ -158,6 +174,7 @@ function summary(r: Record<string, unknown>) {
     animated: r.animated === true,
     previewFrames: r.animated === true && r.has_preview === true ? Number(r.preview_frames) : 0,
     version: Number(r.version),
+    hidden: r.hidden === true,
     uses: Number(r.uses),
     created: Number(r.created),
     updated: Number(r.updated),
@@ -168,10 +185,27 @@ function summary(r: Record<string, unknown>) {
   };
 }
 
-export function communityRoutes(router: Router, db: Db, auth: Auth): void {
+export function communityRoutes(
+  router: Router,
+  db: Db,
+  auth: Auth,
+  moderators: ReadonlySet<string> = new Set(),
+): void {
   const publishes = new RateLimiter(20, 60 * 60_000);
   const uses = new RateLimiter(1, 6 * 60 * 60_000);
+  const reports = new RateLimiter(20, 60 * 60_000);
   const viewer = async (req: Request) => (await auth.user(req))?.id ?? null;
+  const isModerator = (pseudo: string | undefined) =>
+    pseudo !== undefined && moderators.has(pseudo.toLowerCase());
+  const requireModerator = async (req: Request) => {
+    const user = await auth.requireUser(req);
+    if (!isModerator(user.pseudo)) throw new HttpError(403, 'Moderators only');
+    return user;
+  };
+
+  router.add('GET', '/api/community/moderator', async (req, res) => {
+    sendJson(res, 200, { moderator: isModerator((await auth.user(req))?.pseudo) });
+  });
 
   router.add('GET', '/api/community/categories', async (_req, res) => {
     sendJson(res, 200, { categories: COMMUNITY_CATEGORIES, sorts: SORTS });
@@ -183,7 +217,8 @@ export function communityRoutes(router: Router, db: Db, auth: Auth): void {
     const { rows } = await db.query<{ tag: string; count: string }>(
       `SELECT tag, count(DISTINCT c.id) AS count
        FROM community_systems c CROSS JOIN LATERAL unnest(c.tags) AS tags(tag)
-       WHERE ($1::text = '' OR strpos(tag, $1) > 0) AND NOT (tag = ANY($2::text[]))
+       WHERE NOT c.hidden AND ($1::text = '' OR strpos(tag, $1) > 0)
+         AND NOT (tag = ANY($2::text[]))
        GROUP BY tag
        ORDER BY CASE WHEN tag = $1 THEN 0 WHEN strpos(tag, $1) = 1 THEN 1 ELSE 2 END,
                 count DESC, tag
@@ -202,7 +237,8 @@ export function communityRoutes(router: Router, db: Db, auth: Auth): void {
     const category = req.query.get('category') ?? '';
     const q = (req.query.get('q') ?? '').trim().slice(0, 64);
     const page = Math.max(0, Math.min(200, Number(req.query.get('page')) || 0));
-    const where: string[] = [];
+    // Hidden systems (reported, pending review) only show to their author.
+    const where: string[] = ['(NOT c.hidden OR c.user_id = $1::uuid)'];
     const args: unknown[] = [me];
     if (scope === 'mine') where.push('c.user_id = $1::uuid');
     if (scope === 'subscribed')
@@ -248,13 +284,15 @@ export function communityRoutes(router: Router, db: Db, auth: Auth): void {
   });
 
   router.add('GET', '/api/community/:id', async (req, res) => {
-    const me = await viewer(req);
+    const user = await auth.user(req);
+    const me = user?.id ?? null;
     const { rows } = await db.query(
       `SELECT ${SUMMARY}, c.document FROM community_systems c JOIN users u ON u.id = c.user_id
        WHERE c.id = $2`,
       [me, communityId(req.params.id)],
     );
-    if (!rows[0]) throw new HttpError(404, 'No such system');
+    if (!rows[0] || (rows[0].hidden && !rows[0].mine && !isModerator(user?.pseudo)))
+      throw new HttpError(404, 'No such system');
     sendJson(res, 200, { ...summary(rows[0]), document: rows[0].document });
   });
 
@@ -333,11 +371,12 @@ export function communityRoutes(router: Router, db: Db, auth: Auth): void {
     sendJson(res, 200, { ok: true, version: Number(rows[0].version) });
   });
 
+  // Delete: the author, or a moderator.
   router.add('DELETE', '/api/community/:id', async (req, res) => {
     const user = await auth.requireUser(req);
     const { rowCount } = await db.query(
-      'DELETE FROM community_systems WHERE id = $1 AND user_id = $2',
-      [communityId(req.params.id), user.id],
+      'DELETE FROM community_systems WHERE id = $1 AND (user_id = $2 OR $3)',
+      [communityId(req.params.id), user.id, isModerator(user.pseudo)],
     );
     if (rowCount !== 1) throw new HttpError(404, 'No such system of yours');
     sendJson(res, 200, { ok: true });
@@ -373,6 +412,75 @@ export function communityRoutes(router: Router, db: Db, auth: Auth): void {
     const cid = communityId(req.params.id);
     if (uses.take(`${req.ip}:${cid}`))
       await db.query('UPDATE community_systems SET uses = uses + 1 WHERE id = $1', [cid]);
+    sendJson(res, 200, { ok: true });
+  });
+
+  // Report a system (signed in, not your own). Enough distinct reports hide it for review.
+  router.add('POST', '/api/community/:id/report', async (req, res) => {
+    const user = await auth.requireUser(req);
+    if (!reports.take(user.id)) throw new HttpError(429, 'Too many reports, try later');
+    const cid = communityId(req.params.id);
+    const { reason, details } = parseReport(await readJson(req.raw, 4 * 1024));
+    const owner = await db.query<{ user_id: string }>(
+      'SELECT user_id FROM community_systems WHERE id = $1',
+      [cid],
+    );
+    if (!owner.rows[0]) throw new HttpError(404, 'No such system');
+    if (owner.rows[0].user_id === user.id) throw new HttpError(400, 'This system is yours');
+    await db.query(
+      `INSERT INTO community_reports (system_id, user_id, reason, details) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (system_id, user_id)
+       DO UPDATE SET reason = $3, details = $4, created_at = now()`,
+      [cid, user.id, reason, details],
+    );
+    await db.query(
+      `UPDATE community_systems SET hidden = true
+       WHERE id = $1 AND (SELECT count(*) FROM community_reports WHERE system_id = $1) >= $2`,
+      [cid, AUTO_HIDE_REPORTS],
+    );
+    sendJson(res, 200, { ok: true });
+  });
+
+  // Moderation queue: reported or hidden systems, most reported first.
+  router.add('GET', '/api/community/reports', async (req, res) => {
+    const user = await requireModerator(req);
+    const { rows } = await db.query(
+      `SELECT ${SUMMARY},
+         (SELECT count(*) FROM community_reports r WHERE r.system_id = c.id) AS report_count,
+         coalesce((SELECT json_agg(json_build_object(
+             'reason', r.reason, 'details', r.details, 'by', ru.pseudo,
+             'at', (extract(epoch FROM r.created_at) * 1000)::bigint)
+             ORDER BY r.created_at DESC)
+           FROM community_reports r JOIN users ru ON ru.id = r.user_id
+           WHERE r.system_id = c.id), '[]'::json) AS reports
+       FROM community_systems c JOIN users u ON u.id = c.user_id
+       WHERE c.hidden OR EXISTS (SELECT 1 FROM community_reports r WHERE r.system_id = c.id)
+       ORDER BY report_count DESC, c.updated_at DESC
+       LIMIT 100`,
+      [user.id],
+    );
+    sendJson(res, 200, {
+      items: rows.map((r) => ({
+        ...summary(r),
+        reportCount: Number(r.report_count),
+        reports: r.reports,
+      })),
+    });
+  });
+
+  // Moderator decision: hide / show a system, and optionally dismiss its reports.
+  router.add('PUT', '/api/community/:id/moderation', async (req, res) => {
+    await requireModerator(req);
+    const cid = communityId(req.params.id);
+    const body = (await readJson(req.raw, 1024)) as Record<string, unknown>;
+    if (typeof body.hidden !== 'boolean') throw new HttpError(400, 'hidden must be a boolean');
+    const { rowCount } = await db.query('UPDATE community_systems SET hidden = $2 WHERE id = $1', [
+      cid,
+      body.hidden,
+    ]);
+    if (rowCount !== 1) throw new HttpError(404, 'No such system');
+    if (body.dismiss === true)
+      await db.query('DELETE FROM community_reports WHERE system_id = $1', [cid]);
     sendJson(res, 200, { ok: true });
   });
 }

@@ -41,6 +41,11 @@ export interface GridSimulationSpec {
   readonly reseedInputs?: readonly string[];
   /** Supports the `boundaries` enum (0: wrap, 1: open) in the grid helpers. */
   readonly openBoundaries?: boolean;
+  /**
+   * A second RGBA state per cell (`u_state2`, `stateAt2` / `neighbor2` / `sampleState2`):
+   * the seed and every step pass must write it to `outColor2` (two render targets at once).
+   */
+  readonly extraState?: boolean;
 }
 
 /**
@@ -82,11 +87,13 @@ class GridSnapshot implements SimulationSnapshot {
   constructor(
     readonly owner: GridSimulation,
     readonly state: RenderTarget,
+    readonly state2: RenderTarget | null,
     readonly frame: number,
   ) {}
 
   dispose(): void {
     this.state.dispose();
+    this.state2?.dispose();
   }
 }
 
@@ -99,6 +106,12 @@ export class GridSimulation implements Simulation {
   }[];
   private readonly renderProgram: SimProgram;
   private state: PingPong | null = null;
+  /** Second state (spec.extraState), swapped in lockstep with `state`. */
+  private state2: PingPong | null = null;
+  /** Framebuffers writing both states at once, by `state.write` target. */
+  private readonly mrt = new Map<RenderTarget, WebGLFramebuffer>();
+  /** Texture unit of u_state2 (after the inputs). */
+  private readonly state2Unit: number;
   private seedTexture: WebGLTexture | null = null;
   private pointer: SimulationPointer | null = null;
   private frame = 0;
@@ -117,7 +130,14 @@ export class GridSimulation implements Simulation {
       new SimProgram(
         gpu,
         `${id}/${pass}`,
-        buildSimulationShader(defs, src, `${id}/${pass}`, spec.inputs ?? [], spec.openBoundaries),
+        buildSimulationShader(
+          defs,
+          src,
+          `${id}/${pass}`,
+          spec.inputs ?? [],
+          spec.openBoundaries,
+          spec.extraState,
+        ),
       );
     this.seedProgram = build(spec.seed, 'seed');
     const passes: readonly GridPass[] =
@@ -127,6 +147,7 @@ export class GridSimulation implements Simulation {
       repeat: pass.repeat,
     }));
     this.renderProgram = build(spec.render, 'render');
+    this.state2Unit = 2 + (spec.inputs?.length ?? 0);
   }
 
   ready(): boolean {
@@ -139,26 +160,28 @@ export class GridSimulation implements Simulation {
     const { gpu } = this;
     const [width, height] = gpu.gridDims(getNumber(params, 'simResolution', 256));
     if (!this.state || this.state.width !== width || this.state.height !== height) {
-      this.state?.dispose();
-      this.state = gpu.createPingPong({
+      this.disposeState();
+      const options = {
         width,
         height,
         format: gpu.precisionFormat,
         filter: 'nearest',
         wrap: 'repeat',
-      });
+      } as const;
+      this.state = gpu.createPingPong(options);
+      if (this.spec.extraState) this.state2 = gpu.createPingPong(options);
     }
     if (this.seedTexture) gpu.gl.deleteTexture(this.seedTexture);
     const image = this.spec.seedImage?.(params, Math.min(width, height)) ?? null;
     this.seedTexture = image ? gpu.createImageTexture(image, 'nearest') : null;
 
     this.frame = 0;
-    this.bindCommon(this.seedProgram.get(), params, seed)
+    this.bindCommon(this.seedProgram.get(), params, seed, true)
       .texture('u_state', gpu.blankTexture, 0)
       .texture('u_seedTexture', this.seedTexture ?? gpu.blankTexture, 1);
-    gpu.bindTarget(this.state.write);
+    this.bindWrite();
     gpu.drawFullscreen();
-    this.state.swap();
+    this.swap();
     this.lastSeed = seed;
   }
 
@@ -173,9 +196,10 @@ export class GridSimulation implements Simulation {
         const times = repeat ? Math.max(1, Math.round(repeat(params))) : 1;
         for (let r = 0; r < times; r++) {
           p.set('u_frame', this.frame).texture('u_state', state.read.texture, 0);
-          gpu.bindTarget(state.write);
+          if (this.state2) p.texture('u_state2', this.state2.read.texture, this.state2Unit);
+          this.bindWrite();
           gpu.drawFullscreen();
-          state.swap();
+          this.swap();
         }
       }
       this.frame++;
@@ -197,7 +221,12 @@ export class GridSimulation implements Simulation {
 
   snapshot(): SimulationSnapshot {
     if (!this.state) throw new Error('Simulation not initialized');
-    return new GridSnapshot(this, this.gpu.cloneTarget(this.state.read), this.frame);
+    return new GridSnapshot(
+      this,
+      this.gpu.cloneTarget(this.state.read),
+      this.state2 ? this.gpu.cloneTarget(this.state2.read) : null,
+      this.frame,
+    );
   }
 
   restore(snapshot: SimulationSnapshot): void {
@@ -205,6 +234,7 @@ export class GridSimulation implements Simulation {
     if (snapshot.state.width !== this.state.width || snapshot.state.height !== this.state.height)
       return;
     this.gpu.copyTarget(snapshot.state, this.state.read);
+    if (snapshot.state2 && this.state2) this.gpu.copyTarget(snapshot.state2, this.state2.read);
     this.frame = snapshot.frame;
   }
 
@@ -225,13 +255,74 @@ export class GridSimulation implements Simulation {
   }
 
   dispose(): void {
-    this.state?.dispose();
+    this.disposeState();
     if (this.seedTexture) this.gpu.gl.deleteTexture(this.seedTexture);
   }
 
-  private bindCommon(program: ShaderProgram, params: ParamValues, seed: number): ShaderProgram {
+  private disposeState(): void {
+    this.state?.dispose();
+    this.state2?.dispose();
+    this.state = null;
+    this.state2 = null;
+    for (const fbo of this.mrt.values()) this.gpu.gl.deleteFramebuffer(fbo);
+    this.mrt.clear();
+  }
+
+  private swap(): void {
+    this.state?.swap();
+    this.state2?.swap();
+  }
+
+  /** Binds the write side: one target, or both states at once (two color attachments). */
+  private bindWrite(): void {
+    const { gpu, state, state2 } = this;
+    if (!state) return;
+    if (!state2) {
+      gpu.bindTarget(state.write);
+      return;
+    }
+    const { gl } = gpu;
+    let fbo = this.mrt.get(state.write);
+    if (!fbo) {
+      fbo = gl.createFramebuffer();
+      if (!fbo) throw new Error('Failed to create framebuffer');
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0,
+        gl.TEXTURE_2D,
+        state.write.texture,
+        0,
+      );
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT1,
+        gl.TEXTURE_2D,
+        state2.write.texture,
+        0,
+      );
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      this.mrt.set(state.write, fbo);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.viewport(0, 0, state.width, state.height);
+  }
+
+  private bindCommon(
+    program: ShaderProgram,
+    params: ParamValues,
+    seed: number,
+    seeding = false,
+  ): ShaderProgram {
     const brush = this.pointer;
     program.use();
+    // Every declared sampler must be bound (blank while seeding: no previous state).
+    if (this.state2)
+      program.texture(
+        'u_state2',
+        seeding ? this.gpu.blankTexture : this.state2.read.texture,
+        this.state2Unit,
+      );
     // Units 0 (state) and 1 (seed texture) are bound by the callers; inputs follow.
     (this.spec.inputs ?? []).forEach((input, i) => {
       const texture = this.inputs[input.key] ?? null;

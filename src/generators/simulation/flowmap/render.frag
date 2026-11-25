@@ -1,11 +1,11 @@
-// Flowmap display: the encoded map (what gets exported) and/or a live preview of the flow
-// applied to a test pattern, side by side around a draggable split.
+// Flowmap Painter display. The node's OUTPUT is either the encoded flowmap (RG) or the
+// Image input moving along the flow (RGBA). The PREVIEW (display only: the app renders the
+// output with u_preview and u_arrows off for linked nodes and exports) shows the flow applied
+// to the Image input, or to a test pattern while unconnected, beside the output. Without
+// the preview, direction arrows can be drawn over the output (display only too).
 //
-// Preview = classic two-phase flowmap (Vlachos 2010): two copies of the pattern are advected
-// along the flow with phases half a cycle apart; each copy is faded out exactly when its
-// distortion resets (weight 0 at phase 0/1), so the loop never pops. A low-frequency per-pixel
-// phase offset hides the global "breathing", and each cycle jumps the pattern to a new offset
-// so the repetition is not obvious.
+// Flowing = classic two-phase flowmap (Vlachos 2010): two copies advected with phases half a
+// cycle apart, each faded out exactly when its distortion resets, so the loop never pops.
 
 const vec3 WATER_DEEP = vec3(0.04, 0.2, 0.3);
 const vec3 WATER_SHALLOW = vec3(0.12, 0.48, 0.58);
@@ -81,44 +81,65 @@ float arrows(vec2 uv) {
   return 1.0 - smoothstep(-aa, aa, d);
 }
 
-vec3 flowmapView(vec2 uv, vec2 f) {
-  vec3 c = encoded(f);
-  if (u_arrows) {
-    float a = arrows(uv);
-    c = mix(c, vec3(0.04), arrows(uv + vec2(0.0, 0.06 / float(u_arrowDensity))) * 0.6);
-    c = mix(c, vec3(1.0), a * 0.9);
-  }
-  return c;
-}
-
-vec3 previewView(vec2 uv, vec2 f) {
+// Phases of the two-phase flow at uv (a low-frequency offset hides the global breathing).
+vec3 phases(vec2 uv) {
   float steps = float(max(u_stepsPerFrame, 1));
   float jitter = 0.5 + 0.5 * gradientNoise(uv * 3.0, vec2(3.0), 0.0);
   float t = u_frame / (60.0 * steps) * u_flowSpeed + jitter * 0.5;
+  return vec3(fract(t), fract(t + 0.5), t);
+}
+
+// The Image input moving along the flow (transparent while unconnected).
+vec4 flowingInput(vec2 uv, vec2 f) {
+  if (!u_has_image) return vec4(0.0);
+  vec3 p = phases(uv);
   vec2 flow = f * u_flowStrength * 0.12;
+  float w0 = 1.0 - abs(1.0 - 2.0 * p.x);
+  vec4 a = texture(u_in_image, fract(uv - flow * (p.x - 0.5)));
+  vec4 b = texture(u_in_image, fract(uv - flow * (p.y - 0.5)));
+  return mix(b, a, w0);
+}
 
-  float p0 = fract(t);
-  float p1 = fract(t + 0.5);
-  float w0 = 1.0 - abs(1.0 - 2.0 * p0); // 0 when phase 0 resets, 1 half way
-  // Per-cycle "UV jump" so successive cycles don't show the same pattern position.
-  vec2 jump0 = floor(t) * vec2(0.213, 0.137);
-  vec2 jump1 = floor(t + 0.5) * vec2(0.213, 0.137) + 0.5;
-  vec3 a = pattern(uv - flow * (p0 - 0.5) + jump0);
-  vec3 b = pattern(uv - flow * (p1 - 0.5) + jump1);
-
+// Preview texture: the Image input if connected, else the test pattern (with a per-cycle
+// jump so successive cycles don't repeat the same pattern position).
+vec4 previewView(vec2 uv, vec2 f) {
+  if (u_has_image) return flowingInput(uv, f);
+  vec3 p = phases(uv);
+  vec2 flow = f * u_flowStrength * 0.12;
+  float w0 = 1.0 - abs(1.0 - 2.0 * p.x);
+  vec2 jump0 = floor(p.z) * vec2(0.213, 0.137);
+  vec2 jump1 = floor(p.z + 0.5) * vec2(0.213, 0.137) + 0.5;
+  vec3 a = pattern(uv - flow * (p.x - 0.5) + jump0);
+  vec3 b = pattern(uv - flow * (p.y - 0.5) + jump1);
   if (u_previewPattern <= 1) {
     // Blend normals (not colors) to keep the relief sharp, then shade or display.
     vec3 n = normalize(mix(b * 2.0 - 1.0, a * 2.0 - 1.0, w0));
-    return u_previewPattern == 0 ? shadeWater(n) : n * 0.5 + 0.5;
+    return vec4(u_previewPattern == 0 ? shadeWater(n) : n * 0.5 + 0.5, 1.0);
   }
-  return mix(b, a, w0);
+  return vec4(mix(b, a, w0), 1.0);
+}
+
+// What the node passes on.
+vec4 outputImage(vec2 uv, vec2 f) {
+  return u_output == 0 ? vec4(encoded(f), 1.0) : flowingInput(uv, f);
+}
+
+// Direction arrows drawn over a display image (with a soft shadow).
+vec4 withArrows(vec4 c, vec2 uv) {
+  if (!u_arrows) return c;
+  float shadow = arrows(uv + vec2(0.0, 0.06 / float(u_arrowDensity)));
+  float a = arrows(uv);
+  vec3 rgb = mix(mix(c.rgb, vec3(0.04), shadow * 0.6), vec3(1.0), a * 0.9);
+  return vec4(rgb, max(c.a, max(a, shadow * 0.6)));
 }
 
 void main() {
   vec2 f = sampleState(v_uv).rg;
-  vec3 c;
-  if (!u_preview) c = flowmapView(v_uv, f);
-  else if (u_previewLayout == 1) c = previewView(v_uv, f);
-  else c = v_uv.x < u_splitPos ? flowmapView(v_uv, f) : previewView(v_uv, f);
-  outColor = vec4(c, 1.0);
+  if (!u_preview) {
+    // The output, with the direction arrows over it (display only).
+    outColor = withArrows(outputImage(v_uv, f), v_uv);
+    return;
+  }
+  bool full = u_previewLayout == 1;
+  outColor = full || v_uv.x >= u_splitPos ? previewView(v_uv, f) : outputImage(v_uv, f);
 }

@@ -81,6 +81,11 @@ interface GeneratorBase {
   readonly groups?: readonly ParamGroupInfo[];
   /** Parameter values forced when exporting (e.g. hide an editing-only preview). */
   readonly exportOverrides?: ParamValues;
+  /**
+   * Values forced on the image the node passes on (linked nodes, exports, thumbnails, 3D
+   * preview): display-only settings (preview overlays, arrows) then show on its card only.
+   */
+  readonly outputOverrides?: ParamValues;
   /** Draggable split handle in the viewport. */
   readonly split?: ViewportSplit;
   /** Preset shown in the browser thumbnail (its most characteristic look). */

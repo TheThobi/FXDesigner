@@ -110,19 +110,23 @@ Priorités indicatives. Cocher au fil de l'eau.
       la height map, ou sprite additif ; répétitions, orbite) ; export **GIF** (encodeur maison,
       palette commune, boucle infinie) ; simulation **Differential Growth** ; entrée
       **Obstacles** pour Ink Fluid et Smoke & Fire.
-
-## Simulations candidates
-
-- [ ] Fluide : encres de plusieurs couleurs (RGB). Demande un second état par cellule (render
-      targets multiples dans `GridSimulation`).
-
-## Moyen terme
-
-- [ ] Node **Material Output** (entrées Color / Normal / Height / Roughness) que le panneau 3D
-      afficherait en priorité, pour composer un matériau depuis plusieurs branches.
+- [x] Node **Material Output** (Color / Normal / Height / Roughness) affichée en priorité par
+      le panneau 3D ; **encres RGB** dans Ink Fluid (second état par cellule : render targets
+      multiples dans `GridSimulation`) ; communauté : **signalements et modération** (motifs,
+      masquage automatique, file des modérateurs).
+- [x] **Motion vectors** pour tout flipbook (flux optique) ; **cadres de commentaires** dans le
+      graphe (touche `C`) ; node **Trim Sheet** (nodes branchées empilées en bandes raccordables).
+- [x] Opérateurs **Tile Sampler**, **Flood Fill**, **Make It Tile**, **Radial Blur**, **Polar
+      Coordinates**, **Curvature & Occlusion**, **Height Blend**, **Glow** ;
+      simulations **Burning Paper** et **Crack Growth** ; opérateurs classés par fréquence
+      d'usage ; pas de presets sur les nodes de plomberie (Output, Pack, Uniform…).
+- [x] Nodes **Flood Fill to Gradient / Size / Color** et **Flood Fill Mapper** (sortie Data du
+      Flood Fill : boîte de chaque îlot) ; **Tile Sampler animé** (dérive, rotation, oscillation,
+      pulsation, scintillement, apparition / disparition, en boucle) ; **Flowmap Painter** avec
+      entrée Image (sortie flowmap ou image qui coule) et sorties RG / R / G.
 
 ## Long terme
 
-- [ ] Communauté, étapes suivantes : nodes de shaders custom different des systems actuels, signalements, modération
-      (voir [community.md](community.md)).
+- [ ] Communauté : partage de **nodes** de shaders custom (paquets réutilisables comme des
+      générateurs, distincts des systèmes) ; voir [community.md](community.md).
 - [ ] WebGPU (compute shaders) si les simulations deviennent limitantes.

@@ -51,8 +51,16 @@ export class Router {
     this.routes.push({ method, pattern, keys, handler });
   }
 
+  /**
+   * Literal paths win over parameterized ones (`/api/community/reports` before
+   * `/api/community/:id`), whatever the registration order.
+   */
   match(method: string, path: string): { handler: Handler; params: Record<string, string> } | null {
-    for (const r of this.routes) {
+    const ordered = [
+      ...this.routes.filter((r) => r.keys.length === 0),
+      ...this.routes.filter((r) => r.keys.length > 0),
+    ];
+    for (const r of ordered) {
       if (r.method !== method) continue;
       const m = r.pattern.exec(path);
       if (!m) continue;

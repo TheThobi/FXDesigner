@@ -64,7 +64,7 @@ export function uniformDeclarations(defs: readonly ParamDef[]): string {
 /**
  * Generator-specific node inputs: `u_in_<key>` (the connected node's output, a blank texture
  * when nothing is connected) and `u_has_<key>`. Shader operators can inspect
- * `u_channel_<key>` (-1 for RGBA, 0–3 for a scalar channel, 4 for RGB).
+ * `u_channel_<key>` (-1 for RGBA, 0–3 for a scalar channel, 4 for RGB, 5 for RG).
  */
 export function inputDeclarations(inputs: readonly NodeInputDef[]): string {
   return inputs
@@ -115,11 +115,19 @@ export function buildSimulationShader(
   label: string,
   inputs: readonly NodeInputDef[] = [],
   openBoundaries = false,
+  /** A second state texture (u_state2), written by every step pass to outColor2. */
+  extraState = false,
 ): string {
+  const outputs = extraState
+    ? `layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outColor2;
+uniform sampler2D u_state2;
+#define SIM_EXTRA_STATE`
+    : 'out vec4 outColor;';
   return `${SHADER_HEADER}
 
 in vec2 v_uv;
-out vec4 outColor;
+${outputs}
 
 uniform sampler2D u_state;
 uniform sampler2D u_seedTexture;

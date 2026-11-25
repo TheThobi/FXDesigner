@@ -22,7 +22,9 @@ import {
   sanitizeCustomParams,
   nearestResolution,
   postDefaults,
+  sanitizeFrames,
   type EditorState,
+  type GraphFrame,
   type GraphLink,
   type GraphNode,
 } from './state';
@@ -37,6 +39,8 @@ export interface TextureDocument {
   readonly version: typeof DOCUMENT_VERSION;
   readonly nodes: readonly GraphNode[];
   readonly links: readonly GraphLink[];
+  /** Comment frames (optional: older documents have none). */
+  readonly frames?: readonly GraphFrame[];
   /** Selected node (shown in the Details panel, exported). */
   readonly selected: string;
   readonly resolution: number;
@@ -61,6 +65,7 @@ export function documentFromState(state: EditorState, lookup: GeneratorLookup): 
     // Re-validated so values saved before a schema change (new param) are completed.
     nodes: state.nodes.map((n) => sanitizeNode(n, lookup)).filter((n) => n !== null),
     links: state.links,
+    ...(state.frames?.length ? { frames: state.frames } : {}),
     selected: state.selectedId,
     resolution: state.resolution,
     seed: state.seed,
@@ -73,6 +78,7 @@ export function applyDocument(doc: TextureDocument): EditorState {
   return {
     nodes: doc.nodes,
     links: doc.links,
+    frames: doc.frames ?? [],
     selectedId: doc.selected,
     resolution: doc.resolution,
     seed: doc.seed,
@@ -456,11 +462,13 @@ export function parseDocument(raw: unknown, lookup: GeneratorLookup): TextureDoc
     typeof data.selected === 'string' && nodes.some((n) => n.id === data.selected)
       ? data.selected
       : nodes[0]!.id;
+  const frames = sanitizeFrames(data.frames);
   return {
     format: DOCUMENT_FORMAT,
     version: DOCUMENT_VERSION,
     nodes,
     links,
+    ...(frames.length ? { frames } : {}),
     selected,
     resolution: nearestResolution(finite(data.resolution, 512)),
     seed: clamp(Math.round(finite(data.seed, 0)), 0, MAX_SEED),
