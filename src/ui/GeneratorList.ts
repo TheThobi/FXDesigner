@@ -289,14 +289,17 @@ export class GeneratorList {
         ),
       );
       const nested = family.sections.length > 1;
-      for (const { category, generators } of family.sections) {
+      for (const { category, label, generators } of family.sections) {
         const grid = h('div', { class: 'tile-grid' }, ...generators.map((g) => this.item(g)));
         section.append(
           nested
             ? h(
                 'div',
                 { class: `generator-subcategory cat-${category}`, 'data-category': category },
-                h('div', { class: 'subcategory-title', text: CATEGORY_LABELS[category] }),
+                h('div', {
+                  class: 'subcategory-title',
+                  text: label ?? CATEGORY_LABELS[category],
+                }),
                 grid,
               )
             : grid,
@@ -478,6 +481,9 @@ const OPERATOR_GLYPHS: Readonly<Record<string, string>> = {
   'op-slope-blur': '⥂',
   'op-distance': '◎',
   'op-dilate': '⬚',
+  'op-mirror': '⧓',
+  'op-histogram-scan': '◑',
+  'op-variable-blur': '◌',
   'op-edges': '⬚',
   'op-unpack': 'R G B',
   'op-pack': 'RGBA',

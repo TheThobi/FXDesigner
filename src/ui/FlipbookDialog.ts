@@ -17,6 +17,11 @@ export interface FlipbookOptions {
   readonly restart: boolean;
   /** Also bake a motion vector sheet (optical flow from each frame to the next). */
   readonly motionVectors: boolean;
+  /**
+   * Dilate (padding) of each frame, in px (0 = off): colors spread under the transparent
+   * pixels so mipmaps of alpha-cutout sprites don't bleed dark edges.
+   */
+  readonly padding: number;
 }
 
 /** Simulation frames per second of warm-up (one step per displayed frame at 60 Hz). */
@@ -31,6 +36,7 @@ const DEFAULTS: FlipbookOptions = {
   startTime: 0,
   restart: true,
   motionVectors: false,
+  padding: 0,
 };
 
 /**
@@ -82,6 +88,22 @@ export function askFlipbookOptions(
       checked: initial.motionVectors,
       title: 'A second sheet of motion vectors, for smooth frame blending in game engines',
     });
+    const padding = h(
+      'select',
+      {
+        name: 'padding',
+        title:
+          'Spreads the colors under the transparent pixels of each frame (alpha unchanged): ' +
+          'no dark or stray edges in the mipmaps of alpha-cutout sprites',
+      },
+      ...[0, 2, 4, 8, 16, 32].map((px) =>
+        h('option', {
+          value: String(px),
+          text: px ? `${px}px` : 'Off',
+          selected: px === initial.padding,
+        }),
+      ),
+    );
     const info = h('p', { class: 'dialog-info' });
 
     const field = (label: string, input: HTMLElement) =>
@@ -100,6 +122,7 @@ export function askFlipbookOptions(
           : field('Duration (s) — loop length for a looping sheet', duration),
       isSimulation ? field('Restart simulation first', restart) : null,
       variations ? null : field('Motion vectors sheet', motion),
+      field('Dilate (mip-safe padding)', padding),
       variations
         ? field('Time (s)', start)
         : field(isSimulation ? 'Warm-up before capture (s)' : 'Start at (s)', start),
@@ -128,6 +151,7 @@ export function askFlipbookOptions(
       startTime: Math.max(0, Number(start.value) || 0),
       restart: restart.checked,
       motionVectors: !variations && motion.checked,
+      padding: Number(padding.value),
     });
     const refresh = () => {
       const o = read();

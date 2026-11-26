@@ -74,7 +74,7 @@ import {
 import { openQuickAdd } from '../ui/QuickAddMenu';
 import { openContextMenu, type ContextMenuEntry } from '../ui/ContextMenu';
 import { openAbout } from '../ui/AboutDialog';
-import { openCommunity, type CommunityOpenOptions } from '../ui/CommunityDialog';
+import type { CommunityOpenOptions } from '../ui/CommunityDialog';
 import { Community, type CommunitySystem } from './community';
 import { CommunitySync } from './communitySync';
 import {
@@ -97,7 +97,7 @@ import { clamp } from '../util/math';
 import { MAX_SEED, randomSeed } from '../util/random';
 import { createZip } from '../util/zip';
 import { shaderReference } from '../engine/shaderBuilder';
-import { readStorage, writeStorage } from '../util/storage';
+import { onStorageFailure, readStorage, writeStorage } from '../util/storage';
 import {
   applyDocument,
   documentFromState,
@@ -168,6 +168,7 @@ import {
   type EditorState,
   type GraphLink,
   type GraphNode,
+  type NodeOrigin,
   type GraphFrame,
   FRAME_COLORS,
   FRAME_FONT_SIZES,
@@ -246,6 +247,14 @@ interface NodeCache {
   simFrames: number;
   /** Bumped when the simulation state changes (step, reset, rewind). */
   simVersion: number;
+}
+
+/** The Community window's code, split from the main bundle. */
+const loadCommunityDialog = () => import('../ui/CommunityDialog');
+
+/** Where a node added from a community node comes from. */
+function originOf(n: { id: string; version: number; name: string; author: string }): NodeOrigin {
+  return { id: n.id, version: n.version, name: n.name.slice(0, 64), author: n.author.slice(0, 32) };
 }
 
 function errorMessage(e: unknown): string {
@@ -433,6 +442,7 @@ export class App {
           this.codeBtn,
         ),
         this.inspectorDescription,
+        this.originInfo,
       ),
       this.codePanel.element,
       paramsEl,
@@ -656,6 +666,7 @@ export class App {
     };
     this.installedNodes.onChange = () => {
       this.refreshCommunityTiles();
+      this.renderOrigin();
       this.communitySync.schedule();
     };
     this.nodeLinks.onChange = () => this.communitySync.schedule();
@@ -669,7 +680,31 @@ export class App {
       for (const id of this.generatorList.visibleIds()) this.requestThumbnail(id);
     });
     this.showAuthError();
+    this.warnOnStorageFailure();
     void this.cloud.init();
+  }
+
+  /**
+   * The browser refused a save (its storage for this site is full, about 5 MB): say so, at
+   * most once a minute, instead of losing work silently.
+   */
+  private warnOnStorageFailure(): void {
+    let last = 0;
+    onStorageFailure((key) => {
+      const now = Date.now();
+      if (now - last < 60_000) return;
+      last = now;
+      const library = key.startsWith('ptm.library');
+      toast(
+        library
+          ? 'Saving failed: the browser storage is full. Download your library (File → Save ' +
+              'library…), then delete systems you no longer need.'
+          : 'A setting could not be saved: the browser storage is full.',
+        'error',
+        12_000,
+        library ? { label: 'Save library…', run: () => this.saveLibraryFile() } : undefined,
+      );
+    });
   }
 
   // ---- Account ------------------------------------------------------------------------------
@@ -990,8 +1025,14 @@ export class App {
   }
 
   /** Adds a copy of a community node (its code, parameters and look) to the graph. */
-  private addPackagedNode(node: GraphNode, at?: [number, number], name?: string): void {
+  private addPackagedNode(
+    node: GraphNode,
+    at?: [number, number],
+    name?: string,
+    origin?: NodeOrigin,
+  ): void {
     if (name && !node.name) node = { ...node, name: name.slice(0, MAX_NODE_NAME) };
+    if (origin) node = { ...node, origin };
     const [x, y] = at ?? this.viewport.placementNear(this.state.selectedId);
     this.commit(withAddedNode(this.state, { ...node, id: newNodeId(this.state.nodes), x, y }));
   }
@@ -1108,6 +1149,7 @@ export class App {
             nodeFromPackage(system.document, getGenerator),
             undefined,
             system.name,
+            originOf(system),
           );
           return true;
         } catch (e) {
@@ -1300,101 +1342,113 @@ export class App {
       return doc;
     };
     const community = this.community;
-    openCommunity(
-      {
-        community,
-        signedIn: () => this.cloud.user !== null,
-        signIn: () => this.account?.signIn(),
-        current: () => this.currentSystem(systemId, state()),
-        preview: (interactive, framing) =>
-          this.communityPreview(interactive, framing, state(), savedState !== undefined),
-        publishCurrent: async (fields, preview, animated) => {
-          const doc = document();
-          const r = await community.publish(fields, doc, this.mediaOf(preview, animated));
-          this.linkSystem(systemId, r.id, r.version, doc, preview.framing);
-          return r.id;
-        },
-        publishUpdate: async (preview, id, animated) => {
-          const target = id ?? this.library.get(systemId)?.published?.id;
-          if (!target) throw new Error('This system is not published');
-          const doc = document();
-          const version = await community.update(target, {}, doc, this.mediaOf(preview, animated));
-          this.linkSystem(systemId, target, version, doc, preview.framing);
-          return version;
-        },
-        canAnimate: (item) => {
-          try {
-            return this.animatedExport(applyDocument(parseDocument(item.document, getGenerator)));
-          } catch {
-            return item.animated;
-          }
-        },
-        editPublishedPreview: async (item, framing) => {
-          const state = applyDocument(parseDocument(item.document, getGenerator));
-          const previous = this.library.findPublished(item.id)?.published?.framing;
-          return openPreviewStudio(
-            await this.detachedPreviewSource(state),
-            framing ?? previous ?? DEFAULT_FRAMING,
-          );
-        },
-        editPublication: async (item, fields, animated, editedPreview) => {
-          if (editedPreview) {
-            await community.update(
-              item.id,
-              fields,
-              undefined,
-              this.mediaOf(editedPreview, animated),
-            );
-            const entry = this.library.findPublished(item.id);
-            if (entry?.published && entry.published.version === item.version)
-              this.library.setPublished(entry.id, {
-                ...entry.published,
-                framing: editedPreview.framing,
-              });
-          } else if (animated === item.animated) {
-            await community.update(item.id, fields);
-          } else if (!animated) {
-            await community.update(item.id, fields, undefined, {
-              animated: false,
-              preview: null,
-              previewFrames: 0,
-            });
-          } else {
-            const state = applyDocument(parseDocument(item.document, getGenerator));
-            const framing = this.library.findPublished(item.id)?.published?.framing;
-            const preview = composePreview(
-              await this.detachedPreviewSource(state),
-              framing ?? DEFAULT_FRAMING,
-            );
-            await community.update(item.id, fields, undefined, {
-              animated: true,
-              preview: preview.preview,
-              previewFrames: preview.previewFrames,
-            });
-          }
-        },
-        forget: (id) => {
-          this.forgetPublication(id);
-          this.nodeLinks.forget(id);
-        },
-        nodes: this.communityNodeActions(systemId),
-        closed: () => this.refreshCommunityTiles(),
-        copyToLibrary: (system) => {
-          try {
-            const doc = parseDocument(system.document, getGenerator);
-            this.saveSystem(true);
-            const entry = this.library.create(
-              system.name,
-              documentFromState(applyDocument(doc), getGenerator),
-            );
-            this.switchSystem(entry.id, false);
-          } catch (e) {
-            toast(`Cannot open this system: ${errorMessage(e)}`, 'error');
-          }
-        },
-      },
-      { ...opts, libraryPublish: savedState !== undefined },
-    );
+    // Loaded on first use (it needs the network anyway: no offline cost).
+    void loadCommunityDialog()
+      .then(({ openCommunity }) =>
+        openCommunity(
+          {
+            community,
+            signedIn: () => this.cloud.user !== null,
+            signIn: () => this.account?.signIn(),
+            current: () => this.currentSystem(systemId, state()),
+            preview: (interactive, framing) =>
+              this.communityPreview(interactive, framing, state(), savedState !== undefined),
+            publishCurrent: async (fields, preview, animated) => {
+              const doc = document();
+              const r = await community.publish(fields, doc, this.mediaOf(preview, animated));
+              this.linkSystem(systemId, r.id, r.version, doc, preview.framing);
+              return r.id;
+            },
+            publishUpdate: async (preview, id, animated) => {
+              const target = id ?? this.library.get(systemId)?.published?.id;
+              if (!target) throw new Error('This system is not published');
+              const doc = document();
+              const version = await community.update(
+                target,
+                {},
+                doc,
+                this.mediaOf(preview, animated),
+              );
+              this.linkSystem(systemId, target, version, doc, preview.framing);
+              return version;
+            },
+            canAnimate: (item) => {
+              try {
+                return this.animatedExport(
+                  applyDocument(parseDocument(item.document, getGenerator)),
+                );
+              } catch {
+                return item.animated;
+              }
+            },
+            editPublishedPreview: async (item, framing) => {
+              const state = applyDocument(parseDocument(item.document, getGenerator));
+              const previous = this.library.findPublished(item.id)?.published?.framing;
+              return openPreviewStudio(
+                await this.detachedPreviewSource(state),
+                framing ?? previous ?? DEFAULT_FRAMING,
+              );
+            },
+            editPublication: async (item, fields, animated, editedPreview) => {
+              if (editedPreview) {
+                await community.update(
+                  item.id,
+                  fields,
+                  undefined,
+                  this.mediaOf(editedPreview, animated),
+                );
+                const entry = this.library.findPublished(item.id);
+                if (entry?.published && entry.published.version === item.version)
+                  this.library.setPublished(entry.id, {
+                    ...entry.published,
+                    framing: editedPreview.framing,
+                  });
+              } else if (animated === item.animated) {
+                await community.update(item.id, fields);
+              } else if (!animated) {
+                await community.update(item.id, fields, undefined, {
+                  animated: false,
+                  preview: null,
+                  previewFrames: 0,
+                });
+              } else {
+                const state = applyDocument(parseDocument(item.document, getGenerator));
+                const framing = this.library.findPublished(item.id)?.published?.framing;
+                const preview = composePreview(
+                  await this.detachedPreviewSource(state),
+                  framing ?? DEFAULT_FRAMING,
+                );
+                await community.update(item.id, fields, undefined, {
+                  animated: true,
+                  preview: preview.preview,
+                  previewFrames: preview.previewFrames,
+                });
+              }
+            },
+            forget: (id) => {
+              this.forgetPublication(id);
+              this.nodeLinks.forget(id);
+            },
+            nodes: this.communityNodeActions(systemId),
+            closed: () => this.refreshCommunityTiles(),
+            copyToLibrary: (system) => {
+              try {
+                const doc = parseDocument(system.document, getGenerator);
+                this.saveSystem(true);
+                const entry = this.library.create(
+                  system.name,
+                  documentFromState(applyDocument(doc), getGenerator),
+                );
+                this.switchSystem(entry.id, false);
+              } catch (e) {
+                toast(`Cannot open this system: ${errorMessage(e)}`, 'error');
+              }
+            },
+          },
+          { ...opts, libraryPublish: savedState !== undefined },
+        ),
+      )
+      .catch((e: unknown) => toast(`Cannot open the community: ${errorMessage(e)}`, 'error'));
   }
 
   private async renameSystem(id: string): Promise<void> {
@@ -1944,7 +1998,7 @@ export class App {
     const installed = this.installedNodes.byTileId(generatorId);
     if (installed) {
       const node = this.communityNode(installed);
-      if (node) this.addPackagedNode(node, at, installed.name);
+      if (node) this.addPackagedNode(node, at, installed.name, originOf(installed));
       return;
     }
     const def = getGenerator(generatorId);
@@ -2173,7 +2227,12 @@ export class App {
     const installed = this.installedNodes.byTileId(id);
     if (installed) {
       const node = this.communityNode(installed);
-      if (node) this.replaceWithPackagedNode({ ...node, name: node.name ?? installed.name });
+      if (node)
+        this.replaceWithPackagedNode({
+          ...node,
+          name: node.name ?? installed.name,
+          origin: originOf(installed),
+        });
       return;
     }
     const def = getGenerator(id);
@@ -4125,6 +4184,88 @@ export class App {
     const def = this.generator;
     this.inspectorTitle.textContent = node.name ?? def.name;
     this.inspectorTitle.title = node.name ? `${node.name} (${def.name})` : '';
+    this.renderOrigin();
+  }
+
+  /** "From the community" line of a node added from a community node, with its update. */
+  private readonly originInfo = h('div', { class: 'node-origin', hidden: true });
+
+  private renderOrigin(): void {
+    const origin = this.state.selectedId ? this.node.origin : undefined;
+    this.originInfo.hidden = !origin;
+    if (!origin) {
+      this.originInfo.replaceChildren();
+      return;
+    }
+    const newer = this.newerOrigin(origin);
+    this.originInfo.replaceChildren(
+      h('span', {
+        text: `Community node "${origin.name}"${origin.author ? ` by ${origin.author}` : ''} · v${origin.version}`,
+      }),
+      h('button', {
+        type: 'button',
+        class: 'btn btn-small',
+        text: 'Page',
+        title: 'Open its community page',
+        onclick: () => this.openCommunity({ view: origin.id }),
+      }),
+      ...(newer
+        ? [
+            h('button', {
+              type: 'button',
+              class: 'btn btn-small btn-primary',
+              text: `Update to v${newer.version}`,
+              title:
+                'Takes the code and parameters of the new version; your parameter values and ' +
+                'look are kept',
+              onclick: () => this.updateFromOrigin(this.node.id, newer),
+            }),
+          ]
+        : []),
+    );
+  }
+
+  /** The installed version of a node's community origin, when it is newer. */
+  private newerOrigin(origin: NodeOrigin): InstalledNode | null {
+    const installed = this.installedNodes.get(origin.id);
+    return installed && installed.version > origin.version ? installed : null;
+  }
+
+  /**
+   * Brings node `id` to the installed version of its community node: new code, custom and
+   * edited parameters; the user's parameter values (still existing ones), look and name stay.
+   */
+  private updateFromOrigin(id: string, installed: InstalledNode): void {
+    const node = nodeById(this.state, id);
+    const fresh = this.communityNode(installed);
+    const def = fresh ? getGenerator(fresh.generator) : undefined;
+    if (!node || !fresh || !def) return;
+    const { code: _c, customParams: _p, baseParamEdits: _e, ...rest } = node;
+    const effective = effectiveGenerator(def, fresh);
+    const keys = new Set(effective.params.map((p) => p.key));
+    const params = { ...fresh.params };
+    for (const [key, value] of Object.entries(node.params)) if (keys.has(key)) params[key] = value;
+    const updated: GraphNode = {
+      ...rest,
+      generator: fresh.generator,
+      params,
+      ...(fresh.code !== undefined ? { code: fresh.code } : {}),
+      ...(fresh.customParams ? { customParams: fresh.customParams } : {}),
+      ...(fresh.baseParamEdits ? { baseParamEdits: fresh.baseParamEdits } : {}),
+      origin: { ...originOf(installed) },
+    };
+    this.commit({
+      ...this.state,
+      nodes: this.state.nodes.map((n) => (n.id === id ? updated : n)),
+      links:
+        fresh.generator === node.generator
+          ? this.state.links
+          : this.state.links.filter(
+              (l) => l.to !== id || inputsOf(def).some((i) => i.key === l.input),
+            ),
+    });
+    this.syncPanels();
+    toast(`Updated to v${installed.version}`);
   }
 
   /**

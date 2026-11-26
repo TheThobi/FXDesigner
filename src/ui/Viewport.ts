@@ -1112,6 +1112,7 @@ export class Viewport {
               {
                 class: 'pin in',
                 'data-input': input.key,
+                'data-value': input.value ?? 'vec4',
                 title: `${input.label} (${VALUE_LABELS[input.value ?? 'vec4']}): ${input.description}`,
               },
               h('span', { class: 'pin-dot' }),
@@ -1137,6 +1138,7 @@ export class Viewport {
         {
           class: `pin out${output.extra ? ' extra' : ''}`,
           'data-output': output.key ?? '',
+          'data-value': output.type,
           title: `${output.label || 'Output'} (${VALUE_LABELS[output.type]}): ${output.description} Drag onto another node’s input.`,
         },
         h('span', { class: 'pin-dot' }),

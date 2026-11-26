@@ -136,6 +136,14 @@ Priorités indicatives. Cocher au fil de l'eau.
       3D Preview ouverte sous Details ; lien **GitHub** et fenêtre **About** (section IA,
       contributions) ; `prefers-reduced-motion` ne coupe plus que le mouvement (le retour
       visuel reste).
+- [x] Opérateurs **Mirror / Symmetry**, **Histogram Scan**, **Non-uniform Blur** ; post
+      **Sharpen**, **Chromatic aberration**, **Vignette** ; option **Dilate** à l'export des
+      flipbooks ; Details : « Community node … · **Update to vN** » sur une node ajoutée depuis
+      la communauté, « Based on » sur la page d'une node dérivée ; pins lisibles sans la
+      couleur (1, 2, 3 points = float, vec2, RGB) ; message quand une sauvegarde échoue
+      (stockage plein) ; fenêtre Community chargée à la demande ; opérateurs rangés par
+      usage dans le navigateur (Blend & mask, Adjust, Transform & tiling, Blur & glow, Edges &
+      distance, Flood fill, Channels & graph, Animation).
 - [x] Nodes installées et liens « cette node est ma publication » **synchronisés avec le
       compte** (fusion par entrée, comme la bibliothèque) : un autre appareil met à jour la
       même publication au lieu d'en créer une en double ; Caustics des effets renommées
@@ -158,30 +166,19 @@ Taille indicative : **S** (une soirée), **M** (quelques jours), **L** (chantier
 
 ### Nodes
 
-- [ ] **M** Opérateurs : **Mirror / Symmetry** (miroir en X, Y, quadrants ou secteurs d'une
-      image branchée), **Histogram Scan** (seuil doux à position et contraste animables),
-      **Non-uniform Blur** (rayon de flou piloté par un masque).
 - [ ] **M** Générateurs : muzzle flash, bokeh / champ d'étoiles.
 - [ ] **L** Simulations : équation d'onde (ondulations interactives), sable tombant
       (automate), liquide SPH 2D.
 
 ### Post Process
 
-- [ ] **S** Aberration chromatique, vignette, netteté (sharpen).
 - [ ] **M** Étalonnage par **LUT** (`.cube` importé) et courbes RVB.
 - [ ] **M** Distorsion de chaleur (déplacement par bruit animé, en boucle).
 
-### Export
-
-- [ ] **S** Option **Dilate** à l'export des flipbooks / atlas (même traitement que la node,
-      appliqué à chaque case).
-
 ### Communauté
 
-- [ ] **M** « Basé sur » : une node ou un système dérivé d'une publication garde l'attribution
-      (lien vers l'original, auteur).
-- [ ] **M** Dans Details, « Update this node to vN » sur une node ajoutée depuis la communauté
-      quand une version plus récente est installée.
+- [ ] **S** « Basé sur » pour les **systèmes** (les nodes l'ont : une node publiée depuis une
+      node communautaire affiche l'original).
 - [ ] **M** Import Shadertoy (adaptateur `mainImage`) pour un usage local : la licence par
       défaut de Shadertoy (CC BY-NC-SA) est incompatible avec la réutilisation libre de la
       communauté, un shader importé ne se publie donc que si son auteur l'autorise.
@@ -191,7 +188,6 @@ Taille indicative : **S** (une soirée), **M** (quelques jours), **L** (chantier
 
 - [ ] **S** Focus clavier visibles partout, libellés ARIA des curseurs et des pins.
 - [ ] **S** Échelle de l'interface (90 à 150 %) et thème à fort contraste.
-- [ ] **S** Liens et pins distinguables sans la couleur (motif ou forme par type de valeur).
 - [ ] **M** Graphe au clavier : Tab entre les nodes, flèches pour déplacer, Entrée pour
       ouvrir la recherche d'ajout ; aide des raccourcis (`?`).
 
@@ -199,7 +195,8 @@ Taille indicative : **S** (une soirée), **M** (quelques jours), **L** (chantier
 
 - [ ] **M** Bibliothèque locale en **IndexedDB** : la copie de travail de la bibliothèque (et
       la seule copie sans compte) est en localStorage, limité à ≈ 5 Mo par site ; au-delà, les
-      sauvegardes échouent sans bruit. Au minimum : avertir quand une sauvegarde échoue.
+      sauvegardes échouaient sans bruit (un message prévient désormais quand une sauvegarde
+      échoue).
 - [ ] **M** Garde-fou GPU : une node dont le temps de rendu explose est mise en pause avec un
       message, au lieu de figer l'onglet (important pour les nodes communautaires).
 - [ ] **M** Tests de régression visuelle (captures de la CI comparées à des références) et
@@ -207,14 +204,16 @@ Taille indicative : **S** (une soirée), **M** (quelques jours), **L** (chantier
 
 ### Fluidité
 
-- [ ] **S** Découpage du bundle (`import()` des fenêtres Community, Export, GIF, vidéo) : la
-      CI signale déjà des chunks de plus de 500 Ko.
 - [ ] **M** Nodes hors écran ou dézoomées rendues moins souvent / en plus petit (LOD des cartes).
 - [ ] **L** Rendu dans un Worker (`OffscreenCanvas`) : l'interface reste fluide pendant les
       simulations lourdes.
 
 ## Long terme
 
+- [ ] **Stockage Google Drive** (optionnel, pour qui veut plus d'espace) : relier un dossier
+      Drive de l'utilisateur pour y stocker la bibliothèque et ses contenus, et y piocher des
+      images (les images du dossier reconnues directement par la node Image). Réponse plus
+      large à la saturation du stockage local que l'IndexedDB seule.
 - [ ] **Système comme node** (sous-graphe / material function : entrées, sorties et
       paramètres exposés) ; prolongerait « Collapse into new system ». Gardé de côté.
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { OPERATOR_GROUPS } from '../../src/generators/operators';
 import { upgradeLegacyPost } from '../../src/engine/post/legacy';
 import { DEFAULT_RAMP, POST_PARAMS } from '../../src/engine/post/schema';
 import { GRADIENT_PRESETS, GRADIENTS } from '../../src/params/gradientPresets';
@@ -106,6 +107,15 @@ describe('generator browser', () => {
         .map((g) => g.id)
         .sort(),
     );
+  });
+});
+
+describe('operator sections', () => {
+  it('files every addable operator under a purpose (none left in Other)', () => {
+    const ops = generatorsByFamily().find((f) => f.id === 'operators')!;
+    expect(ops.sections.some((s) => s.label === 'Other')).toBe(false);
+    const known = new Set(GENERATORS.map((g) => g.id));
+    for (const id of OPERATOR_GROUPS.flatMap((g) => g.ids)) expect(known.has(id), id).toBe(true);
   });
 });
 

@@ -46,7 +46,7 @@ import { PARTICLES } from './particle';
 import { UNDERWORLD_GENERATORS } from './underworld';
 import { MORE_PATTERNS } from './pattern/more';
 import { MOTIF_PATTERNS } from './pattern/motifs';
-import { OPERATORS } from './operators';
+import { OPERATOR_GROUPS, OPERATORS } from './operators';
 
 /** All generators, in display order. Add new ones here. */
 export const GENERATORS: readonly GeneratorDefinition[] = [
@@ -121,23 +121,45 @@ export interface GeneratorFamilyGroup {
   readonly label: string;
   readonly sections: readonly {
     readonly category: GeneratorCategory;
+    /** Section title (default: the category's label). */
+    readonly label?: string;
     readonly generators: readonly GeneratorDefinition[];
   }[];
 }
 
 /** Generators grouped by family, then category (browser order); empty groups are omitted. */
+type FamilySection = GeneratorFamilyGroup['sections'][number];
+const OPERATOR_CATEGORY: GeneratorCategory = 'operator';
+
 export function generatorsByFamily(): GeneratorFamilyGroup[] {
   const byCategory = generatorsByCategory();
   return GENERATOR_FAMILIES.map((f) => ({
     id: f.id,
     label: f.label,
     sections: f.categories
-      .map((category) => ({
-        category,
-        generators: (byCategory.get(category) ?? []).filter((def) =>
+      .flatMap((category): FamilySection[] => {
+        const generators = (byCategory.get(category) ?? []).filter((def) =>
           ADDABLE_GENERATORS.includes(def),
-        ),
-      }))
+        );
+        return category === 'operator' ? operatorSections(generators) : [{ category, generators }];
+      })
       .filter((s) => s.generators.length > 0),
   })).filter((f) => f.sections.length > 0);
+}
+
+/** Operators split by purpose (OPERATOR_GROUPS); any operator left out goes to "Other". */
+function operatorSections(generators: readonly GeneratorDefinition[]): FamilySection[] {
+  const grouped = new Set(OPERATOR_GROUPS.flatMap((g) => g.ids));
+  return [
+    ...OPERATOR_GROUPS.map((g) => ({
+      category: OPERATOR_CATEGORY,
+      label: g.label,
+      generators: generators.filter((d) => g.ids.includes(d.id)),
+    })),
+    {
+      category: OPERATOR_CATEGORY,
+      label: 'Other',
+      generators: generators.filter((d) => !grouped.has(d.id)),
+    },
+  ];
 }

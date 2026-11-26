@@ -20,6 +20,10 @@ export default defineConfig(({ mode }) => {
     build: {
       target: 'es2022',
       sourcemap: true,
+      // The app is an offline PWA: generators (most of the weight, their GLSL) and every
+      // offline tool stay in the main bundle; only network-bound windows load on demand
+      // (Community). ~230 kB gzipped.
+      chunkSizeWarningLimit: 900,
     },
     test: {
       environment: 'node',

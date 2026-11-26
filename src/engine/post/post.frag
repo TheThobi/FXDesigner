@@ -1,5 +1,5 @@
 // Post-processing pass, applied to every generator. Per evaluation point:
-//   source -> levels -> posterize/dither -> halftone -> color ramp -> relief lighting
+//   source -> aberration, sharpen -> levels -> posterize/dither -> halftone -> color ramp -> relief lighting
 //   -> alpha -> outline   (each stage is a module with an on/off uniform)
 // then supersampled (SSAA) or pixelated. Output may instead be a normal or height map.
 // Parameter uniforms are injected from POST_PARAMS; common + noise chunks are prepended.
@@ -186,6 +186,31 @@ vec3 paper(vec3 c, vec2 uv) {
   return c * (1.0 - u_paperAmount * 0.35 * (0.5 - 0.5 * g));
 }
 
+// ---- Lens modules -------------------------------------------------------------------------
+
+// Unsharp mask: the source minus a small blur of itself, added back.
+vec3 sharpen(vec2 uv, vec3 c) {
+  if (!u_sharpenOn) return c;
+  vec2 o = max(vec2(u_sharpenRadius / REF), u_pixelSize);
+  vec3 blur = 0.25 * (sampleSource(uv + vec2(o.x, 0.0)).rgb + sampleSource(uv - vec2(o.x, 0.0)).rgb +
+                      sampleSource(uv + vec2(0.0, o.y)).rgb + sampleSource(uv - vec2(0.0, o.y)).rgb);
+  return max(c + (c - blur) * u_sharpen, 0.0);
+}
+
+// Radial chromatic aberration: red pushed out, blue pulled in, none at the center.
+vec3 aberration(vec2 uv, vec3 c) {
+  if (!u_aberrationOn) return c;
+  vec2 d = (uv - 0.5) * 2.0 * (u_aberration / REF);
+  return vec3(sampleSource(uv + d).r, c.g, sampleSource(uv - d).b);
+}
+
+vec3 vignette(vec3 c, vec2 uv) {
+  if (!u_vignetteOn) return c;
+  float d = length((uv - 0.5) * 2.0) / 1.41421356;
+  float v = smoothstep(u_vignetteSize, u_vignetteSize + u_vignetteSoftness, d);
+  return mix(c, u_vignetteColor, v * u_vignette);
+}
+
 // Full look at one point. `o` = neighbour distance for outlines/lighting (uv).
 vec4 evaluate(vec2 uv, vec2 o) {
   if (u_output == 1) {
@@ -198,7 +223,7 @@ vec4 evaluate(vec2 uv, vec2 o) {
   if (u_output == 2) return vec4(vec3(heightAt(uv)), 1.0);
 
   vec4 src = sampleSource(uv);
-  vec3 c = levels(src.rgb);
+  vec3 c = levels(sharpen(uv, aberration(uv, src.rgb)));
   float l = lum(c);
   float t = halftone(posterizeTone(l), uv);
   bool stylized = u_posterizeOn || u_halftoneOn;
@@ -214,6 +239,7 @@ vec4 evaluate(vec2 uv, vec2 o) {
   }
   color.rgb = watercolor(color.rgb, uv);
   color.rgb = paper(color.rgb, uv);
+  color.rgb = vignette(color.rgb, uv);
 
   float alpha = 1.0;
   if (u_alphaMode == 1) alpha = t;

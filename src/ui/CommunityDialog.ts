@@ -204,6 +204,16 @@ function isMissing(e: unknown): boolean {
   );
 }
 
+/** The community node a node package was made from ("based on"), if any. */
+function packageOrigin(document: unknown): { id: string; name: string; author: string } | null {
+  const nodes = (document as { nodes?: unknown } | null)?.nodes;
+  const node: unknown = Array.isArray(nodes) ? nodes[0] : null;
+  const o = (node as { origin?: Record<string, unknown> } | null)?.origin;
+  return o && typeof o.id === 'string' && typeof o.name === 'string'
+    ? { id: o.id, name: o.name, author: typeof o.author === 'string' ? o.author : '' }
+    : null;
+}
+
 /** The GLSL of a node package (shown read-only on its page), or ''. */
 function packageCode(document: unknown): string {
   const nodes = (document as { nodes?: unknown } | null)?.nodes;
@@ -893,6 +903,23 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
       buttons.push(button('Report…', () => void report(system)));
     }
     const code = packageCode(system.document);
+    const origin = packageOrigin(system.document);
+    const basedOn =
+      origin && origin.id !== system.id
+        ? h(
+            'p',
+            { class: 'community-meta' },
+            'Based on ',
+            h('button', {
+              type: 'button',
+              class: 'community-tag',
+              text: origin.name || 'a community node',
+              title: 'Open the original',
+              onclick: () => void showDetail(origin.id),
+            }),
+            origin.author ? ` by ${origin.author}` : '',
+          )
+        : null;
     const status =
       installed === null
         ? null
@@ -906,7 +933,7 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
     renderDetail(
       system,
       buttons,
-      status,
+      basedOn || status ? h('div', { class: 'community-node-status' }, basedOn, status) : null,
       installed,
       code
         ? h(

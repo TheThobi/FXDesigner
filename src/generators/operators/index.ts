@@ -41,6 +41,9 @@ import floodMapperFrag from './flood-mapper.glsl?raw';
 import makeTileFrag from './make-tile.glsl?raw';
 import radialBlurFrag from './radial-blur.glsl?raw';
 import polarFrag from './polar.glsl?raw';
+import mirrorFrag from './mirror.glsl?raw';
+import histogramScanFrag from './histogram-scan.glsl?raw';
+import variableBlurFrag from './variable-blur.glsl?raw';
 import curvatureFrag from './curvature.glsl?raw';
 import heightBlendFrag from './height-blend.glsl?raw';
 import glowFrag from './glow.glsl?raw';
@@ -1031,6 +1034,80 @@ export const radialBlurOp = operator({
   ],
 });
 
+export const mirrorOp = operator({
+  id: 'op-mirror',
+  name: 'Mirror / Symmetry',
+  description:
+    'Reflects one side of the image onto the other (X, Y or both, around a movable axis), or ' +
+    'mirrors it into sectors around a center (kaleidoscope of any input).',
+  fragment: mirrorFrag,
+  inputs: [IMAGE],
+  params: [
+    param.select('mode', 'Mode', ['Mirror X', 'Mirror Y', 'Quadrants', 'Sectors'], 0),
+    param.vec2('axis', 'Axis / center', [0.5, 0.5], 0, 1),
+    param.bool('flip', 'Keep the other side', false, {
+      description: 'Copy the left / bottom side instead of the right / top one.',
+      visibleWhen: (v) => Number(v.mode) !== 3,
+    }),
+    param.int('segments', 'Sectors', 6, 2, 32, { visibleWhen: (v) => Number(v.mode) === 3 }),
+    param.angle('rotation', 'Rotation', 0, { visibleWhen: (v) => Number(v.mode) === 3 }),
+    param.bool('wrap', 'Wrap', false, { description: 'Sample across the edges (tiled images).' }),
+  ],
+  presets: [
+    { name: 'Mirror X', values: { mode: 0 } },
+    { name: 'Quadrants', values: { mode: 2 } },
+    { name: 'Six sectors', values: { mode: 3, segments: 6 } },
+    { name: 'Twelve sectors', values: { mode: 3, segments: 12, rotation: 15 } },
+  ],
+});
+
+export const histogramScanOp = operator({
+  id: 'op-histogram-scan',
+  name: 'Histogram Scan',
+  description:
+    'Soft threshold of the brightness: Position moves the cut through the tones (keyframe it ' +
+    'to reveal or erase a mask), Contrast sharpens it.',
+  fragment: histogramScanFrag,
+  inputs: [IMAGE],
+  params: [
+    param.float('position', 'Position', 0.5, 0, 1),
+    param.float('contrast', 'Contrast', 0.6, 0, 1),
+    param.bool('invert', 'Invert', false),
+  ],
+  presets: [
+    { name: 'Soft cut', values: { position: 0.5, contrast: 0.6 } },
+    { name: 'Hard mask', values: { position: 0.5, contrast: 1 } },
+    { name: 'Highlights only', values: { position: 0.75, contrast: 0.7 } },
+    { name: 'Gentle', values: { position: 0.4, contrast: 0.2 } },
+  ],
+});
+
+export const variableBlurOp = operator({
+  id: 'op-variable-blur',
+  name: 'Non-uniform Blur',
+  description:
+    'Blur whose radius follows a mask (white = full radius, black = sharp): soft-focus areas, ' +
+    'blurry edges, depth falloffs.',
+  fragment: variableBlurFrag,
+  inputs: [
+    IMAGE,
+    {
+      ...input('mask', 'Mask', 'Where to blur (bright = more).', '#9be86a', 'float'),
+      params: ['invertMask'],
+    },
+  ],
+  params: [
+    param.float('radius', 'Radius', 12, 0, 64, { unit: 'px' }),
+    param.bool('invertMask', 'Invert mask', false),
+    param.bool('wrap', 'Wrap', true, { description: 'Sample across the edges (seamless).' }),
+  ],
+  presets: [
+    { name: 'Soft focus', values: { radius: 12 } },
+    { name: 'Heavy', values: { radius: 40 } },
+    { name: 'Sharp where white', values: { radius: 16, invertMask: true } },
+  ],
+});
+
 export const polarOp = operator({
   id: 'op-polar',
   name: 'Polar Coordinates',
@@ -1145,6 +1222,55 @@ export const trimSheetOp = operator({
   ],
 });
 
+/**
+ * Sub-sections of the Operators tab in the browser, by purpose (display only: nothing is
+ * stored). Within a section, operators keep the OPERATORS order (most used first).
+ */
+export const OPERATOR_GROUPS: readonly {
+  readonly label: string;
+  readonly ids: readonly string[];
+}[] = [
+  { label: 'Blend & mask', ids: ['op-blend', 'op-mask', 'op-height-blend'] },
+  {
+    label: 'Adjust',
+    ids: ['op-level', 'op-math', 'op-auto-levels', 'op-histogram-scan'],
+  },
+  {
+    label: 'Transform & tiling',
+    ids: [
+      'op-transform',
+      'op-warp',
+      'op-tile-sampler',
+      'op-polar',
+      'op-mirror',
+      'op-make-tile',
+      'op-trim-sheet',
+    ],
+  },
+  {
+    label: 'Blur & glow',
+    ids: ['op-blur', 'op-glow', 'op-radial-blur', 'op-slope-blur', 'op-variable-blur'],
+  },
+  {
+    label: 'Edges & distance',
+    ids: ['op-edges', 'op-distance', 'op-dilate', 'op-edge-fade', 'op-curvature'],
+  },
+  {
+    label: 'Flood fill',
+    ids: [
+      'op-flood-fill',
+      'op-flood-gradient',
+      'op-flood-size',
+      'op-flood-color',
+      'op-flood-mapper',
+    ],
+  },
+  {
+    label: 'Channels & graph',
+    ids: ['op-unpack', 'op-pack', 'uniform', 'op-custom', 'material-output'],
+  },
+];
+
 /** Operators, most used first (the browser shows them in this order). */
 export const OPERATORS: readonly ShaderGenerator[] = [
   outputOp,
@@ -1176,6 +1302,9 @@ export const OPERATORS: readonly ShaderGenerator[] = [
   floodColorOp,
   floodMapperOp,
   polarOp,
+  mirrorOp,
+  histogramScanOp,
+  variableBlurOp,
   makeTileOp,
   customOp,
   trimSheetOp,

@@ -84,6 +84,11 @@ export interface GraphNode {
   /** Name given by the user (card title); absent = the generator's name. */
   readonly name?: string;
   /**
+   * The community node this one was added from (its update is offered in Details, and a
+   * node published from it credits it). Absent = made here.
+   */
+  readonly origin?: NodeOrigin;
+  /**
    * GLSL replacing the generator's main fragment (shader generators): the node was converted
    * to code and edited, it is a custom node. Absent = the generator's own code.
    */
@@ -92,6 +97,14 @@ export interface GraphNode {
   readonly customParams?: readonly CustomParamSpec[];
   /** Per-node edits to generator parameters. Null removes a parameter and its uniform. */
   readonly baseParamEdits?: Readonly<Record<string, BaseParamEdit | null>>;
+}
+
+export interface NodeOrigin {
+  /** Community id. */
+  readonly id: string;
+  readonly version: number;
+  readonly name: string;
+  readonly author: string;
 }
 
 export interface BaseParamEdit {

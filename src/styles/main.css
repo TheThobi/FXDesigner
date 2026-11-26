@@ -928,6 +928,32 @@ button:focus-visible {
   background: var(--pin-color, #d8d8d8);
 }
 
+/* Value types readable without color: 1 dot = float, 2 = vector 2, 3 = RGB, plain = RGBA. */
+.pin {
+  --pin-mark: var(--pin-color, #d8d8d8);
+}
+
+.pin.linked {
+  --pin-mark: #141414;
+}
+
+.pin[data-value='float'] .pin-dot {
+  background-image: radial-gradient(circle, var(--pin-mark) 1.2px, transparent 1.7px);
+}
+
+.pin[data-value='vec2'] .pin-dot {
+  background-image:
+    radial-gradient(circle at 50% 30%, var(--pin-mark) 1.2px, transparent 1.7px),
+    radial-gradient(circle at 50% 70%, var(--pin-mark) 1.2px, transparent 1.7px);
+}
+
+.pin[data-value='vec3'] .pin-dot {
+  background-image:
+    radial-gradient(circle at 50% 20%, var(--pin-mark) 1.2px, transparent 1.7px),
+    radial-gradient(circle at 50% 50%, var(--pin-mark) 1.2px, transparent 1.7px),
+    radial-gradient(circle at 50% 80%, var(--pin-mark) 1.2px, transparent 1.7px);
+}
+
 .pin:hover .pin-dot,
 .pin.hover .pin-dot {
   transform: scale(1.35);
@@ -4504,6 +4530,7 @@ body.dragging-tab * {
   height: 8px;
   border-width: 1.5px;
   border-radius: 50%;
+  background-image: none;
 }
 
 .node.reroute .pin-label {
@@ -5557,4 +5584,23 @@ body.dragging-tab * {
 
 .community-licence {
   font-size: 11px;
+}
+
+/* Details: a node added from a community node (and its update). */
+.node-origin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, #c58bff 12%, transparent);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.node-origin > span {
+  flex: 1 1 auto;
+  min-width: 0;
 }

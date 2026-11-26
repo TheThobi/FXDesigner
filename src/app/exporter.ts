@@ -4,6 +4,7 @@ import type { Capture, ChainStep, FrameRequest, Renderer } from '../engine/Rende
 type ImageRequest = FrameRequest | readonly ChainStep[];
 import type { FlipbookOptions } from '../ui/FlipbookDialog';
 import { canvasToBlob } from '../util/download';
+import { dilatePixels } from '../util/dilate';
 import { encodeGif } from '../util/gif';
 import { flowIntensity, opticalFlow } from '../util/opticalFlow';
 import { encodeGray16Png } from '../util/png16';
@@ -89,6 +90,8 @@ export async function renderFlipbook(
     for (let i = 0; i < columns * rows; i++) {
       const pixels = capture.render(frameAt(i));
       keep?.push(pixels);
+      // Padding inside each cell (cells never bleed into each other); alpha unchanged.
+      if (opts.padding > 0) dilatePixels(pixels, fw, fh, opts.padding);
       ctx.putImageData(
         new ImageData(pixels, fw, fh),
         (i % columns) * fw,

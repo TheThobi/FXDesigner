@@ -47,6 +47,17 @@ export const POST_PROCESS_PARAMS: readonly ParamDef[] = [
   param.float('gamma', 'Gamma', 1, 0.1, 4, { group: 'Levels' }),
   param.bool('invert', 'Invert', false, { group: 'Levels' }),
 
+  param.toggle('sharpenOn', 'Sharpen'),
+  param.float('sharpen', 'Amount', 0.6, 0, 3, { group: 'Sharpen' }),
+  param.float('sharpenRadius', 'Radius', 1.5, 0.5, 8, { group: 'Sharpen', unit: 'px' }),
+
+  param.toggle('aberrationOn', 'Chromatic aberration'),
+  param.float('aberration', 'Offset', 3, 0, 32, {
+    group: 'Chromatic aberration',
+    unit: 'px',
+    description: 'Red and blue shift apart toward the edges (none at the center).',
+  }),
+
   param.toggle('slopeBlurOn', 'Slope blur'),
   param.select('slopeSource', 'Slope map', SLOPE_SOURCES, 0, { group: 'Slope blur' }),
   param.float('slopeScale', 'Noise scale', 4, 1, 32, {
@@ -160,6 +171,15 @@ export const POST_PROCESS_PARAMS: readonly ParamDef[] = [
     group: 'Paper grain',
   }),
 
+  param.toggle('vignetteOn', 'Vignette'),
+  param.float('vignette', 'Amount', 0.5, 0, 1, { group: 'Vignette' }),
+  param.float('vignetteSize', 'Size', 0.55, 0, 1, {
+    group: 'Vignette',
+    description: 'Where the darkening starts (0 = center, 1 = corners).',
+  }),
+  param.float('vignetteSoftness', 'Softness', 0.45, 0.01, 1, { group: 'Vignette' }),
+  param.color('vignetteColor', 'Color', '#000000', { group: 'Vignette' }),
+
   param.toggle('outlineOn', 'Outline'),
   param.float('outline', 'Opacity', 1, 0, 1, { group: 'Outline' }),
   param.float('outlineWidth', 'Width', 1.5, 0.5, 8, { group: 'Outline', unit: 'px' }),
@@ -201,6 +221,18 @@ export const POST_MODULES: readonly ParamGroupInfo[] = [
     description: 'Brightness / contrast / gamma before any stylization.',
     summary: (v) =>
       `B ${n(v, 'brightness').toFixed(2)} · C ${n(v, 'contrast').toFixed(2)} · γ ${n(v, 'gamma').toFixed(2)}`,
+  },
+  {
+    name: 'Sharpen',
+    icon: 'tune',
+    description: 'Crisper details (unsharp mask on the source).',
+    summary: (v) => `${n(v, 'sharpen').toFixed(2)} · ${n(v, 'sharpenRadius').toFixed(1)} px`,
+  },
+  {
+    name: 'Chromatic aberration',
+    icon: 'palette',
+    description: 'Red and blue fringes toward the edges, like a lens.',
+    summary: (v) => `${n(v, 'aberration').toFixed(1)} px`,
   },
   {
     name: 'Slope blur',
@@ -260,6 +292,12 @@ export const POST_MODULES: readonly ParamGroupInfo[] = [
     icon: 'paper',
     description: 'Tileable paper / canvas texture multiplied over the image.',
     summary: (v) => `${opt(PAPER_TYPES, v, 'paperType')} · ${n(v, 'paperAmount').toFixed(2)}`,
+  },
+  {
+    name: 'Vignette',
+    icon: 'sun',
+    description: 'Darkens (or tints) the image toward its edges. Breaks tiling.',
+    summary: (v) => `${n(v, 'vignette').toFixed(2)} · size ${n(v, 'vignetteSize').toFixed(2)}`,
   },
   {
     name: 'Outline',

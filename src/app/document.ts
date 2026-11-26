@@ -28,6 +28,7 @@ import {
   type GraphFrame,
   type GraphLink,
   type GraphNode,
+  type NodeOrigin,
 } from './state';
 
 export const DOCUMENT_FORMAT = 'fx-designer';
@@ -377,6 +378,20 @@ function migrateV7toV8(raw: Record<string, unknown>): Record<string, unknown> {
 const finite = (v: unknown, fallback: number) =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback;
 
+/** A valid community origin of a node, or null. */
+function sanitizeOrigin(raw: unknown): NodeOrigin | null {
+  const o = record(raw);
+  if (typeof o.id !== 'string' || !/^[a-z0-9]{8,32}$/.test(o.id)) return null;
+  if (typeof o.version !== 'number' || !Number.isSafeInteger(o.version) || o.version < 1)
+    return null;
+  return {
+    id: o.id,
+    version: o.version,
+    name: typeof o.name === 'string' ? o.name.slice(0, 64) : '',
+    author: typeof o.author === 'string' ? o.author.slice(0, 32) : '',
+  };
+}
+
 /** Validated copy of an untrusted node, or null when its generator is unknown. */
 function sanitizeNode(raw: unknown, lookup: GeneratorLookup): GraphNode | null {
   const obj = record(raw);
@@ -408,6 +423,7 @@ function sanitizeNode(raw: unknown, lookup: GeneratorLookup): GraphNode | null {
     frozenAt:
       typeof obj.frozenAt === 'number' && Number.isFinite(obj.frozenAt) ? obj.frozenAt : null,
     ...(obj.collapsed === true ? { collapsed: true } : {}),
+    ...(sanitizeOrigin(obj.origin) ? { origin: sanitizeOrigin(obj.origin)! } : {}),
     ...(typeof obj.name === 'string' && obj.name.trim()
       ? { name: obj.name.trim().slice(0, MAX_NODE_NAME) }
       : {}),

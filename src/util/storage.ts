@@ -7,10 +7,23 @@ export function readStorage(key: string): string | null {
   }
 }
 
-export function writeStorage(key: string, value: string): void {
+/**
+ * Called when a write fails (usually: the browser storage of the site is full). The app
+ * warns the user: without it, saves would fail silently.
+ */
+let failureListener: ((key: string) => void) | null = null;
+
+export function onStorageFailure(listener: ((key: string) => void) | null): void {
+  failureListener = listener;
+}
+
+/** Writes `value`; false (and the failure listener called) when the browser refused. */
+export function writeStorage(key: string, value: string): boolean {
   try {
     localStorage.setItem(key, value);
+    return true;
   } catch {
-    // Not persisted: acceptable for UI preferences.
+    failureListener?.(key);
+    return false;
   }
 }

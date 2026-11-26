@@ -9,7 +9,12 @@ import {
   encodeDocumentForUrl,
   parseDocument,
 } from '../../src/app/document';
-import { createNode, effectiveGenerator, type EditorState } from '../../src/app/state';
+import {
+  createNode,
+  effectiveGenerator,
+  type EditorState,
+  type GraphNode,
+} from '../../src/app/state';
 import { getGenerator } from '../../src/generators/registry';
 
 const noise = getGenerator('fractal-noise')!;
@@ -500,5 +505,24 @@ describe('node names', () => {
     const parsed = parseDocument(JSON.parse(JSON.stringify(doc)), getGenerator);
     expect(parsed.nodes[0]!.name).toBe('Fire mask '.repeat(10).trim().slice(0, 48));
     expect(parsed.nodes[1]!.name).toBeUndefined();
+  });
+});
+
+describe('community origin of nodes', () => {
+  it('keeps a valid origin only', () => {
+    const origin = { id: 'abcdef012345', version: 3, name: 'Aurora', author: 'Test' };
+    const ok = { ...createNode(noise, 'n1', 0, 0), origin };
+    // Invalid on purpose (as found in an untrusted file).
+    const bad = {
+      ...createNode(noise, 'n2', 0, 0),
+      origin: { id: '../x', version: 1 },
+    } as unknown as GraphNode;
+    const doc = documentFromState(
+      { ...state, nodes: [ok, bad], links: [], selectedId: 'n1' },
+      getGenerator,
+    );
+    const parsed = parseDocument(JSON.parse(JSON.stringify(doc)), getGenerator);
+    expect(parsed.nodes[0]!.origin).toEqual(origin);
+    expect(parsed.nodes[1]!.origin).toBeUndefined();
   });
 });
