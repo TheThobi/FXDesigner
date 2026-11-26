@@ -12,15 +12,18 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
 /**
  * Every generator, split in SHARDS tests (generator i goes to shard i % SHARDS): each has its
  * own time budget. Tests are tagged @part1…@part4 (about the same duration each): CI runs the
- * parts on parallel machines (`--grep @partN`).
+ * parts on parallel machines (`--grep @partN`). Shard s goes to part s % PARTS + 1, so a part
+ * holds the same generators (i % PARTS) whatever SHARDS is: raise SHARDS when a sweep test
+ * nears its timeout.
  */
-const SHARDS = 4;
+const PARTS = 4;
+const SHARDS = 8;
 const part = (n: number) => ({ tag: `@part${n}` });
 
 for (let shard = 0; shard < SHARDS; shard++) {
   test(
     `every generator compiles and renders (${shard + 1}/${SHARDS})`,
-    part(shard + 1),
+    part((shard % PARTS) + 1),
     async ({ page }) => {
       test.setTimeout(900_000);
       const errors: string[] = [];
@@ -45,29 +48,34 @@ for (let shard = 0; shard < SHARDS; shard++) {
 
       let previous: Uint8Array | null = null;
       for (const id of ids) {
-        const item = page.locator(`.generator-item[data-id="${id}"]`);
-        const category = await item.getAttribute('data-category');
-        const operator = ['operator', 'animation'].includes(category ?? '');
-        // Operators live in their own browser tab.
-        if (!(await item.isVisible()))
-          await page
-            .locator(`.panel-browser .segment[data-tab="${operator ? 'operators' : 'generators'}"]`)
-            .click();
-        await item.click();
-        await expect(page.locator('.inspector-header h2')).not.toBeEmpty();
-        await page.waitForTimeout(category === 'simulation' ? 4000 : 400);
-        const overlay = page.locator('.error-overlay');
-        if (await overlay.isVisible()) throw new Error(`${id}: ${await overlay.textContent()}`);
-        const shot = await page
-          .locator('.canvas-frame')
-          .screenshot({ path: `test-results/generators/${id}.png` });
-        // Guards against stale frames: each generator must change the preview.
-        // Operators have nothing to show without inputs (all empty), so they may look alike.
-        expect(
-          !operator && previous !== null && sameBytes(shot, previous),
-          `${id} rendered the same image as the previous generator`,
-        ).toBeFalsy();
-        previous = shot;
+        // One step per generator: a timeout names the generator it stopped on.
+        await test.step(id, async () => {
+          const item = page.locator(`.generator-item[data-id="${id}"]`);
+          const category = await item.getAttribute('data-category');
+          const operator = ['operator', 'animation'].includes(category ?? '');
+          // Operators live in their own browser tab.
+          if (!(await item.isVisible()))
+            await page
+              .locator(
+                `.panel-browser .segment[data-tab="${operator ? 'operators' : 'generators'}"]`,
+              )
+              .click();
+          await item.click();
+          await expect(page.locator('.inspector-header h2')).not.toBeEmpty();
+          await page.waitForTimeout(category === 'simulation' ? 4000 : 400);
+          const overlay = page.locator('.error-overlay');
+          if (await overlay.isVisible()) throw new Error(`${id}: ${await overlay.textContent()}`);
+          const shot = await page
+            .locator('.canvas-frame')
+            .screenshot({ path: `test-results/generators/${id}.png` });
+          // Guards against stale frames: each generator must change the preview.
+          // Operators have nothing to show without inputs (all empty), so they may look alike.
+          expect(
+            !operator && previous !== null && sameBytes(shot, previous),
+            `${id} rendered the same image as the previous generator`,
+          ).toBeFalsy();
+          previous = shot;
+        });
       }
 
       expect(errors).toEqual([]);

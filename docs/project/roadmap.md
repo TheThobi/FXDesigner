@@ -124,9 +124,98 @@ Priorités indicatives. Cocher au fil de l'eau.
       Flood Fill : boîte de chaque îlot) ; **Tile Sampler animé** (dérive, rotation, oscillation,
       pulsation, scintillement, apparition / disparition, en boucle) ; **Flowmap Painter** avec
       entrée Image (sortie flowmap ou image qui coule) et sorties RG / R / G.
+- [x] Communauté (étape 2) : partage de **nodes de shaders custom** (onglet Shader nodes :
+      publication de la node sélectionnée, code GLSL visible avant installation, installation
+      dans une section **Community** du navigateur de nodes, mises à jour, liens node ↔
+      publication) ; tout ce qui est publié est réutilisable librement ; voir
+      [community.md](community.md).
+- [x] Node **Dilate (Padding)** (couleurs des pixels opaques étendues sous l'alpha, mipmaps
+      sans bavure) ; **nom personnalisé** des nodes (F2, double-clic sur l'en-tête) ;
+      **aligner / distribuer** ; cadres de commentaire **sélectionnables** (clic, Shift,
+      rectangle de sélection), déplacés et supprimés avec les nodes, taille du titre ;
+      3D Preview ouverte sous Details ; lien **GitHub** et fenêtre **About** (section IA,
+      contributions) ; `prefers-reduced-motion` ne coupe plus que le mouvement (le retour
+      visuel reste).
+- [x] Nodes installées et liens « cette node est ma publication » **synchronisés avec le
+      compte** (fusion par entrée, comme la bibliothèque) : un autre appareil met à jour la
+      même publication au lieu d'en créer une en double ; Caustics des effets renommées
+      **Stylized Caustics**.
+
+## Propositions
+
+Taille indicative : **S** (une soirée), **M** (quelques jours), **L** (chantier).
+
+### Graphe et workspace
+
+- [ ] **M** Aligner / distribuer : bon début, mais l'ergonomie est à améliorer (barre
+      d'alignement quand plusieurs nodes sont sélectionnées, raccourcis, guides et aimantation
+      pendant le déplacement).
+- [ ] **M** Mini-carte du graphe et recherche de node (Ctrl+F : saute à la node, la sélectionne).
+- [ ] **M** Paramètres **exposés** d'un système (quelques curseurs « macro » reliés à des
+      paramètres de nodes) : un système publié se règle sans ouvrir le graphe.
+- [ ] **S** Options de workspace : pas de la grille et magnétisme, fond de l'aperçu (damier,
+      noir, couleur), courbure des liens, thème clair.
+
+### Nodes
+
+- [ ] **M** Opérateurs : **Mirror / Symmetry** (miroir en X, Y, quadrants ou secteurs d'une
+      image branchée), **Histogram Scan** (seuil doux à position et contraste animables),
+      **Non-uniform Blur** (rayon de flou piloté par un masque).
+- [ ] **M** Générateurs : muzzle flash, bokeh / champ d'étoiles.
+- [ ] **L** Simulations : équation d'onde (ondulations interactives), sable tombant
+      (automate), liquide SPH 2D.
+
+### Post Process
+
+- [ ] **S** Aberration chromatique, vignette, netteté (sharpen).
+- [ ] **M** Étalonnage par **LUT** (`.cube` importé) et courbes RVB.
+- [ ] **M** Distorsion de chaleur (déplacement par bruit animé, en boucle).
+
+### Export
+
+- [ ] **S** Option **Dilate** à l'export des flipbooks / atlas (même traitement que la node,
+      appliqué à chaque case).
+
+### Communauté
+
+- [ ] **M** « Basé sur » : une node ou un système dérivé d'une publication garde l'attribution
+      (lien vers l'original, auteur).
+- [ ] **M** Dans Details, « Update this node to vN » sur une node ajoutée depuis la communauté
+      quand une version plus récente est installée.
+- [ ] **M** Import Shadertoy (adaptateur `mainImage`) pour un usage local : la licence par
+      défaut de Shadertoy (CC BY-NC-SA) est incompatible avec la réutilisation libre de la
+      communauté, un shader importé ne se publie donc que si son auteur l'autorise.
+- [ ] **M** Collections (listes publiques de systèmes / nodes) et commentaires.
+
+### Accessibilité
+
+- [ ] **S** Focus clavier visibles partout, libellés ARIA des curseurs et des pins.
+- [ ] **S** Échelle de l'interface (90 à 150 %) et thème à fort contraste.
+- [ ] **S** Liens et pins distinguables sans la couleur (motif ou forme par type de valeur).
+- [ ] **M** Graphe au clavier : Tab entre les nodes, flèches pour déplacer, Entrée pour
+      ouvrir la recherche d'ajout ; aide des raccourcis (`?`).
+
+### Stabilité
+
+- [ ] **M** Bibliothèque locale en **IndexedDB** : la copie de travail de la bibliothèque (et
+      la seule copie sans compte) est en localStorage, limité à ≈ 5 Mo par site ; au-delà, les
+      sauvegardes échouent sans bruit. Au minimum : avertir quand une sauvegarde échoue.
+- [ ] **M** Garde-fou GPU : une node dont le temps de rendu explose est mise en pause avec un
+      message, au lieu de figer l'onglet (important pour les nodes communautaires).
+- [ ] **M** Tests de régression visuelle (captures de la CI comparées à des références) et
+      parcours e2e « publier / installer une node ».
+
+### Fluidité
+
+- [ ] **S** Découpage du bundle (`import()` des fenêtres Community, Export, GIF, vidéo) : la
+      CI signale déjà des chunks de plus de 500 Ko.
+- [ ] **M** Nodes hors écran ou dézoomées rendues moins souvent / en plus petit (LOD des cartes).
+- [ ] **L** Rendu dans un Worker (`OffscreenCanvas`) : l'interface reste fluide pendant les
+      simulations lourdes.
 
 ## Long terme
 
-- [ ] Communauté : partage de **nodes** de shaders custom (paquets réutilisables comme des
-      générateurs, distincts des systèmes) ; voir [community.md](community.md).
+- [ ] **Système comme node** (sous-graphe / material function : entrées, sorties et
+      paramètres exposés) ; prolongerait « Collapse into new system ». Gardé de côté.
+
 - [ ] WebGPU (compute shaders) si les simulations deviennent limitantes.

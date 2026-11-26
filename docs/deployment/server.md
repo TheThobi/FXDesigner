@@ -109,7 +109,9 @@ Chaque utilisateur peut aussi exporter sa bibliothèque (File → Save library).
 ## 6. Communauté
 
 La fenêtre Community utilise la même base : la migration 2 crée `community_systems` et
-`community_subscriptions` au démarrage, rien à configurer. Sans base de données, la fenêtre
+`community_subscriptions` au démarrage, rien à configurer (la migration 5 y ajoute la colonne
+`kind` : système ou node de shader custom ; la migration 6 crée `user_data`, les nodes
+installées et liens de publication synchronisés par compte). Sans base de données, la fenêtre
 affiche « The community is unavailable ». Les catégories se modifient dans
 `server/src/community.ts` (`COMMUNITY_CATEGORIES`) ; leurs identifiants sont stockés, ne pas les
 renommer sans migration.

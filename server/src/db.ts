@@ -103,6 +103,21 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX community_reports_system ON community_reports (system_id);
   `,
+  // 5: community publications are systems (whole documents) or custom shader nodes.
+  `
+  ALTER TABLE community_systems ADD COLUMN kind text NOT NULL DEFAULT 'system';
+  CREATE INDEX community_systems_kind ON community_systems (kind, created_at DESC);
+  `,
+  // 6: small per-account settings (installed community nodes, node publication links).
+  `
+  CREATE TABLE user_data (
+    user_id uuid NOT NULL REFERENCES users ON DELETE CASCADE,
+    key text NOT NULL,
+    value jsonb NOT NULL,
+    updated bigint NOT NULL,
+    PRIMARY KEY (user_id, key)
+  );
+  `,
 ];
 
 export type Db = pg.Pool;

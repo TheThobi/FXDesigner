@@ -109,7 +109,7 @@ when the fragment calls `centered()`) keep uv in [0,1] and `centered()` is aspec
 `'tiled'` ones repeat a whole number of times along the long axis (seamless, never stretched).
 Simulations size their grids with `gpu.gridDims(simResolution)` (short side) and restart.
 
-`App.draw` re-renders a node only when its *signature* changes (params, post, ramp, io, size,
+`App.draw` re-renders a node only when its _signature_ changes (params, post, ramp, io, size,
 time for animated shaders, simulation version, upstream versions). The selected node renders
 at `min(resolution, 1024)`; others at a power of two matching their on-screen size (≤ 512).
 Node outputs are straight-alpha RGBA16F (`NodeTargets`); `node/display.frag` composites them
@@ -162,16 +162,16 @@ A generator declares `params: ParamDef[]`. From that list we derive:
 - **validation** of documents / URLs / autosave (`params/values.ts#sanitizeValues`),
 - **presets** (partial value sets, validated by unit tests).
 
-| ParamDef type | GLSL        | Notes                        |
-| ------------- | ----------- | ---------------------------- |
-| float         | `float`     | slider + numeric input       |
-| int           | `int`       |                              |
-| bool          | `bool`      |                              |
-| select        | `int`       | option values                |
-| color         | `vec3`      | `#rrggbb` in documents       |
-| vec2          | `vec2`      |                              |
-| gradient      | `sampler2D` | baked 256×1 lookup texture   |
-| text          | —           | CPU-side only (e.g. RD seed) |
+| ParamDef type | GLSL        | Notes                                            |
+| ------------- | ----------- | ------------------------------------------------ |
+| float         | `float`     | slider + numeric input                           |
+| int           | `int`       |                                                  |
+| bool          | `bool`      |                                                  |
+| select        | `int`       | option values                                    |
+| color         | `vec3`      | `#rrggbb` in documents                           |
+| vec2          | `vec2`      |                                                  |
+| gradient      | `sampler2D` | baked 256×1 lookup texture                       |
+| text          | —           | CPU-side only (e.g. RD seed)                     |
 | image         | `sampler2D` | data URL; + `vec2 u_<key>Size` (0 while loading) |
 
 ## Shader generators
@@ -363,7 +363,10 @@ the API:
   reports set `hidden` (only the author and moderators still see it). Moderators are the
   pseudos of `MODERATORS`: `GET /reports` (queue), `PUT /:id/moderation` (hide / restore,
   dismiss reports), and they may delete any system. The router prefers literal paths over
-  `:params`.
+  `:params`. A publication's `kind` (migration 5) is `system` or `node`: a **node package**
+  is a document holding one shader node with custom code or custom parameters and no links
+  (`parseNodeDocument`, 256 KB). Lists and tag suggestions filter with `?type=system|node|all`
+  (absent = `system`, for older clients); new versions keep their kind.
 - Writes require `Content-Type: application/json` and, when present, an `Origin` equal to
   `PUBLIC_URL` (CSRF). `db.ts` holds the ordered `MIGRATIONS`, applied at startup under an
   advisory lock.
@@ -372,9 +375,23 @@ Client side, `app/cloud.ts` checks `/api/health` (no server = no account UI), re
 session, pushes every local library change (debounced, `Library.onChange`) and reconciles the
 whole library at sign-in and on window focus (`applyRemote*` methods write server data
 without echoing it back). `ui/AccountUI.ts` is the toolbar button and sign-in window.
-`app/community.ts` + `ui/CommunityDialog.ts` are the Community window (Discover / Subscribed /
-My systems, detail, publish and edit forms); copies go into the library (`App.openCommunity`)
-and their versions are remembered locally to flag updates of subscribed systems. The publish
+`app/community.ts` + `ui/CommunityDialog.ts` are the Community window (Systems / Shader nodes,
+Discover / Subscribed / Mine, detail, publish and edit forms); copies go into the library
+(`App.openCommunity`) and their versions are remembered locally to flag updates of subscribed
+systems. Shader nodes (`app/communityNodes.ts`): "Publish selected node" (or the node menu)
+sends `nodePackage(node)` (code always included); a node page shows its GLSL read-only and
+offers Install / Update, Add to the graph and Uninstall. Installed nodes live in localStorage
+(`InstalledNodes`, synced with the account) and show in a **Community** section of the node browser (tile
+id `community:<id>`, in the Operators tab when built on an operator): click / double-click /
+drag replace or add a copy of the packaged node, like a generator. Update badges compare with
+the latest version seen online this session (`Community.latestVersion`). The nodes you
+published are linked per system and node id (`NodeLinks`, localStorage, outside documents so
+the system's hash never changes). Both sync with the account through `app/communitySync.ts`
+(server `user_data`, key `community`, `GET / PUT /api/user-data/:key`): per-entry last write
+wins with tombstones (`app/syncedEntries.ts`), after each library sync and shortly after a
+change; installed nodes sync as ids and versions, their packages are downloaded again: the Shader nodes tab shows Publish · Up to date · Publish
+node update for the selected node, and publishing a system lists your linked nodes with
+unpublished changes (see [community.md](../project/community.md)). The publish
 and edit forms suggest existing tags by match and number of systems using them
 (`GET /api/community/tags`).
 A library system you published keeps a link (`SystemEntry.published`: community id, version,

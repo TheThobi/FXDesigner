@@ -1,8 +1,9 @@
 /**
- * Community client: systems shared by their authors on the FX Designer server
- * (server/src/community.ts). Browsing works signed out; publishing and subscribing need an
- * account. The versions of the systems copied into the library are remembered locally, to
- * tell when a subscribed system got an update.
+ * Community client: systems and custom shader nodes shared by their authors on the FX
+ * Designer server (server/src/community.ts). Browsing works signed out; publishing and
+ * subscribing need an account. The versions of the systems copied into the library are
+ * remembered locally, to tell when a subscribed system got an update (installed nodes keep
+ * their own version, see communityNodes.ts).
  */
 import { readStorage, writeStorage } from '../util/storage';
 import { call } from './cloud';
@@ -14,12 +15,16 @@ export interface CommunityCategory {
 }
 
 export type CommunitySort = 'trending' | 'popular' | 'new';
+/** What a publication shares: a whole system, or one custom shader node. */
+export type PublicationKind = 'system' | 'node';
 export type CommunityScope = 'all' | 'subscribed' | 'mine';
 /** Animated systems move (time, simulations); static ones are still images. */
 export type CommunityKind = 'all' | 'animated' | 'static';
 
 export interface CommunitySummary {
   readonly id: string;
+  /** Absent from older servers: a system. */
+  readonly kind?: PublicationKind;
   readonly name: string;
   readonly description: string;
   readonly category: string;
@@ -65,6 +70,7 @@ export interface CommunitySystem extends CommunitySummary {
 }
 
 export interface CommunityQuery {
+  readonly type: PublicationKind;
   readonly scope: CommunityScope;
   readonly kind: CommunityKind;
   readonly sort: CommunitySort;
@@ -128,6 +134,7 @@ export class Community {
 
   async list(query: CommunityQuery): Promise<{ items: CommunitySummary[]; more: boolean }> {
     const params = new URLSearchParams({
+      type: query.type,
       scope: query.scope,
       kind: query.kind === 'all' ? '' : query.kind,
       sort: query.sort,
@@ -135,15 +142,33 @@ export class Community {
       q: query.q,
       page: String(query.page),
     });
-    return call(`community?${params.toString()}`);
+    const result = await call<{ items: CommunitySummary[]; more: boolean }>(
+      `community?${params.toString()}`,
+    );
+    for (const item of result.items) this.seen(item);
+    return result;
   }
 
-  get(id: string): Promise<CommunitySystem> {
-    return call(`community/${encodeURIComponent(id)}`);
+  async get(id: string): Promise<CommunitySystem> {
+    const system = await call<CommunitySystem>(`community/${encodeURIComponent(id)}`);
+    this.seen(system);
+    return system;
   }
 
-  async suggestTags(query: string, exclude: readonly string[]) {
-    const params = new URLSearchParams({ q: query });
+  /** Latest version seen online this session (update badges of installed nodes). */
+  latestVersion(id: string): number | null {
+    return this.latest.get(id) ?? null;
+  }
+
+  private readonly latest = new Map<string, number>();
+
+  private seen(item: Pick<CommunitySummary, 'id' | 'version'>): void {
+    const version = publicationVersion(item.version);
+    if (version !== null) this.latest.set(item.id, version);
+  }
+
+  async suggestTags(query: string, exclude: readonly string[], type: PublicationKind = 'system') {
+    const params = new URLSearchParams({ q: query, type });
     for (const tag of exclude) params.append('exclude', tag);
     const result = await call<{ tags: { tag: string; count: number }[] }>(
       `community/tags?${params}`,
@@ -163,15 +188,16 @@ export class Community {
 
   private readonly previews = new Map<string, Promise<PreviewStrip | null>>();
 
-  /** Publishes a new system: its community id and version (1). */
+  /** Publishes a new system (or node package): its community id and version (1). */
   async publish(
     fields: PublishFields,
     document: unknown,
     media: PublishMedia,
+    kind: PublicationKind = 'system',
   ): Promise<{ id: string; version: number | null }> {
     const result = await call<{ id: string; version?: unknown }>('community', {
       method: 'POST',
-      body: JSON.stringify({ ...fields, ...media, document }),
+      body: JSON.stringify({ ...fields, ...media, kind, document }),
     });
     return { id: result.id, version: await this.resolveVersion(result.id, result.version) };
   }

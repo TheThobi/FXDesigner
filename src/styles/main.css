@@ -1911,12 +1911,16 @@ button.panel-tab:hover:not(.active) {
   transition: border-color 0.12s;
 }
 
+/* Reduced motion (an OS setting): movement goes (sliding, bouncing, looping animations), but
+   quick color and light feedback stays, so the UI still answers the pointer. Hover previews
+   (preset cycling, community animations) start on the user's own gesture and stay. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation: none !important;
-    transition: none !important;
+    transition-property:
+      color, background-color, border-color, opacity, box-shadow, filter !important;
   }
 }
 
@@ -5393,9 +5397,20 @@ body.dragging-tab * {
   background: color-mix(in srgb, var(--frame) 14%, transparent);
 }
 
+.graph-frame.marquee-hit {
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.graph-frame.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
 .graph-frame-head {
-  height: 28px;
-  padding: 0 10px;
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: var(--frame-font, 12px);
+  line-height: 1.2;
   display: flex;
   align-items: center;
   border-radius: 5px 5px 0 0;
@@ -5423,4 +5438,123 @@ body.dragging-tab * {
     color-mix(in srgb, var(--frame) 80%, transparent) 50%
   );
   border-radius: 0 0 5px 0;
+}
+
+/* ---- Community shader nodes ----------------------------------------------------------------- */
+
+/* Systems / Shader nodes switch, right of the window title. */
+.community-dialog .library-head .segmented.community-types {
+  flex: 0 0 auto;
+  width: 260px;
+}
+
+.community-badge.installed {
+  background: color-mix(in srgb, #5fd38d 80%, #000);
+  color: #0d1a12;
+}
+
+.community-code {
+  margin-top: 12px;
+}
+
+.community-code > summary {
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.community-code-view {
+  max-height: 40vh;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre;
+  user-select: text;
+}
+
+/* Installed community nodes in the node browser. */
+.generator-item.community-item {
+  --cat: #c58bff;
+}
+
+.generator-item .tile-update {
+  top: 4px;
+  left: 4px;
+  padding: 0 4px;
+  font-size: 9px;
+}
+
+.community-browse-link {
+  display: block;
+  margin: 4px 8px 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.community-browse-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* Publishing a system: your nodes inside it with unpublished changes. */
+.community-node-hint {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.community-node-hint p {
+  margin: 0 0 6px;
+  color: var(--text-dim);
+}
+
+/* ---- About / GitHub ------------------------------------------------------------------------- */
+
+.tool-btn.github-link {
+  color: var(--text-dim);
+  text-decoration: none;
+}
+
+.tool-btn.github-link:hover {
+  color: var(--text-strong);
+}
+
+.about-dialog {
+  max-width: 460px;
+}
+
+.about-dialog a:not(.btn) {
+  color: var(--accent);
+}
+
+.about-dialog .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+}
+
+.about-heading {
+  margin: 14px 0 4px;
+  font-size: 13px;
+}
+
+.about-license {
+  font-size: 11px;
+}
+
+.community-licence {
+  font-size: 11px;
 }

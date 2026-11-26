@@ -30,7 +30,7 @@ npm scripts need Node ≥ 20 (local Node 22 works); `make <target>` runs the sam
 - `npm run docs`: regenerates `docs/development/nodes.md` after any node change (a unit test
   fails otherwise).
 - `npm run test:e2e` (`make e2e`): Playwright against the production build, one worker; the
-  app runs with `?e2e` (no background thumbnails) and the generator sweep is split in 4 tests.
+  app runs with `?e2e` (no background thumbnails) and the generator sweep is split in 8 tests (2 per part).
   Every test is tagged `@part1`…`@part4` (similar durations): CI runs the parts on 4 parallel
   jobs (`--grep @partN`); tag new tests to keep them balanced.
   Screenshots in `test-results/generators/`: look at them after touching GLSL.

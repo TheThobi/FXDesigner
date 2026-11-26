@@ -80,8 +80,9 @@ color, normal, height and roughness.
 dragging a frame moves its nodes.
 
 **Library** — systems in folders, autosaved in the browser, exportable as JSON, shareable as
-links. Signing in syncs them across devices and opens the **community** (publish, subscribe,
-report). Installable as an app; works offline.
+links. Signing in syncs them across devices and opens the **community** (publish systems and
+custom shader nodes, install shared nodes into the node browser, subscribe, report).
+Installable as an app; works offline.
 
 The full list of nodes and parameters is in the [node reference](docs/development/nodes.md).
 
@@ -172,6 +173,32 @@ Guides (in French): [accounts and PostgreSQL](docs/deployment/server.md) ·
 | [Node authoring](docs/development/authoring.md)  | Writing generators and operators      |
 | [Node reference](docs/development/nodes.md)      | Every node, generated from the code   |
 | [Roadmap](docs/project/roadmap.md)               | Future ideas (French)                 |
+
+<br />
+
+## About AI
+
+Most of FX Designer's code and documentation was written by AI assistants (**Claude** and
+**ChatGPT**). That's what made a tool of this size possible in a reasonable time for one
+person, who is also its first user: it was built as a texture production tool for real game
+work, not as a demo.
+
+The author decides what gets built and how it should look and behave, tests every feature in
+production and reports what breaks; the assistants write the code, the tests and the docs.
+The repository is organised for that: [agents.md](agents.md) is the entry point for AI
+assistants, [the authoring guide](docs/development/authoring.md) explains how to write a node,
+and the CI runs every generator in a real browser on each push.
+
+<br />
+
+## Contributing
+
+Anyone can contribute, with or without AI help:
+
+- **Ideas and bugs**: open an [issue](https://github.com/TheThobi/FXDesigner/issues).
+- **Nodes and fixes**: pull requests are welcome. Start with [agents.md](agents.md) and the
+  [authoring guide](docs/development/authoring.md); `npm run check` must pass.
+- **Effects**: share your systems and custom shader nodes in the app's **Community** window.
 
 <br />
 

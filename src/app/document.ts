@@ -17,6 +17,7 @@ import {
   dependsOn,
   hasOutput,
   MAX_NODE_CODE,
+  MAX_NODE_NAME,
   effectiveGenerator,
   sanitizeBaseParamEdits,
   sanitizeCustomParams,
@@ -407,6 +408,9 @@ function sanitizeNode(raw: unknown, lookup: GeneratorLookup): GraphNode | null {
     frozenAt:
       typeof obj.frozenAt === 'number' && Number.isFinite(obj.frozenAt) ? obj.frozenAt : null,
     ...(obj.collapsed === true ? { collapsed: true } : {}),
+    ...(typeof obj.name === 'string' && obj.name.trim()
+      ? { name: obj.name.trim().slice(0, MAX_NODE_NAME) }
+      : {}),
     ...(custom.length ? { customParams: custom } : {}),
     ...(baseParamEdits ? { baseParamEdits } : {}),
     ...(typeof obj.code === 'string' &&

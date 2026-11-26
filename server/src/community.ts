@@ -5,10 +5,15 @@ import { HttpError, readJson, sendJson, type Request, type Router } from './http
 import { RateLimiter } from './security.js';
 
 /**
- * Community: systems shared by their authors. Anyone can browse and open them; signed-in
- * users publish (name, description, category, tags, thumbnail, document), edit or delete
- * their own, and subscribe to others' (a subscription keeps the system in their list and
- * tells them when it was updated). "Trending" ranks by subscriptions of the last 7 days.
+ * Community: systems and custom shader nodes shared by their authors. Anyone can browse and
+ * open them; signed-in users publish (name, description, category, tags, thumbnail,
+ * document), edit or delete their own, and subscribe to others' (a subscription keeps the
+ * publication in their list and tells them when it was updated). "Trending" ranks by
+ * subscriptions of the last 7 days.
+ *
+ * A publication's `kind` is 'system' (a whole document) or 'node': a document holding one
+ * custom shader node (edited GLSL and / or its own parameters), installed by others as a
+ * reusable node. Both share the table, the routes, subscriptions and moderation.
  */
 
 /** Categories (ids are stored; labels are shown by the client). */
@@ -29,9 +34,28 @@ const CATEGORY_IDS = new Set(COMMUNITY_CATEGORIES.map((c) => c.id));
 export const SORTS = ['trending', 'popular', 'new'] as const;
 export type CommunitySort = (typeof SORTS)[number];
 
+export const KINDS = ['system', 'node'] as const;
+export type PublicationKind = (typeof KINDS)[number];
+
+/** Publication kind of a body (older clients send none: a system). */
+export function parseKind(raw: unknown): PublicationKind {
+  if (raw === undefined || raw === null) return 'system';
+  if (raw !== 'system' && raw !== 'node') throw new HttpError(400, 'Invalid kind');
+  return raw;
+}
+
+/** Kind filter of a `type` list parameter: 'system' when absent (older clients), '' = both. */
+export function kindFilter(raw: string | null): PublicationKind | '' {
+  if (raw === 'all') return '';
+  return raw === 'node' ? 'node' : 'system';
+}
+
 const PAGE_SIZE = 24;
 const MAX_PUBLISHED = 200;
 const MAX_DOCUMENT = 4 * 1024 * 1024;
+/** A node package: one node, its code (64 KB at most) and settings. */
+const MAX_NODE_DOCUMENT = 256 * 1024;
+const MAX_NODE_CODE = 65536;
 const MAX_THUMB = 512 * 1024;
 /** Hover animation of animated systems: a strip of frames side by side. */
 const MAX_PREVIEW = 2 * 1024 * 1024;
@@ -134,6 +158,31 @@ function parseDocument(raw: unknown): string {
   return doc;
 }
 
+/**
+ * A node package: a document holding exactly one shader node with custom code or custom
+ * parameters, and no links. The client validates the rest like any document.
+ */
+export function parseNodeDocument(raw: unknown): string {
+  const doc = parseDocument(raw);
+  if (doc.length > MAX_NODE_DOCUMENT) throw new HttpError(413, 'Node too large');
+  const o = raw as Record<string, unknown>;
+  if (!Array.isArray(o.nodes) || o.nodes.length !== 1)
+    throw new HttpError(400, 'A node package holds one node');
+  if (Array.isArray(o.links) && o.links.length)
+    throw new HttpError(400, 'A node package has no links');
+  const first: unknown = o.nodes[0];
+  const node = (first && typeof first === 'object' ? first : {}) as Record<string, unknown>;
+  if (typeof node.generator !== 'string') throw new HttpError(400, 'Invalid node');
+  const code = typeof node.code === 'string' ? node.code : null;
+  if (code !== null && code.length > MAX_NODE_CODE) throw new HttpError(413, 'Code too long');
+  const custom = Array.isArray(node.customParams) && node.customParams.length > 0;
+  if (code === null && !custom) throw new HttpError(400, 'Not a custom shader node');
+  return doc;
+}
+
+const documentOf = (kind: PublicationKind, raw: unknown) =>
+  kind === 'node' ? parseNodeDocument(raw) : parseDocument(raw);
+
 /** ILIKE pattern matching `q` literally. */
 export function likePattern(q: string): string {
   return `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
@@ -151,7 +200,8 @@ export function orderBy(sort: string): string {
 }
 
 const SUMMARY = `
-  c.id, c.name, c.description, c.category, c.tags, c.thumb, c.version, c.uses, c.animated,
+  c.id, c.kind, c.name, c.description, c.category, c.tags, c.thumb, c.version, c.uses,
+  c.animated,
   c.preview_frames, (c.preview IS NOT NULL) AS has_preview, c.hidden,
   (extract(epoch FROM c.created_at) * 1000)::bigint AS created,
   (extract(epoch FROM c.updated_at) * 1000)::bigint AS updated,
@@ -166,6 +216,7 @@ const SUMMARY = `
 function summary(r: Record<string, unknown>) {
   return {
     id: r.id,
+    kind: r.kind === 'node' ? 'node' : 'system',
     name: r.name,
     description: r.description,
     category: r.category,
@@ -214,21 +265,23 @@ export function communityRoutes(
   router.add('GET', '/api/community/tags', async (req, res) => {
     const query = normalizeTags(req.query.get('q'))[0] ?? '';
     const exclude = normalizeTags(req.query.getAll('exclude'));
+    const kind = kindFilter(req.query.get('type'));
     const { rows } = await db.query<{ tag: string; count: string }>(
       `SELECT tag, count(DISTINCT c.id) AS count
        FROM community_systems c CROSS JOIN LATERAL unnest(c.tags) AS tags(tag)
        WHERE NOT c.hidden AND ($1::text = '' OR strpos(tag, $1) > 0)
-         AND NOT (tag = ANY($2::text[]))
+         AND NOT (tag = ANY($2::text[])) AND ($3::text = '' OR c.kind = $3)
        GROUP BY tag
        ORDER BY CASE WHEN tag = $1 THEN 0 WHEN strpos(tag, $1) = 1 THEN 1 ELSE 2 END,
                 count DESC, tag
        LIMIT 8`,
-      [query, exclude],
+      [query, exclude, kind],
     );
     sendJson(res, 200, { tags: rows.map(({ tag, count }) => ({ tag, count: Number(count) })) });
   });
 
-  // List: ?scope=all|mine|subscribed &sort=trending|popular|new &category= &q= &page=
+  // List: ?type=system|node|all &scope=all|mine|subscribed &sort=trending|popular|new
+  //       &kind=animated|static &category= &q= &page=
   router.add('GET', '/api/community', async (req, res) => {
     const me = await viewer(req);
     const scope = req.query.get('scope') ?? 'all';
@@ -245,6 +298,11 @@ export function communityRoutes(
       where.push(
         'EXISTS (SELECT 1 FROM community_subscriptions s WHERE s.system_id = c.id AND s.user_id = $1::uuid)',
       );
+    const type = kindFilter(req.query.get('type'));
+    if (type) {
+      args.push(type);
+      where.push(`c.kind = $${args.length}`);
+    }
     const kind = req.query.get('kind');
     if (kind === 'animated') where.push('c.animated');
     if (kind === 'static') where.push('NOT c.animated');
@@ -301,21 +359,22 @@ export function communityRoutes(
     if (!publishes.take(user.id)) throw new HttpError(429, 'Too many publications, try later');
     const body = (await readJson(req.raw, BODY_LIMIT)) as Record<string, unknown>;
     const meta = parsePublishInput(body) as PublishInput;
-    const doc = parseDocument(body.document);
+    const kind = parseKind(body.kind);
+    const doc = documentOf(kind, body.document);
     const count = await db.query<{ n: string }>(
       'SELECT count(*) AS n FROM community_systems WHERE user_id = $1',
       [user.id],
     );
     if (Number(count.rows[0]!.n) >= MAX_PUBLISHED)
-      throw new HttpError(403, `At most ${MAX_PUBLISHED} published systems per account`);
+      throw new HttpError(403, `At most ${MAX_PUBLISHED} publications per account`);
     const cid = randomBytes(9).toString('hex');
     const frames = previewFrames(body.previewFrames);
     const preview = frames ? parsePreview(body.preview) : null;
     await db.query(
       `INSERT INTO community_systems
          (id, user_id, name, description, category, tags, thumb, document, animated, preview,
-          preview_frames)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)`,
+          preview_frames, kind)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)`,
       [
         cid,
         user.id,
@@ -328,6 +387,7 @@ export function communityRoutes(
         body.animated === true,
         preview,
         preview ? frames : 0,
+        kind,
       ],
     );
     sendJson(res, 200, { id: cid, version: 1 });
@@ -350,7 +410,13 @@ export function communityRoutes(
     if (meta.category !== undefined) set('category', meta.category);
     if (meta.tags !== undefined) set('tags', meta.tags);
     if (body.document !== undefined) {
-      set('document', parseDocument(body.document), '::jsonb');
+      // A new version keeps the publication's kind.
+      const owned = await db.query<{ kind: string }>(
+        'SELECT kind FROM community_systems WHERE id = $1 AND user_id = $2',
+        [cid, user.id],
+      );
+      if (!owned.rows[0]) throw new HttpError(404, 'No such system of yours');
+      set('document', documentOf(parseKind(owned.rows[0].kind), body.document), '::jsonb');
       sets.push('version = version + 1');
     }
     if (body.animated !== undefined) set('animated', body.animated === true);

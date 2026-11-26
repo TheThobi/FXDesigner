@@ -5,7 +5,7 @@ import {
   isOperator,
 } from '../engine/generator';
 import { generatorsByFamily } from '../generators/registry';
-import { openContextMenu } from './ContextMenu';
+import { openContextMenu, type ContextMenuEntry } from './ContextMenu';
 import { clear, h } from './dom';
 import { icon } from './icons';
 import { segmentedTabs, type SegmentedTabs } from './Panel';
@@ -19,6 +19,20 @@ export interface TileDropTarget {
   drop(id: string, x: number, y: number): void;
   /** The drag ended (dropped or cancelled). */
   end(): void;
+}
+
+/** An installed community node, shown as a tile of the "Community" section. */
+export interface CommunityTile {
+  /** Tile id (`community:<id>`), passed to onSelect / onAdd / the drop target. */
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly author: string;
+  readonly thumb: string | null;
+  /** Built on an operator (listed in the Operators tab). */
+  readonly operator: boolean;
+  /** A newer version is online. */
+  readonly update: boolean;
 }
 
 /** Pointer distance (px) before pressing a tile becomes a drag. */
@@ -42,6 +56,10 @@ export class GeneratorList {
   hoveredId: string | null = null;
   /** Receives tiles dragged out of the browser. */
   dropTarget: TileDropTarget | null = null;
+  /** Extra context menu entries of a community tile (details, update, uninstall). */
+  communityMenu: ((id: string) => ContextMenuEntry[]) | null = null;
+  /** "Browse community nodes" link of the Community sections. */
+  onBrowseCommunity: (() => void) | null = null;
   private readonly mainThumbs = new Map<string, string>();
   private readonly presetThumbs = new Map<string, readonly string[]>();
   private cycleTimer: ReturnType<typeof setInterval> | undefined;
@@ -178,6 +196,81 @@ export class GeneratorList {
     if (img && main) img.src = main;
   }
 
+  /** Installed community nodes (one "Community" section per tab). */
+  setCommunityNodes(tiles: readonly CommunityTile[]): void {
+    for (const id of [...this.items.keys()])
+      if (id.startsWith('community:')) {
+        this.observer.unobserve(this.items.get(id)!);
+        this.items.delete(id);
+      }
+    for (const section of this.list.querySelectorAll('.community-section')) section.remove();
+    for (const tab of ['generators', 'operators'] as const) {
+      const mine = tiles.filter((t) => t.operator === (tab === 'operators'));
+      const section = h(
+        'details',
+        {
+          class: 'generator-category community-section',
+          open: true,
+          'data-family': 'community',
+          'data-tab': tab,
+        },
+        h(
+          'summary',
+          {},
+          h('span', { text: 'Community' }),
+          h('span', { class: 'count', text: String(mine.length) }),
+        ),
+        mine.length
+          ? h('div', { class: 'tile-grid' }, ...mine.map((t) => this.communityItem(t)))
+          : null,
+        h('button', {
+          type: 'button',
+          class: 'community-browse-link',
+          text: mine.length ? 'Browse community nodes…' : 'Install shader nodes shared by others…',
+          onclick: () => this.onBrowseCommunity?.(),
+        }),
+      );
+      // Installed nodes come first; without any, the section only offers the browse link (last).
+      if (mine.length) this.list.prepend(section);
+      else this.list.append(section);
+    }
+    this.filter(this.search.value);
+    if (this.activeId) this.setActive(this.activeId);
+  }
+
+  private communityItem(t: CommunityTile): HTMLElement {
+    const el = h(
+      'button',
+      {
+        class: 'generator-item community-item',
+        title: `${t.name} · by ${t.author}${t.description ? `\n${t.description}` : ''}`,
+        'data-id': t.id,
+        'data-category': 'community',
+      },
+      h(
+        'div',
+        { class: t.thumb ? 'tile-thumb' : 'tile-thumb operator-glyph' },
+        t.thumb
+          ? h('img', {
+              alt: '',
+              width: 64,
+              height: 64,
+              draggable: false,
+              src: t.thumb,
+              class: 'loaded',
+            })
+          : '◇',
+        t.update ? h('span', { class: 'community-badge tile-update', text: 'Update' }) : null,
+      ),
+      h('div', { class: 'tile-stripe' }),
+      h('div', { class: 'tile-name', text: t.name }),
+      h('div', { class: 'tile-type', text: 'Community node' }),
+    );
+    this.bindTile(el, t.id, t.name);
+    this.items.set(t.id, el);
+    return el;
+  }
+
   private build(): void {
     clear(this.list);
     for (const family of generatorsByFamily()) {
@@ -236,8 +329,22 @@ export class GeneratorList {
       h('div', { class: 'tile-name', text: g.name }),
       h('div', { class: 'tile-type', text: typeLabel(g.category) }),
     );
-    // Click swaps the selected node's generator; double-click adds a node (the single click
-    // is delayed so a double-click doesn't also swap); drag onto the viewport adds it there.
+    this.bindTile(el, g.id, g.name);
+    this.items.set(g.id, el);
+    this.observer.observe(el);
+    if (g.id !== 'image' && g.presets?.length && g.kind === 'shader') {
+      el.addEventListener('pointerenter', () => this.startCycle(g.id));
+      el.addEventListener('pointerleave', () => this.stopCycle());
+      el.title += `\nHover to preview ${g.presets.length} presets`;
+    }
+    return el;
+  }
+
+  /**
+   * Click swaps the selected node's generator; double-click adds a node (the single click is
+   * delayed so a double-click doesn't also swap); drag onto the viewport adds it there.
+   */
+  private bindTile(el: HTMLElement, id: string, name: string): void {
     let clickTimer: ReturnType<typeof setTimeout> | undefined;
     let dragged = false;
     el.addEventListener('click', (e) => {
@@ -247,17 +354,19 @@ export class GeneratorList {
         return;
       }
       if (e.detail > 1) return;
-      clickTimer = setTimeout(() => this.onSelect(g.id), 220);
+      clickTimer = setTimeout(() => this.onSelect(id), 220);
     });
     el.addEventListener('dblclick', () => {
       clearTimeout(clickTimer);
-      this.onAdd(g.id);
+      this.onAdd(id);
     });
     el.addEventListener('contextmenu', (e) => {
       e.preventDefault();
+      const extra = id.startsWith('community:') ? (this.communityMenu?.(id) ?? []) : [];
       openContextMenu(e.clientX, e.clientY, [
-        { label: 'Add to the graph', shortcut: 'Dbl-click', run: () => this.onAdd(g.id) },
-        { label: 'Replace the selected node', shortcut: 'Click', run: () => this.onSelect(g.id) },
+        { label: 'Add to the graph', shortcut: 'Dbl-click', run: () => this.onAdd(id) },
+        { label: 'Replace the selected node', shortcut: 'Click', run: () => this.onSelect(id) },
+        ...(extra.length ? [null, ...extra] : []),
       ]);
     });
     // Pointer-driven drag (not native HTML drag & drop, which other pointer captures and
@@ -275,7 +384,7 @@ export class GeneratorList {
           if (Math.hypot(ev.clientX - start[0], ev.clientY - start[1]) < TILE_DRAG_THRESHOLD)
             return;
           const thumb = el.querySelector('.tile-thumb')?.cloneNode(true) ?? null;
-          ghost = h('div', { class: 'tile-ghost' }, thumb, h('span', { text: g.name }));
+          ghost = h('div', { class: 'tile-ghost' }, thumb, h('span', { text: name }));
           document.body.append(ghost);
           document.body.classList.add('dragging-tile');
           window.getSelection()?.removeAllRanges();
@@ -292,7 +401,7 @@ export class GeneratorList {
         ghost.remove();
         document.body.classList.remove('dragging-tile');
         dragged = true;
-        if (ev.type === 'pointerup') this.dropTarget?.drop(g.id, ev.clientX, ev.clientY);
+        if (ev.type === 'pointerup') this.dropTarget?.drop(id, ev.clientX, ev.clientY);
         this.dropTarget?.end();
       };
       el.addEventListener('pointermove', move);
@@ -300,14 +409,6 @@ export class GeneratorList {
       el.addEventListener('pointercancel', up);
     });
     el.title += '\nClick: use on the selected node · Double-click or drag: new node';
-    this.items.set(g.id, el);
-    this.observer.observe(el);
-    if (g.id !== 'image' && g.presets?.length && g.kind === 'shader') {
-      el.addEventListener('pointerenter', () => this.startCycle(g.id));
-      el.addEventListener('pointerleave', () => this.stopCycle());
-      el.title += `\nHover to preview ${g.presets.length} presets`;
-    }
-    return el;
   }
 
   private filter(query: string): void {
@@ -322,8 +423,12 @@ export class GeneratorList {
       for (const sub of section.querySelectorAll<HTMLElement>('.generator-subcategory')) {
         sub.hidden = sub.querySelector('.generator-item:not([hidden])') === null;
       }
-      const inTab = (section.dataset.family === 'operators') === (this.tab === 'operators');
-      section.hidden = !inTab || visible === 0;
+      const tab =
+        section.dataset.tab ??
+        (section.dataset.family === 'operators' ? 'operators' : 'generators');
+      // The Community section stays (with its browse link) while nothing filters it out.
+      const empty = visible === 0 && (q !== '' || !section.classList.contains('community-section'));
+      section.hidden = tab !== this.tab || empty;
       if (q && visible) section.open = true;
     }
   }
@@ -372,6 +477,7 @@ const OPERATOR_GLYPHS: Readonly<Record<string, string>> = {
   'op-blur': '◌',
   'op-slope-blur': '⥂',
   'op-distance': '◎',
+  'op-dilate': '⬚',
   'op-edges': '⬚',
   'op-unpack': 'R G B',
   'op-pack': 'RGBA',

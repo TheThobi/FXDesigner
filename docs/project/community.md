@@ -4,8 +4,48 @@
 > tendances / popularité / nouveautés, catégories, tags, recherche, abonnements, publication
 > et édition, versions). Voir `server/src/community.ts` et
 > [architecture.md](../development/architecture.md#server-and-accounts). Signalements et
-> modération aussi (motifs, masquage automatique, file des modérateurs `MODERATORS`). Le reste
-> de ce document (paquets de shaders custom) reste à faire.
+> modération aussi (motifs, masquage automatique, file des modérateurs `MODERATORS`).
+>
+> Le partage de **nodes de shaders custom** est en place aussi (onglet « Shader nodes ») :
+> une node convertie en code ou dotée de paramètres custom se publie depuis la fenêtre ou
+> le menu de la node. Le paquet n'est pas le format `ptm-effect` imaginé plus bas : c'est un
+> document FX Designer à **une seule node** (générateur de base, code, paramètres custom et
+> édités, valeurs, look, rampe), validé et migré comme tout document. Le code GLSL est
+> affiché en lecture seule sur la page de la node et ne s'exécute qu'après un clic
+> (Install ou Add to the graph). Les nodes installées vont dans une section **Community** du
+> navigateur de nodes (localStorage, pas encore synchronisées avec le compte). Restent à
+> faire : synchronisation des nodes installées et import Shadertoy. Une node ajoutée depuis la
+> communauté prend le nom de la publication (renommable).
+>
+> **Licence** : pas de choix. Tout ce qui est publié dans la communauté est réutilisable
+> librement par n'importe qui, dans n'importe quel projet (rappelé dans le formulaire de
+> publication et sur chaque page).
+
+## Systèmes et nodes publiés ensemble
+
+Une node publiée et le système qui la contient sont **deux publications indépendantes**.
+Règles retenues :
+
+- **Lien de la node** : la node que vous publiez est reliée à sa publication (localement, par
+  système et par node : `NodeLinks`). Une copie ou un duplicata de la node n'est pas relié :
+  c'est une nouvelle node. Comme pour les systèmes, l'état est local / publié / modifié
+  (hash du paquet, la graine du workspace mise à part).
+- **Fenêtre Community** : l'onglet Systems parle du système ouvert (Publish · Up to date ·
+  Publish update), l'onglet Shader nodes de la node sélectionnée (Publish selected node ·
+  Node published · up to date · Publish node update). Les deux peuvent être « modifiés » en
+  même temps ; chacun se publie de son côté.
+- **Publier le système ne publie pas ses nodes** : le système embarque la version actuelle
+  de la node, donc ceux qui ouvrent le système ont tout. Mais ceux qui ont installé la node
+  n'ont les changements qu'avec une mise à jour de la node. Le formulaire de publication du
+  système (et sa fenêtre de mise à jour) liste donc vos nodes publiées modifiées, avec un
+  bouton « Update "…" » par node.
+- **Publier une node ne modifie pas le système** : le lien est hors du document, le hash du
+  système ne bouge pas.
+- **Systèmes et nodes des autres** : une node ajoutée depuis la communauté est une copie ;
+  la mise à jour de la publication ne change pas les systèmes qui l'utilisent déjà (une
+  proposition « Update this node to vN » dans Details est dans la roadmap).
+- **Suppression** d'une node publiée : les copies installées et celles des systèmes restent ;
+  le lien de votre node disparaît.
 
 But : parcourir, publier et réutiliser des **effets** créés par d'autres (presets d'effets
 existants ou nouveaux générateurs en shader), depuis l'application.
@@ -154,8 +194,9 @@ vec4 generate(vec2 uv) {
 - **Licence** : sauf mention contraire de l'auteur, les shaders Shadertoy sont sous **CC
   BY-NC-SA 3.0**. Cela impose de **conserver l'attribution** (auteur et lien), de ne pas en
   faire d'usage commercial et de partager sous la même licence. L'import doit enregistrer
-  l'auteur, l'URL et la licence dans le paquet, puis les afficher. La publication d'un
-  shader importé dans la bibliothèque doit reprendre la licence d'origine.
+  l'auteur, l'URL et la licence dans le paquet, puis les afficher. Cette licence est
+  incompatible avec la réutilisation libre de la communauté : un shader importé reste
+  local, sauf si son auteur l'autorise.
 
 ## Documentation à écrire
 
@@ -182,8 +223,8 @@ documentation d'auteur, accessible depuis l'éditeur. À prévoir :
   générée automatiquement à partir des commentaires des fichiers `.glsl`.
 - **Presets** : nommer par l'aspect obtenu et jamais d'après un autre générateur, choisir un
   `featuredPreset` représentatif, et utiliser les raccourcis de post (`posterize: 4`…).
-- **Publication** : les critères de modération, la licence choisie par l'auteur (la proposer
-  explicitement : CC0, CC BY, CC BY-NC-SA…) et l'attribution des sources.
+- **Publication** : les critères de modération, la réutilisation libre de tout ce qui est
+  publié (pas de choix de licence) et l'attribution des sources.
 
 Les fichiers `docs/development/authoring.md` et `agents.md` couvrent déjà une partie de ce
 contenu pour les développeurs. La documentation d'auteur en serait la version publique et

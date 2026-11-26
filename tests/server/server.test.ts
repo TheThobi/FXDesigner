@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  kindFilter,
   likePattern,
   normalizeTags,
   orderBy,
+  parseKind,
+  parseNodeDocument,
   parsePublishInput,
   parseReport,
 } from '../../server/src/community';
 import { parsePublished } from '../../server/src/library';
+import { parseUserData, userDataKey } from '../../server/src/userData';
 import { applyDevOverrides, loadConfig, parseModerators } from '../../server/src/config';
 import { parseCookies, Router, serializeCookie } from '../../server/src/http';
 import {
@@ -165,6 +169,52 @@ describe('community', () => {
     expect(orderBy('new')).toContain('created_at');
     expect(orderBy('popular')).toContain('subscribers');
     expect(orderBy('; DROP TABLE users')).toContain('recent');
+  });
+});
+
+describe('community shader nodes', () => {
+  const node = (extra: Record<string, unknown>) => ({
+    format: 'fx-designer',
+    nodes: [{ id: 'n1', generator: 'fractal-noise', ...extra }],
+    links: [],
+  });
+
+  it('reads the publication kind and list filter', () => {
+    expect(parseKind(undefined)).toBe('system');
+    expect(parseKind('node')).toBe('node');
+    expect(() => parseKind('script')).toThrow('Invalid kind');
+    // Older clients list systems only; 'all' lists both.
+    expect(kindFilter(null)).toBe('system');
+    expect(kindFilter('node')).toBe('node');
+    expect(kindFilter('all')).toBe('');
+    expect(kindFilter('nope')).toBe('system');
+  });
+
+  it('accepts one custom shader node only', () => {
+    expect(JSON.parse(parseNodeDocument(node({ code: 'vec4 generate(vec2 uv);' })))).toEqual(
+      node({ code: 'vec4 generate(vec2 uv);' }),
+    );
+    expect(() => parseNodeDocument(node({ customParams: [{ key: 'a' }] }))).not.toThrow();
+    expect(() => parseNodeDocument(node({}))).toThrow('Not a custom shader node');
+    expect(() => parseNodeDocument(node({ code: 'x'.repeat(70_000) }))).toThrow('Code too long');
+    expect(() =>
+      parseNodeDocument({ ...node({ code: 'x' }), links: [{ from: 'n1', to: 'n1' }] }),
+    ).toThrow('no links');
+    const two = node({ code: 'x' });
+    expect(() => parseNodeDocument({ ...two, nodes: [...two.nodes, ...two.nodes] })).toThrow(
+      'one node',
+    );
+    expect(() => parseNodeDocument(node({ generator: 3, code: 'x' }))).toThrow('Invalid node');
+  });
+});
+
+describe('user data', () => {
+  it('accepts known keys and bounded objects', () => {
+    expect(userDataKey('community')).toBe('community');
+    expect(() => userDataKey('../x')).toThrow('Unknown key');
+    expect(parseUserData({ a: 1 })).toBe('{"a":1}');
+    expect(() => parseUserData([1])).toThrow('Invalid value');
+    expect(() => parseUserData({ big: 'x'.repeat(600_000) })).toThrow('too large');
   });
 });
 

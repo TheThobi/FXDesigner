@@ -229,8 +229,15 @@ export interface ViewportCallbacks {
   readonly onLinkDrop: (drop: LinkDrop) => void;
   /** A frame was dragged (with the nodes inside it) or resized. */
   readonly onFrameChange: (frame: GraphViewFrame, moves: readonly NodeMove[]) => void;
+  /** Selected nodes and comment frames dragged together (frames carry their inner nodes). */
+  readonly onGroupMove: (
+    moves: readonly NodeMove[],
+    frames: readonly { readonly id: string; readonly x: number; readonly y: number }[],
+  ) => void;
   /** Double-click on a frame title. */
   readonly onFrameRename: (id: string) => void;
+  /** Double-click on a node header: rename the node. */
+  readonly onNodeRename: (id: string) => void;
 }
 
 /** A comment frame of the graph (world units). */
@@ -243,6 +250,8 @@ export interface GraphViewFrame {
   readonly title: string;
   /** CSS color of its tint. */
   readonly color: string;
+  /** Title size in px (absent = the default size). */
+  readonly fontSize?: number;
 }
 
 export interface GraphContextMenu {
@@ -630,6 +639,7 @@ export class Viewport {
   setFrames(frames: readonly GraphViewFrame[]): void {
     this.frames = frames;
     const ids = new Set(frames.map((f) => f.id));
+    for (const id of this.frameSelection) if (!ids.has(id)) this.frameSelection.delete(id);
     for (const [id, el] of this.frameEls) {
       if (ids.has(id)) continue;
       el.remove();
@@ -643,8 +653,123 @@ export class Viewport {
         this.frameWorld.append(el);
       }
       this.placeFrame(el, frame);
-      el.querySelector('.graph-frame-title')!.textContent = frame.title || 'Frame';
+      el.classList.toggle('selected', this.frameSelection.has(frame.id));
+      const title = el.querySelector<HTMLElement>('.graph-frame-title')!;
+      title.textContent = frame.title || 'Frame';
+      el.style.setProperty('--frame-font', frame.fontSize ? `${frame.fontSize}px` : '');
     }
+  }
+
+  /**
+   * Selected comment frames: a click on a title bar (Shift: add / remove), or the marquee
+   * around whole frames. They move with the selected nodes, and Delete removes them.
+   */
+  private readonly frameSelection = new Set<string>();
+
+  selectedFrames(): string[] {
+    return [...this.frameSelection];
+  }
+
+  /** Selects comment frame `id` alone (null: none). */
+  selectFrame(id: string | null): void {
+    this.setFrameSelection(id === null ? [] : [id]);
+  }
+
+  private setFrameSelection(ids: Iterable<string>): void {
+    const next = new Set(ids);
+    if (
+      next.size === this.frameSelection.size &&
+      [...next].every((id) => this.frameSelection.has(id))
+    )
+      return;
+    this.frameSelection.clear();
+    for (const id of next) if (this.frameEls.has(id)) this.frameSelection.add(id);
+    for (const [fid, el] of this.frameEls)
+      el.classList.toggle('selected', this.frameSelection.has(fid));
+  }
+
+  /** Whether card `c` lies entirely inside frame `f` (it moves with the frame). */
+  private inFrame(c: Card, f: GraphViewFrame): boolean {
+    return (
+      c.data.x >= f.x &&
+      c.data.y >= f.y &&
+      c.data.x + this.cardWidth(c) <= f.x + f.w &&
+      c.data.y + this.cardHeight(c) <= f.y + f.h
+    );
+  }
+
+  /**
+   * Drags the selection: selected nodes, selected frames and the nodes inside those frames.
+   * `lead` (world position of the grabbed item) snaps to the grid (Ctrl: free move); the rest
+   * keeps its offsets. A press without a drag runs `onClick`.
+   */
+  private dragGroup(
+    e: PointerEvent,
+    from: HTMLElement,
+    lead: readonly [number, number],
+    onClick?: () => void,
+  ): void {
+    e.preventDefault();
+    const start = [e.clientX, e.clientY] as const;
+    const grab = this.toWorld(e.clientX, e.clientY);
+    const frames = this.frames
+      .filter((f) => this.frameSelection.has(f.id))
+      .map((f) => ({ frame: f, el: this.frameEls.get(f.id)! }));
+    const ids = new Set(this.selection);
+    for (const { frame } of frames)
+      for (const c of this.cards.values()) if (this.inFrame(c, frame)) ids.add(c.id);
+    const group = [...ids]
+      .map((id) => this.cards.get(id))
+      .filter((c): c is Card => c !== undefined)
+      .map((c) => ({ card: c, origin: [c.data.x, c.data.y] as const }));
+    let moved = false;
+    let delta = [0, 0];
+    from.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      if (!moved && Math.hypot(ev.clientX - start[0], ev.clientY - start[1]) < DRAG_THRESHOLD)
+        return;
+      moved = true;
+      const p = this.toWorld(ev.clientX, ev.clientY);
+      let dx = p[0] - grab[0];
+      let dy = p[1] - grab[1];
+      if (!ev.ctrlKey) {
+        dx = Viewport.snap(lead[0] + dx) - lead[0];
+        dy = Viewport.snap(lead[1] + dy) - lead[1];
+      }
+      delta = [Math.round(dx), Math.round(dy)];
+      for (const { card: c, origin } of group) {
+        const x = Math.round(origin[0] + dx);
+        const y = Math.round(origin[1] + dy);
+        c.data = { ...c.data, x, y };
+        c.element.style.transform = `translate(${x}px, ${y}px)`;
+        c.element.classList.add('moving');
+      }
+      for (const { frame, el } of frames)
+        this.placeFrame(el, { ...frame, x: frame.x + delta[0]!, y: frame.y + delta[1]! });
+      this.renderLinks();
+      this.updateOcclusion();
+    };
+    const up = () => {
+      from.removeEventListener('pointermove', move);
+      from.removeEventListener('pointerup', up);
+      from.removeEventListener('pointercancel', up);
+      for (const { card: c } of group) c.element.classList.remove('moving');
+      if (!moved) {
+        onClick?.();
+        return;
+      }
+      this.callbacks.onGroupMove(
+        group.map(({ card: c }) => ({ id: c.id, x: c.data.x, y: c.data.y })),
+        frames.map(({ frame }) => ({
+          id: frame.id,
+          x: frame.x + delta[0]!,
+          y: frame.y + delta[1]!,
+        })),
+      );
+    };
+    from.addEventListener('pointermove', move);
+    from.addEventListener('pointerup', up);
+    from.addEventListener('pointercancel', up);
   }
 
   /** World box around the given nodes (null when none is shown). */
@@ -684,55 +809,31 @@ export class Viewport {
       if (e.button !== 0 || e.altKey || !frame) return;
       e.preventDefault();
       e.stopPropagation();
-      head.setPointerCapture(e.pointerId);
-      const grab = this.toWorld(e.clientX, e.clientY);
-      // Nodes entirely inside the frame move with it.
-      const inside = [...this.cards.values()]
-        .filter(
-          (c) =>
-            c.data.x >= frame.x &&
-            c.data.y >= frame.y &&
-            c.data.x + this.cardWidth(c) <= frame.x + frame.w &&
-            c.data.y + this.cardHeight(c) <= frame.y + frame.h,
-        )
-        .map((c) => ({ card: c, origin: [c.data.x, c.data.y] as const }));
-      let moved: GraphViewFrame = frame;
-      const move = (ev: PointerEvent) => {
-        const p = this.toWorld(ev.clientX, ev.clientY);
-        let dx = p[0] - grab[0];
-        let dy = p[1] - grab[1];
-        if (!ev.ctrlKey) {
-          dx = Viewport.snap(frame.x + dx) - frame.x;
-          dy = Viewport.snap(frame.y + dy) - frame.y;
-        }
-        moved = { ...frame, x: Math.round(frame.x + dx), y: Math.round(frame.y + dy) };
-        this.placeFrame(el, moved);
-        for (const { card: c, origin } of inside) {
-          const x = Math.round(origin[0] + dx);
-          const y = Math.round(origin[1] + dy);
-          c.data = { ...c.data, x, y };
-          c.element.style.transform = `translate(${x}px, ${y}px)`;
-        }
-        this.renderLinks();
-        this.updateOcclusion();
+      this.selectLink(null);
+      if (e.shiftKey) {
+        // Shift: add / remove the frame, the selected nodes stay.
+        const next = new Set(this.frameSelection);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        this.setFrameSelection(next);
+        return;
+      }
+      // Pressing a frame of a larger selection drags all of it; otherwise the frame alone.
+      const alone = () => {
+        if (this.selection.size) this.deselect();
+        this.selectFrame(id);
       };
-      const up = () => {
-        head.removeEventListener('pointermove', move);
-        head.removeEventListener('pointerup', up);
-        head.removeEventListener('pointercancel', up);
-        if (moved === frame) return;
-        this.callbacks.onFrameChange(
-          moved,
-          inside.map(({ card: c }) => ({ id: c.id, x: c.data.x, y: c.data.y })),
-        );
-      };
-      head.addEventListener('pointermove', move);
-      head.addEventListener('pointerup', up);
-      head.addEventListener('pointercancel', up);
+      const grouped =
+        this.frameSelection.has(id) && (this.frameSelection.size > 1 || this.selection.size > 0);
+      if (!grouped) alone();
+      // Nodes entirely inside a selected frame move with it.
+      this.dragGroup(e, head, [frame.x, frame.y], grouped ? alone : undefined);
     });
     grip.addEventListener('pointerdown', (e) => {
       const frame = frameOf();
       if (e.button !== 0 || !frame) return;
+      this.selectLink(null);
+      this.selectFrame(id);
       e.preventDefault();
       e.stopPropagation();
       grip.setPointerCapture(e.pointerId);
@@ -961,6 +1062,11 @@ export class Viewport {
     element.style.zIndex = String(card.z);
     this.sizeImage(card);
     this.bindCard(card, head);
+    head.addEventListener('dblclick', (e) => {
+      if ((e.target as HTMLElement).closest('button')) return;
+      e.stopPropagation();
+      this.callbacks.onNodeRename(node.id);
+    });
     this.buildOutputs(card);
     this.world.append(element);
     this.cards.set(node.id, card);
@@ -1190,6 +1296,7 @@ export class Viewport {
 
   /** Selects a link (highlighted; Delete removes it), or clears the link selection. */
   private selectLink(key: string | null): void {
+    if (key !== null) this.selectFrame(null);
     if (key === this.selectedLinkKey) return;
     this.selectedLinkKey = key;
     for (const path of this.linkLayer.querySelectorAll<SVGPathElement>('.vp-link-hit')) {
@@ -1380,57 +1487,14 @@ export class Viewport {
      * Moves the whole selection with the pointer. Positions follow the pointer in world space,
      * so zooming or panning during the drag keeps the nodes under the cursor.
      */
-    const startMove = (e: PointerEvent, from: HTMLElement) => {
-      e.preventDefault();
-      const start = [e.clientX, e.clientY];
-      const grab = this.toWorld(e.clientX, e.clientY);
-      const group = [...this.selection]
-        .map((id) => this.cards.get(id))
-        .filter((c): c is Card => c !== undefined)
-        .map((c) => ({ card: c, origin: [c.data.x, c.data.y] as const }));
-      let moved = false;
-      const lead = [card.data.x, card.data.y] as const;
-      from.setPointerCapture(e.pointerId);
-      const move = (ev: PointerEvent) => {
-        if (!moved && Math.hypot(ev.clientX - start[0]!, ev.clientY - start[1]!) < DRAG_THRESHOLD)
-          return;
-        moved = true;
-        const p = this.toWorld(ev.clientX, ev.clientY);
-        let dx = p[0] - grab[0];
-        let dy = p[1] - grab[1];
-        // The grabbed card snaps to the grid (Ctrl: free move); the others keep their offsets.
-        if (!ev.ctrlKey) {
-          dx = Viewport.snap(lead[0] + dx) - lead[0];
-          dy = Viewport.snap(lead[1] + dy) - lead[1];
-        }
-        for (const { card: c, origin } of group) {
-          const x = Math.round(origin[0] + dx);
-          const y = Math.round(origin[1] + dy);
-          c.data = { ...c.data, x, y };
-          c.element.style.transform = `translate(${x}px, ${y}px)`;
-          c.element.classList.add('moving');
-        }
-        this.renderLinks();
-        this.updateOcclusion();
-      };
-      const up = () => {
-        from.removeEventListener('pointermove', move);
-        from.removeEventListener('pointerup', up);
-        from.removeEventListener('pointercancel', up);
-        for (const { card: c } of group) c.element.classList.remove('moving');
-        if (moved) {
-          this.callbacks.onMove(
-            group.map(({ card: c }) => ({ id: c.id, x: c.data.x, y: c.data.y })),
-          );
-        } else if (this.selection.size > 1) {
-          // A plain click inside a multi-selection selects just that node.
+    const startMove = (e: PointerEvent, from: HTMLElement) =>
+      this.dragGroup(e, from, [card.data.x, card.data.y], () => {
+        // A plain click inside a multi-selection selects just that node.
+        if (this.selection.size > 1 || this.frameSelection.size) {
+          this.selectFrame(null);
           this.select([card.id], card.id);
         }
-      };
-      from.addEventListener('pointermove', move);
-      from.addEventListener('pointerup', up);
-      from.addEventListener('pointercancel', up);
-    };
+      });
 
     // Capture phase: the selection is updated before a drag starts from the header or image.
     card.element.addEventListener(
@@ -1438,6 +1502,8 @@ export class Viewport {
       (e) => {
         if (e.button !== 0 || e.altKey) return;
         this.selectLink(null);
+        // Frames stay selected with Shift, or when pressing a node of the selection (drag).
+        if (!e.shiftKey && !this.selection.has(card.id)) this.selectFrame(null);
         if ((e.target as HTMLElement).closest('.pin')) return;
         if (e.shiftKey) {
           if (this.selection.has(card.id) && this.selection.size > 1) {
@@ -1494,6 +1560,7 @@ export class Viewport {
     const start = [e.clientX, e.clientY] as const;
     const additive = e.shiftKey;
     const before = [...this.selection];
+    const framesBefore = [...this.frameSelection];
     let dragged = false;
     this.stage.setPointerCapture(e.pointerId);
     const box = (ev: PointerEvent) => ({
@@ -1509,6 +1576,14 @@ export class Viewport {
           return r.right > b.left && r.left < b.right && r.bottom > b.top && r.top < b.bottom;
         })
         .map((c) => c.id);
+    // Frames are picked only when the box encloses them (starting inside one selects its nodes).
+    const frameHits = (b: ReturnType<typeof box>) =>
+      [...this.frameEls]
+        .filter(([, el]) => {
+          const r = el.getBoundingClientRect();
+          return r.left >= b.left && r.right <= b.right && r.top >= b.top && r.bottom <= b.bottom;
+        })
+        .map(([id]) => id);
     const move = (ev: PointerEvent) => {
       if (!dragged && Math.hypot(ev.clientX - start[0], ev.clientY - start[1]) < DRAG_THRESHOLD)
         return;
@@ -1524,6 +1599,9 @@ export class Viewport {
       const inside = new Set(hits(b));
       for (const card of this.cards.values())
         card.element.classList.toggle('marquee-hit', inside.has(card.id));
+      const framesInside = new Set(frameHits(b));
+      for (const [id, el] of this.frameEls)
+        el.classList.toggle('marquee-hit', framesInside.has(id));
     };
     const up = (ev: PointerEvent) => {
       this.stage.removeEventListener('pointermove', move);
@@ -1531,6 +1609,7 @@ export class Viewport {
       this.stage.removeEventListener('pointercancel', up);
       this.marquee.hidden = true;
       for (const card of this.cards.values()) card.element.classList.remove('marquee-hit');
+      for (const el of this.frameEls.values()) el.classList.remove('marquee-hit');
       if (!dragged) {
         // Click on the background: nothing selected any more.
         if (!additive) this.deselect();
@@ -1538,12 +1617,14 @@ export class Viewport {
       }
       const picked = hits(box(ev));
       const ids = additive ? [...new Set([...before, ...picked])] : picked;
-      if (ids.length === 0) {
-        this.deselect();
-        return;
+      const frames = frameHits(box(ev));
+      const frameIds = additive ? [...new Set([...framesBefore, ...frames])] : frames;
+      if (ids.length === 0) this.deselect();
+      else {
+        const primary = ids.includes(this.selectedId) ? this.selectedId : ids[ids.length - 1]!;
+        this.select(ids, primary);
       }
-      const primary = ids.includes(this.selectedId) ? this.selectedId : ids[ids.length - 1]!;
-      this.select(ids, primary);
+      this.setFrameSelection(frameIds);
     };
     this.stage.addEventListener('pointermove', move);
     this.stage.addEventListener('pointerup', up);
@@ -1692,6 +1773,7 @@ export class Viewport {
     this.selection.clear();
     for (const card of this.cards.values()) card.element.classList.remove('multi');
     this.selectLink(null);
+    this.selectFrame(null);
     this.callbacks.onSelection([]);
     if (this.selectedId) this.callbacks.onSelect('');
   }
@@ -1836,6 +1918,7 @@ export class Viewport {
         }
         if (e.button === 0 && !e.altKey && !onCard) {
           this.selectLink(null);
+          if (!e.shiftKey) this.selectFrame(null);
           e.preventDefault();
           this.startMarquee(e);
           return;

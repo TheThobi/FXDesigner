@@ -1,4 +1,5 @@
 import type { PublishState } from '../app/library';
+import { REPOSITORY_URL } from './AboutDialog';
 import { h } from './dom';
 import { icon, type IconName } from './icons';
 import { LAYOUT_PARTS, type Layout } from './Layout';
@@ -31,6 +32,8 @@ export interface ToolbarActions {
   saveLibrary(): void;
   /** Adds the systems of a library file. */
   loadLibrary(): void;
+  /** File → About (project, source code, license). */
+  openAbout(): void;
 }
 
 function toolButton(
@@ -118,13 +121,25 @@ export class Toolbar {
         toolButton(
           'globe',
           'Community',
-          'Systems shared by everyone: browse, subscribe, publish',
+          'Systems and shader nodes shared by everyone: browse, install, publish',
           () => actions.openCommunity(),
         ),
       ),
       this.systemLabel,
       this.publishBadge,
       h('div', { class: 'spacer' }),
+      h(
+        'a',
+        {
+          class: 'tool-btn github-link',
+          href: REPOSITORY_URL,
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          title: 'Source code on GitHub (anyone can contribute)',
+          'aria-label': 'Source code on GitHub',
+        },
+        icon('github', 18),
+      ),
       this.accountSlot,
       layoutMenu(layout),
       h('div', { class: 'tool-group' }, exportBtn),
@@ -210,6 +225,8 @@ function fileMenu(actions: ToolbarActions, state: () => ToolbarState): HTMLEleme
       h('div', { class: 'menu-sep' }),
       item('library', 'Save library…', () => actions.saveLibrary()),
       item('library', 'Open library…', () => actions.loadLibrary()),
+      h('div', { class: 'menu-sep' }),
+      item('github', 'About FX Designer…', () => actions.openAbout()),
     );
   });
   return root;

@@ -6,9 +6,10 @@ import fragment from './caustics.glsl?raw';
 export const caustics: ShaderGenerator = {
   kind: 'shader',
   id: 'caustics',
-  name: 'Caustics',
+  name: 'Stylized Caustics',
   category: 'water',
-  description: 'Seamless animated underwater light caustics.',
+  description:
+    'Seamless animated underwater light caustics, procedural and stylized (the simulated ones are Water Caustics).',
   animated: true,
   fragment,
   params: [

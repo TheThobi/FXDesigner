@@ -73,8 +73,21 @@ import {
 } from '../ui/Viewport';
 import { openQuickAdd } from '../ui/QuickAddMenu';
 import { openContextMenu, type ContextMenuEntry } from '../ui/ContextMenu';
-import { openCommunity } from '../ui/CommunityDialog';
-import { Community } from './community';
+import { openAbout } from '../ui/AboutDialog';
+import { openCommunity, type CommunityOpenOptions } from '../ui/CommunityDialog';
+import { Community, type CommunitySystem } from './community';
+import { CommunitySync } from './communitySync';
+import {
+  COMMUNITY_NODE_PREFIX,
+  InstalledNodes,
+  isCustomShaderNode,
+  nodeFromPackage,
+  nodePackage,
+  NodeLinks,
+  packageHash,
+  type InstalledNode,
+  type NodeLink,
+} from './communityNodes';
 import { mostUsedNodes, recordNodeUsage } from './nodeUsage';
 import { debounce } from '../util/debounce';
 import { fnv1a } from '../util/hash';
@@ -120,7 +133,7 @@ import {
   type PreviewResult,
   type PreviewSource,
 } from '../ui/PreviewStudio';
-import type { CurrentSystem } from '../ui/CommunityDialog';
+import type { CommunityNodeActions, CurrentSystem } from '../ui/CommunityDialog';
 import { clearHash, loadSession, readHashDocument, saveSession, shareUrl } from './persistence';
 import {
   codeDiffers,
@@ -157,7 +170,9 @@ import {
   type GraphNode,
   type GraphFrame,
   FRAME_COLORS,
+  FRAME_FONT_SIZES,
   MAX_FRAMES,
+  MAX_NODE_NAME,
   MIN_FRAME_SIZE,
 } from './state';
 import { SIM_THUMBNAIL, ThumbnailCache } from './thumbnails';
@@ -506,6 +521,18 @@ export class App {
         });
       },
       onFrameRename: (id) => void this.renameFrame(id),
+      onNodeRename: (id) => void this.renameNode(id),
+      onGroupMove: (moves, frames) => {
+        const at = new Map(frames.map((f) => [f.id, f]));
+        const moved = moves.reduce((s, m) => withNode(s, m.id, { x: m.x, y: m.y }), this.state);
+        this.commit({
+          ...moved,
+          frames: (moved.frames ?? []).map((f) => {
+            const p = at.get(f.id);
+            return p ? { ...f, x: p.x, y: p.y } : f;
+          }),
+        });
+      },
     });
     this.timeline = new Timeline({
       togglePlay: () => this.togglePlay(),
@@ -573,6 +600,7 @@ export class App {
         openExport: () => void this.openExport(),
         openLibrary: () => this.openLibrary(),
         openCommunity: () => this.openCommunity(),
+        openAbout: () => openAbout(),
         newSystem: () => this.newSystem(),
         renameSystem: () => void this.renameSystem(this.systemId),
         saveLibrary: () => this.saveLibraryFile(),
@@ -607,6 +635,32 @@ export class App {
     requestAnimationFrame(this.frame);
     this.generatorList.onVisible = (id) => this.requestThumbnail(id);
     this.generatorList.onHover = (id) => this.previewPresets(id);
+    this.generatorList.onBrowseCommunity = () => this.openCommunity({ type: 'node' });
+    this.generatorList.communityMenu = (tileId) => {
+      const installed = this.installedNodes.byTileId(tileId);
+      if (!installed) return [];
+      return [
+        {
+          label: 'Community page',
+          run: () => this.openCommunity({ view: installed.id }),
+        },
+        {
+          label: 'Uninstall',
+          icon: 'close',
+          run: () => {
+            this.installedNodes.remove(installed.id);
+            toast(`Uninstalled "${installed.name}"`);
+          },
+        },
+      ];
+    };
+    this.installedNodes.onChange = () => {
+      this.refreshCommunityTiles();
+      this.communitySync.schedule();
+    };
+    this.nodeLinks.onChange = () => this.communitySync.schedule();
+    this.cloud.afterSync = () => this.communitySync.sync();
+    this.refreshCommunityTiles();
     void this.thumbnails.loaded.then(() => {
       // Stored images show at once (even stale ones, replaced when rendered again).
       for (const [id, { url }] of this.thumbnails.entries())
@@ -884,6 +938,199 @@ export class App {
   }
 
   private readonly community = new Community();
+  /** Community shader nodes installed in the node browser. */
+  private readonly installedNodes = new InstalledNodes();
+  /** Graph nodes that are your published community nodes. */
+  private readonly nodeLinks = new NodeLinks();
+  /** Installed nodes and node links follow the account across devices. */
+  private get communitySync(): CommunitySync {
+    this.syncer ??= new CommunitySync(this.cloud, this.installedNodes, this.nodeLinks, (id) =>
+      this.community.get(id).catch((e: unknown) => {
+        // Gone from the community: forget it; other errors retry at the next sync.
+        if ((e as { status?: number }).status === 404) return null;
+        throw e;
+      }),
+    );
+    return this.syncer;
+  }
+
+  private syncer: CommunitySync | null = null;
+
+  /** Tiles of the installed community nodes (update badge from versions seen online). */
+  private refreshCommunityTiles(): void {
+    const tiles = [];
+    for (const n of this.installedNodes.list()) {
+      let def: GeneratorDefinition | undefined;
+      try {
+        def = getGenerator(nodeFromPackage(n.document, getGenerator).generator);
+      } catch {
+        continue; // Unusable here (unknown generator, newer format): not listed.
+      }
+      tiles.push({
+        id: `${COMMUNITY_NODE_PREFIX}${n.id}`,
+        name: n.name,
+        description: n.description,
+        author: n.author,
+        thumb: n.thumb,
+        operator: def !== undefined && isOperator(def),
+        update: (this.community.latestVersion(n.id) ?? 0) > n.version,
+      });
+    }
+    this.generatorList.setCommunityNodes(tiles);
+  }
+
+  /** The node of an installed community node (toast and null when it can't be used). */
+  private communityNode(installed: InstalledNode): GraphNode | null {
+    try {
+      return nodeFromPackage(installed.document, getGenerator);
+    } catch (e) {
+      toast(`Cannot use "${installed.name}": ${errorMessage(e)}`, 'error');
+      return null;
+    }
+  }
+
+  /** Adds a copy of a community node (its code, parameters and look) to the graph. */
+  private addPackagedNode(node: GraphNode, at?: [number, number], name?: string): void {
+    if (name && !node.name) node = { ...node, name: name.slice(0, MAX_NODE_NAME) };
+    const [x, y] = at ?? this.viewport.placementNear(this.state.selectedId);
+    this.commit(withAddedNode(this.state, { ...node, id: newNodeId(this.state.nodes), x, y }));
+  }
+
+  /** Turns the selected node into a copy of a community node (position and links kept). */
+  private replaceWithPackagedNode(node: GraphNode): void {
+    const def = getGenerator(node.generator);
+    if (!def || this.generator.role === 'output') return;
+    const id = this.node.id;
+    const { id: _id, x: _x, y: _y, collapsed: _c, frozenAt: _f, seed: _s, ...settings } = node;
+    this.commit(withNode(withNodeGenerator(this.state, id, def, this.generator), id, settings));
+    this.syncPanels();
+  }
+
+  /** What the community window publishes and installs as shader nodes. */
+  /** Your published node `node` of the open system: its link and whether it changed since. */
+  private nodePublication(node: GraphNode): { link: NodeLink | null; state: PublishState } {
+    const link = this.nodeLinks.get(this.systemId, node.id);
+    if (!link) return { link: null, state: 'local' };
+    let hash = '';
+    try {
+      hash = packageHash(nodePackage(node, getGenerator, 0));
+    } catch {
+      // Not a shader node any more (generator swapped): an edit.
+    }
+    return { link, state: hash === link.hash ? 'published' : 'modified' };
+  }
+
+  private communityNodeActions(systemId: string): CommunityNodeActions {
+    const packaged = () => nodePackage(this.node, getGenerator, this.state.seed);
+    /** Links the selected node to community node `id` at `version`. */
+    const link = (id: string, name: string, version: number | null, doc: unknown) =>
+      this.nodeLinks.set(this.systemId, this.node.id, {
+        id,
+        name,
+        version,
+        hash: packageHash(doc),
+      });
+    const install = (system: CommunitySystem): boolean => {
+      try {
+        nodeFromPackage(system.document, getGenerator);
+      } catch (e) {
+        toast(`Cannot install "${system.name}": ${errorMessage(e)}`, 'error');
+        return false;
+      }
+      this.installedNodes.install({
+        id: system.id,
+        version: system.version,
+        name: system.name,
+        author: system.author,
+        description: system.description,
+        thumb: system.thumb,
+        document: system.document,
+      });
+      return true;
+    };
+    return {
+      current: () => {
+        const node = this.node;
+        const def = getGenerator(node.generator);
+        const selected = this.state.selectedId !== '';
+        const publication = selected
+          ? this.nodePublication(node)
+          : { link: null, state: 'local' as const };
+        return {
+          name: publication.link?.name ?? def?.name ?? node.generator,
+          publishable: selected && isCustomShaderNode(node, def),
+          animated: def?.animated === true,
+          ...publication,
+        };
+      },
+      preview: (interactive, framing) => {
+        const state = applyDocument(parseDocument(packaged(), getGenerator));
+        return this.communityPreview(interactive, framing, state, true);
+      },
+      publish: async (fields, preview, animated) => {
+        const doc = packaged();
+        const r = await this.community.publish(
+          fields,
+          doc,
+          this.mediaOf(preview, animated),
+          'node',
+        );
+        link(r.id, fields.name, r.version, doc);
+        // The author's own node goes in their browser too (best effort: it is published).
+        try {
+          install(await this.community.get(r.id));
+        } catch {
+          // Installed from its page later.
+        }
+        return r.id;
+      },
+      publishUpdate: async (preview, id, animated) => {
+        const doc = packaged();
+        const version = await this.community.update(id, {}, doc, this.mediaOf(preview, animated));
+        const previous = this.nodeLinks.get(this.systemId, this.node.id);
+        let name = previous?.id === id ? previous.name : 'Shader node';
+        try {
+          const online = await this.community.get(id);
+          name = online.name;
+          if (this.installedNodes.get(id)) install(online);
+        } catch {
+          // Published: the name and the installed copy catch up later.
+        }
+        link(id, name, version, doc);
+        return version;
+      },
+      installedVersion: (id) => this.installedNodes.get(id)?.version ?? null,
+      install,
+      uninstall: (id) => this.installedNodes.remove(id),
+      addToGraph: (system) => {
+        try {
+          this.addPackagedNode(
+            nodeFromPackage(system.document, getGenerator),
+            undefined,
+            system.name,
+          );
+          return true;
+        } catch (e) {
+          toast(`Cannot add "${system.name}": ${errorMessage(e)}`, 'error');
+          return false;
+        }
+      },
+      unpublished: () => {
+        // Library publishing (another system than the open one): its nodes aren't loaded.
+        if (systemId !== this.systemId) return [];
+        const out = [];
+        for (const [nodeId, link] of this.nodeLinks.ofSystem(this.systemId)) {
+          const node = nodeById(this.state, nodeId);
+          if (node && this.nodePublication(node).state === 'modified') out.push({ nodeId, link });
+        }
+        return out;
+      },
+      select: (nodeId) => {
+        this.selectNode(nodeId);
+        this.viewport.selectOnly(nodeId);
+      },
+    };
+  }
 
   /**
    * Publication state of library system `id`: local, published as is, or edited since. The
@@ -1031,10 +1278,7 @@ export class App {
   }
 
   /** Community window: systems shared by everyone; publishing sends the open system. */
-  private openCommunity(
-    opts: { publish?: boolean; view?: string; edit?: string } = {},
-    systemId = this.systemId,
-  ): void {
+  private openCommunity(opts: CommunityOpenOptions = {}, systemId = this.systemId): void {
     this.saveSystem(true);
     let savedState: EditorState | undefined;
     let savedHash: string | undefined;
@@ -1129,7 +1373,12 @@ export class App {
             });
           }
         },
-        forget: (id) => this.forgetPublication(id),
+        forget: (id) => {
+          this.forgetPublication(id);
+          this.nodeLinks.forget(id);
+        },
+        nodes: this.communityNodeActions(systemId),
+        closed: () => this.refreshCommunityTiles(),
         copyToLibrary: (system) => {
           try {
             const doc = parseDocument(system.document, getGenerator);
@@ -1308,7 +1557,7 @@ export class App {
         n.code !== undefined && def.kind === 'shader' && codeDiffers(n.code, def.fragment);
       return {
         id: n.id,
-        title: custom ? `${def.name} · custom` : def.name,
+        title: n.name ?? (custom ? `${def.name} · custom` : def.name),
         category: def.category,
         x: n.x,
         y: n.y,
@@ -1325,6 +1574,7 @@ export class App {
       };
     });
     this.viewport.setGraph(nodes, this.state.links, this.state.selectedId);
+    if (this.state.selectedId) this.updateInspectorTitle();
     this.viewport.setFrames(
       (this.state.frames ?? []).map((f) => ({
         ...f,
@@ -1500,6 +1750,57 @@ export class App {
           icon: 'library',
           run: () => void this.collapseIntoSystem(ids),
         },
+        ...(ids.length >= 2
+          ? [
+              {
+                label: 'Align / distribute…',
+                icon: 'layout' as const,
+                run: () =>
+                  openContextMenu(client[0], client[1], [
+                    { label: 'Align left', run: () => this.alignNodes(ids, 'left') },
+                    { label: 'Align right', run: () => this.alignNodes(ids, 'right') },
+                    { label: 'Align top', run: () => this.alignNodes(ids, 'top') },
+                    { label: 'Align bottom', run: () => this.alignNodes(ids, 'bottom') },
+                    { label: 'Align centers (column)', run: () => this.alignNodes(ids, 'center') },
+                    { label: 'Align middles (row)', run: () => this.alignNodes(ids, 'middle') },
+                    null,
+                    {
+                      label: 'Distribute horizontally',
+                      disabled: ids.length < 3,
+                      run: () => this.alignNodes(ids, 'spreadX'),
+                    },
+                    {
+                      label: 'Distribute vertically',
+                      disabled: ids.length < 3,
+                      run: () => this.alignNodes(ids, 'spreadY'),
+                    },
+                  ]),
+              },
+            ]
+          : []),
+        ...(ids.length === 1 && clicked
+          ? [
+              {
+                label: 'Rename…',
+                shortcut: 'F2',
+                run: () => void this.renameNode(clicked.id),
+              },
+            ]
+          : []),
+        ...(ids.length === 1 &&
+        clicked &&
+        isCustomShaderNode(clicked, getGenerator(clicked.generator))
+          ? [
+              {
+                label: 'Publish node to the community…',
+                icon: 'download' as const,
+                run: () => {
+                  this.selectNode(clicked.id);
+                  this.openCommunity({ publishNode: true });
+                },
+              },
+            ]
+          : []),
       ];
     } else if (target.kind === 'link') {
       const { link } = target;
@@ -1526,14 +1827,22 @@ export class App {
           run: () => this.updateFrame({ ...frame, color: i }),
         })),
         null,
+        ...FRAME_FONT_SIZES.map((s, i) => {
+          const current = (frame.fontSize ?? FRAME_FONT_SIZES[0]!.px) === s.px;
+          return {
+            label: `${current ? '● ' : ''}Text: ${s.name}`,
+            run: () => {
+              const { fontSize: _old, ...rest } = frame;
+              this.updateFrame(i === 0 ? rest : { ...rest, fontSize: s.px });
+            },
+          };
+        }),
+        null,
         {
           label: 'Delete frame',
           icon: 'close' as const,
-          run: () =>
-            this.commit({
-              ...this.state,
-              frames: (this.state.frames ?? []).filter((f) => f.id !== frame.id),
-            }),
+          shortcut: 'Del',
+          run: () => this.deleteFrame(frame.id),
         },
       ];
     } else {
@@ -1632,6 +1941,12 @@ export class App {
 
   /** Adds a node running `generatorId`, at `at` (graph units) or next to the selected node. */
   private addNode(generatorId: string, at?: [number, number]): void {
+    const installed = this.installedNodes.byTileId(generatorId);
+    if (installed) {
+      const node = this.communityNode(installed);
+      if (node) this.addPackagedNode(node, at, installed.name);
+      return;
+    }
     const def = getGenerator(generatorId);
     if (!def || def.role) return;
     const [x, y] = at ?? this.viewport.placementNear(this.state.selectedId);
@@ -1695,12 +2010,17 @@ export class App {
   }
 
   /** Deletes nodes in one undoable step (at least one node always remains). */
-  private deleteNodes(ids: readonly string[]): void {
-    if (this.state.nodes.length <= 1) {
+  private deleteNodes(ids: readonly string[], frameIds: readonly string[] = []): void {
+    // Selected comment frames go in the same undoable step.
+    const gone = new Set(frameIds);
+    let next: EditorState = gone.size
+      ? { ...this.state, frames: (this.state.frames ?? []).filter((f) => !gone.has(f.id)) }
+      : this.state;
+    if (ids.length && this.state.nodes.length <= 1) {
       toast('The last node cannot be deleted', 'error');
+      if (next !== this.state) this.commit(next);
       return;
     }
-    let next = this.state;
     for (const id of ids) {
       // Deleting a Reroute keeps the link it was bending.
       const node = nodeById(next, id);
@@ -1850,6 +2170,12 @@ export class App {
   /** Swaps the selected node's generator (generator browser click). */
   private setNodeGenerator(id: string): void {
     if (this.generator.role === 'output') return;
+    const installed = this.installedNodes.byTileId(id);
+    if (installed) {
+      const node = this.communityNode(installed);
+      if (node) this.replaceWithPackagedNode({ ...node, name: node.name ?? installed.name });
+      return;
+    }
     const def = getGenerator(id);
     if (!def || id === this.node.generator) return;
     this.commit(withNodeGenerator(this.state, this.node.id, def, this.generator));
@@ -1885,7 +2211,7 @@ export class App {
     const def = this.generator;
     this.shownKey = `${node.id}:${node.generator}`;
     this.generatorList.setActive(def.id);
-    this.inspectorTitle.textContent = def.name;
+    this.updateInspectorTitle();
     this.inspectorBadge.textContent = CATEGORY_LABELS[def.category];
     this.inspectorBadge.className = `badge cat-${def.category}`;
     this.inspectorDescription.textContent = def.description;
@@ -3762,7 +4088,7 @@ export class App {
           w: Math.max(MIN_FRAME_SIZE, Math.round(w)),
           h: Math.max(MIN_FRAME_SIZE, Math.round(h)),
           title: title.trim().slice(0, 64),
-          color: frames.length % FRAME_COLORS.length,
+          color: 0,
         },
       ],
     });
@@ -3779,11 +4105,103 @@ export class App {
     if (at) void this.addFrame(Viewport.snap(at[0]), Viewport.snap(at[1]), 480, 320, 'Comment');
   }
 
+  private deleteFrame(id: string): void {
+    this.commit({
+      ...this.state,
+      frames: (this.state.frames ?? []).filter((f) => f.id !== id),
+    });
+  }
+
   private updateFrame(frame: GraphFrame): void {
     this.commit({
       ...this.state,
       frames: (this.state.frames ?? []).map((f) => (f.id === frame.id ? frame : f)),
     });
+  }
+
+  /** Details header: the node's name, with its generator when it was renamed. */
+  private updateInspectorTitle(): void {
+    const node = this.node;
+    const def = this.generator;
+    this.inspectorTitle.textContent = node.name ?? def.name;
+    this.inspectorTitle.title = node.name ? `${node.name} (${def.name})` : '';
+  }
+
+  /**
+   * Lines up nodes on a side or center of their bounding box, or spreads them with equal
+   * gaps between their edges (first and last stay). One undoable step.
+   */
+  private alignNodes(
+    ids: readonly string[],
+    mode: 'left' | 'right' | 'top' | 'bottom' | 'center' | 'middle' | 'spreadX' | 'spreadY',
+  ): void {
+    const boxes = ids
+      .map((id) => ({ id, box: this.viewport.nodesBounds([id]) }))
+      .filter((b): b is { id: string; box: NonNullable<typeof b.box> } => b.box !== null);
+    const all = this.viewport.nodesBounds(ids);
+    if (boxes.length < 2 || !all) return;
+    const moves = new Map<string, readonly [number, number]>();
+    if (mode === 'spreadX' || mode === 'spreadY') {
+      const horizontal = mode === 'spreadX';
+      const pos = (b: (typeof boxes)[number]['box']) => (horizontal ? b.x : b.y);
+      const len = (b: (typeof boxes)[number]['box']) => (horizontal ? b.w : b.h);
+      const sorted = [...boxes].sort((a, b) => pos(a.box) - pos(b.box));
+      const total = sorted.reduce((n, b) => n + len(b.box), 0);
+      const gap = ((horizontal ? all.w : all.h) - total) / (sorted.length - 1);
+      let at = horizontal ? all.x : all.y;
+      for (const { id, box } of sorted) {
+        moves.set(id, horizontal ? [at, box.y] : [box.x, at]);
+        at += len(box) + gap;
+      }
+    } else {
+      for (const { id, box } of boxes) {
+        const x =
+          mode === 'left'
+            ? all.x
+            : mode === 'right'
+              ? all.x + all.w - box.w
+              : mode === 'center'
+                ? all.x + (all.w - box.w) / 2
+                : box.x;
+        const y =
+          mode === 'top'
+            ? all.y
+            : mode === 'bottom'
+              ? all.y + all.h - box.h
+              : mode === 'middle'
+                ? all.y + (all.h - box.h) / 2
+                : box.y;
+        moves.set(id, [x, y]);
+      }
+    }
+    this.commit(
+      [...moves].reduce(
+        (s, [id, [x, y]]) => withNode(s, id, { x: Math.round(x), y: Math.round(y) }),
+        this.state,
+      ),
+    );
+  }
+
+  /** Renames node `id` (its generator's name brings back the default title). */
+  private async renameNode(id: string): Promise<void> {
+    const node = nodeById(this.state, id);
+    const def = node ? getGenerator(node.generator) : undefined;
+    if (!node || !def) return;
+    const name = await promptDialog({
+      title: 'Rename node',
+      label: `Name ("${def.name}" brings back the default)`,
+      value: node.name ?? def.name,
+      confirmLabel: 'Rename',
+    });
+    if (name === null) return;
+    const trimmed = name.trim().slice(0, MAX_NODE_NAME);
+    const { name: _old, ...rest } = node;
+    const renamed = trimmed && trimmed !== def.name ? { ...rest, name: trimmed } : rest;
+    this.commit({
+      ...this.state,
+      nodes: this.state.nodes.map((n) => (n.id === id ? renamed : n)),
+    });
+    if (id === this.node.id) this.updateInspectorTitle();
   }
 
   private async renameFrame(id: string): Promise<void> {
@@ -4038,10 +4456,10 @@ export class App {
       if (e.defaultPrevented) return;
       if (!mod && (e.key === 'Delete' || e.key === 'Backspace') && !isTypingText()) {
         if (e.target instanceof HTMLSelectElement) e.preventDefault();
-        // A clicked link goes first, otherwise the selected nodes.
+        // A clicked link or comment frame goes first, otherwise the selected nodes.
         const link = this.viewport.selectedLink();
         if (link) this.commit(withoutLink(this.state, link.to, link.input));
-        else this.deleteNodes(this.viewport.selectedIds());
+        else this.deleteNodes(this.viewport.selectedIds(), this.viewport.selectedFrames());
         return;
       }
       if (isEditingText()) return;
@@ -4052,6 +4470,9 @@ export class App {
         this.layout.toggle('timeline');
       } else if (!mod && (e.key === 'c' || e.key === 'C')) {
         this.commentSelection();
+      } else if (!mod && e.key === 'F2' && this.state.selectedId) {
+        e.preventDefault();
+        void this.renameNode(this.state.selectedId);
       } else if (!mod && (e.key === ',' || e.key === '.')) {
         this.stepFrame(e.key === '.' ? 1 : -1);
       } else if (mod && e.key.toLowerCase() === 'd') {

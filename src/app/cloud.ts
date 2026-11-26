@@ -73,6 +73,8 @@ export class Cloud {
   onState: (() => void) | null = null;
   /** Systems replaced or removed by the server (App reloads the open one if needed). */
   onRemoteChange: ((ids: readonly string[]) => void) | null = null;
+  /** Runs after each library sync while signed in (other synced settings). */
+  afterSync: (() => Promise<void>) | null = null;
 
   private readonly pending = new Map<string, LibraryChange>();
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -233,6 +235,7 @@ export class Cloud {
       this.emit();
     }
     if (changed.length) this.onRemoteChange?.(changed);
+    if (this.user) await this.afterSync?.();
   }
 
   private queue(change: LibraryChange): void {

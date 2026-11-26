@@ -32,6 +32,10 @@ interface Stack {
 type Zone = 'center' | 'left' | 'right' | 'top' | 'bottom';
 
 const STORAGE_KEY = 'ptm.ui.dock.v2';
+/** Set once saved layouts had their 3D preview moved under Details / Workspace. */
+const PREVIEW3D_BELOW_KEY = 'ptm.ui.dock.preview3dBelow';
+/** Height share of the 3D preview under Details / Workspace. */
+const PREVIEW3D_SHARE = 0.3;
 const DRAG_THRESHOLD = 6;
 /** Edge band (fraction of a stack) that splits instead of stacking. */
 const EDGE = 0.28;
@@ -44,7 +48,16 @@ function defaultLayout(): Split {
     children: [
       { kind: 'stack', panels: ['browser'], active: 'browser' },
       { kind: 'stack', panels: ['viewport'], active: 'viewport' },
-      { kind: 'stack', panels: ['details', 'workspace', 'preview3d'], active: 'details' },
+      {
+        // The 3D preview opens small, under Details / Workspace.
+        kind: 'split',
+        dir: 'column',
+        children: [
+          { kind: 'stack', panels: ['details', 'workspace'], active: 'details' },
+          { kind: 'stack', panels: ['preview3d'], active: 'preview3d' },
+        ],
+        sizes: [1 - PREVIEW3D_SHARE, PREVIEW3D_SHARE],
+      },
     ],
     sizes: [0.2, 0.55, 0.25],
   };
@@ -122,6 +135,16 @@ export class DockManager {
       saved = null;
     }
     this.root = parseDockLayout(saved) ?? defaultLayout();
+    // Layouts saved when the 3D preview was a tab of Details: move it under them, once.
+    if (readStorage(PREVIEW3D_BELOW_KEY) === null) {
+      const details = this.find('details');
+      if (details && this.find('preview3d') === details) {
+        this.removePanel('preview3d');
+        this.insertBeside(details, 'preview3d', 'bottom', PREVIEW3D_SHARE);
+        this.save();
+      }
+      writeStorage(PREVIEW3D_BELOW_KEY, '1');
+    }
     this.hint = h('div', { class: 'dock-drop-hint', hidden: true });
     document.body.append(this.hint);
     this.refresh();
@@ -136,7 +159,9 @@ export class DockManager {
         this.insertBeside(this.find('viewport')!, id, id === 'browser' ? 'left' : 'right');
     }
     if (!this.find('workspace')) this.find('details')?.panels.push('workspace');
-    if (!this.find('preview3d')) this.find('details')?.panels.push('preview3d');
+    const details = this.find('details');
+    if (!this.find('preview3d') && details)
+      this.insertBeside(details, 'preview3d', 'bottom', PREVIEW3D_SHARE);
     this.render();
   }
 
@@ -221,7 +246,12 @@ export class DockManager {
   }
 
   /** Puts panel `id` in a new stack on `side` of `target` (half of the target's room). */
-  private insertBeside(target: Stack, id: PanelId, side: Exclude<Zone, 'center'>): void {
+  private insertBeside(
+    target: Stack,
+    id: PanelId,
+    side: Exclude<Zone, 'center'>,
+    share = 0.35,
+  ): void {
     const dir = side === 'left' || side === 'right' ? 'row' : 'column';
     const fresh: Stack = { kind: 'stack', panels: [id], active: id };
     const parent = this.parentOf(target) ?? this.root;
@@ -236,7 +266,6 @@ export class DockManager {
       return;
     }
     // Wrap the target in a split of the other direction.
-    const share = 0.35;
     const wrap: Split = {
       kind: 'split',
       dir,

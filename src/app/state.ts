@@ -81,6 +81,8 @@ export interface GraphNode {
   readonly frozenAt: number | null;
   /** Collapsed in the graph (header and pins only, no image). Absent = expanded. */
   readonly collapsed?: boolean;
+  /** Name given by the user (card title); absent = the generator's name. */
+  readonly name?: string;
   /**
    * GLSL replacing the generator's main fragment (shader generators): the node was converted
    * to code and edited, it is a custom node. Absent = the generator's own code.
@@ -115,6 +117,8 @@ export interface CustomParamSpec {
 }
 
 export const MAX_CUSTOM_PARAMS = 32;
+/** Longest node name (characters). */
+export const MAX_NODE_NAME = 48;
 const CUSTOM_KEY_RE = /^[a-z][A-Za-z0-9]{0,23}$/;
 const RESERVED: ReadonlySet<string> = new Set(RESERVED_UNIFORMS);
 
@@ -327,7 +331,17 @@ export interface GraphFrame {
   readonly title: string;
   /** Index into FRAME_COLORS. */
   readonly color: number;
+  /** Title size in px, one of FRAME_FONT_SIZES (absent = the default size). */
+  readonly fontSize?: number;
 }
+
+/** Title sizes offered for comment frames (px); the first is the default. */
+export const FRAME_FONT_SIZES: readonly { readonly name: string; readonly px: number }[] = [
+  { name: 'Normal', px: 12 },
+  { name: 'Large', px: 18 },
+  { name: 'Huge', px: 28 },
+  { name: 'Giant', px: 44 },
+];
 
 /** Frame tints (muted, the UI stays neutral). */
 export const FRAME_COLORS: readonly { readonly name: string; readonly value: string }[] = [
@@ -360,6 +374,9 @@ export function sanitizeFrames(raw: unknown): GraphFrame[] {
       h: Math.round(Math.min(20000, Math.max(MIN_FRAME_SIZE, h))),
       title: typeof o.title === 'string' ? o.title.slice(0, 64) : '',
       color: Math.min(FRAME_COLORS.length - 1, Math.max(0, Math.round(num(o.color)) || 0)),
+      ...(FRAME_FONT_SIZES.slice(1).some((s) => s.px === o.fontSize)
+        ? { fontSize: o.fontSize as number }
+        : {}),
     });
   }
   return out;

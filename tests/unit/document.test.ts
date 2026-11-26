@@ -468,7 +468,10 @@ describe('comment frames', () => {
   it('round-trip with the document, sanitized; documents without frames stay valid', () => {
     const node = createNode(noise, 'n1', 0, 0);
     const base = { ...state, nodes: [node], links: [], selectedId: node.id };
-    const frames = [{ id: 'f1', x: 10, y: 20, w: 400, h: 300, title: 'Fire', color: 2 }];
+    const frames = [
+      { id: 'f1', x: 10, y: 20, w: 400, h: 300, title: 'Fire', color: 2 },
+      { id: 'f2', x: 10, y: 400, w: 400, h: 300, title: 'Big', color: 0, fontSize: 28 },
+    ];
     const doc = documentFromState({ ...base, frames }, getGenerator);
     const parsed = parseDocument(JSON.parse(JSON.stringify(doc)), getGenerator);
     expect(parsed.frames).toEqual(frames);
@@ -476,12 +479,26 @@ describe('comment frames', () => {
     expect('frames' in documentFromState(base, getGenerator)).toBe(false);
     const raw = JSON.parse(JSON.stringify(doc)) as Record<string, unknown>;
     raw.frames = [
-      { id: 'f1', x: 0, y: 0, w: 5, h: 99999, title: 'x'.repeat(100), color: 42 },
+      { id: 'f1', x: 0, y: 0, w: 5, h: 99999, title: 'x'.repeat(100), color: 42, fontSize: 13 },
       { id: 'f1', x: 1, y: 1, w: 200, h: 200 },
       { id: 'bad', x: 'no' },
     ];
     expect(parseDocument(raw, getGenerator).frames).toEqual([
       { id: 'f1', x: 0, y: 0, w: 120, h: 20000, title: 'x'.repeat(64), color: 4 },
     ]);
+  });
+});
+
+describe('node names', () => {
+  it('keeps a trimmed, capped name and drops empty ones', () => {
+    const named = { ...createNode(noise, 'n1', 0, 0), name: `  ${'Fire mask '.repeat(10)}` };
+    const blank = { ...createNode(noise, 'n2', 0, 0), name: '   ' };
+    const doc = documentFromState(
+      { ...state, nodes: [named, blank], links: [], selectedId: 'n1' },
+      getGenerator,
+    );
+    const parsed = parseDocument(JSON.parse(JSON.stringify(doc)), getGenerator);
+    expect(parsed.nodes[0]!.name).toBe('Fire mask '.repeat(10).trim().slice(0, 48));
+    expect(parsed.nodes[1]!.name).toBeUndefined();
   });
 });

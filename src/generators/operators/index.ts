@@ -21,6 +21,8 @@ import customFrag from './custom.glsl?raw';
 import distanceJumpFrag from './distance-jump.glsl?raw';
 import distanceSeedFrag from './distance-seed.glsl?raw';
 import distanceFrag from './distance.glsl?raw';
+import dilateSeedFrag from './dilate-seed.glsl?raw';
+import dilateFrag from './dilate.glsl?raw';
 import edgesFrag from './edges.glsl?raw';
 import edgeFadeFrag from './edge-fade.glsl?raw';
 import maskFrag from './mask.glsl?raw';
@@ -334,6 +336,55 @@ export const slopeBlurOp = operator({
     { name: 'Painterly', values: { mode: 0, intensity: 12 } },
     { name: 'Erode', values: { mode: 1, intensity: 8 } },
     { name: 'Grow', values: { mode: 2, intensity: 8 } },
+  ],
+});
+
+export const dilateOp = operator({
+  id: 'op-dilate',
+  name: 'Dilate (Padding)',
+  description:
+    'Spreads the colors of solid pixels over the transparent ones (alpha kept): alpha-cutout ' +
+    'textures stop bleeding stray colors on their edges in the mipmaps.',
+  fragment: dilateFrag,
+  passes: [
+    { label: 'seed', fragment: dilateSeedFrag, precise: true },
+    {
+      label: 'jump',
+      fragment: distanceJumpFrag,
+      precise: true,
+      // Jump flood covering Padding (or the whole image), plus a final step of 1.
+      repeat: (values, width, height, inputs) => {
+        if (!inputs?.image) return 0;
+        const size = Math.max(width, height);
+        const px = values.infinite === true ? size : (getNumber(values, 'padding') * size) / 512;
+        const cover = Math.ceil(Math.log2(Math.max(2, px)));
+        return Math.min(cover, Math.ceil(Math.log2(size))) + 1;
+      },
+    },
+  ],
+  inputs: [input('image', 'Image', 'A texture with transparent areas (alpha cutout).', '#e8e8e8')],
+  params: [
+    param.float('padding', 'Padding', 16, 1, 256, {
+      unit: 'px',
+      description: 'How far colors spread around the solid pixels.',
+    }),
+    param.bool('infinite', 'Fill everything', false, {
+      description: 'Spread over the whole transparent area (ignores Padding).',
+    }),
+    param.float('threshold', 'Alpha threshold', 0.01, 0, 1, {
+      description: 'Pixels above this alpha are solid: their color spreads.',
+    }),
+    param.select('alpha', 'Output alpha', ['Original', 'Opaque (show padding)'], 0, {
+      description: 'Keep the original alpha for export; Opaque shows the spread colors.',
+    }),
+    param.bool('tile', 'Tiling', false, {
+      description: 'Colors spread across the edges (seamless textures).',
+    }),
+  ],
+  presets: [
+    { name: 'Mip-safe padding', values: { padding: 16 } },
+    { name: 'Show the padding', values: { padding: 16, alpha: 1 } },
+    { name: 'Fill everything', values: { infinite: true, alpha: 1 } },
   ],
 });
 
@@ -1116,6 +1167,7 @@ export const OPERATORS: readonly ShaderGenerator[] = [
   autoLevelsOp,
   edgesOp,
   distanceOp,
+  dilateOp,
   edgeFadeOp,
   curvatureOp,
   floodFillOp,

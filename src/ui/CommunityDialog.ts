@@ -7,11 +7,13 @@ import type {
   CommunitySort,
   CommunitySummary,
   CommunitySystem,
+  PublicationKind,
   PublishFields,
   ReportedSystem,
   ReportReason,
 } from '../app/community';
 import { REPORT_REASONS } from '../app/community';
+import type { NodeLink } from '../app/communityNodes';
 import type { PreviewFraming, PublishedLink, PublishState } from '../app/library';
 import { publicationVersion } from '../app/library';
 import { confirmDialog } from './ConfirmDialog';
@@ -75,9 +77,67 @@ export interface CommunityActions {
   readonly copyToLibrary: (system: CommunitySystem) => void;
   /** A community system was deleted: library systems linked to it become local. */
   readonly forget: (id: string) => void;
+  /** Shader nodes: the node that "Publish" sends (the selected one). */
+  readonly nodes: CommunityNodeActions;
+  /** The window closed. */
+  readonly closed?: () => void;
+}
+
+/** The selected node as seen by the community window. */
+export interface CurrentNode {
+  readonly name: string;
+  /** A custom shader node (edited code or its own parameters). */
+  readonly publishable: boolean;
+  readonly animated: boolean;
+  /** Local, published as is, or edited since you published it. */
+  readonly state: PublishState;
+  /** Your community node it is published as. */
+  readonly link: NodeLink | null;
+}
+
+/** One of your published nodes, in the open system, edited since it was published. */
+export interface UnpublishedNode {
+  readonly nodeId: string;
+  readonly link: NodeLink;
+}
+
+export interface CommunityNodeActions {
+  readonly current: () => CurrentNode;
+  /** Images of the selected node alone (chosen in the preview editor when interactive). */
+  readonly preview: (
+    interactive: boolean,
+    framing: PreviewFraming | undefined,
+  ) => Promise<PreviewResult | null>;
+  /** Publishes the selected node as a new community node; returns its id. */
+  readonly publish: (
+    fields: PublishFields,
+    media: PreviewResult,
+    animated: boolean,
+  ) => Promise<string>;
+  /** Publishes the selected node as the next version of community node `id`. */
+  readonly publishUpdate: (
+    media: PreviewResult,
+    id: string,
+    animated: boolean,
+  ) => Promise<number | null>;
+  /** Installed version of community node `id`, or null. */
+  readonly installedVersion: (id: string) => number | null;
+  /** Installs (or updates) a community node: it shows in the node browser. */
+  readonly install: (system: CommunitySystem) => boolean;
+  readonly uninstall: (id: string) => void;
+  /** Adds a copy of the node to the open system (no install). */
+  readonly addToGraph: (system: CommunitySystem) => boolean;
+  /** Your published nodes of the open system with unpublished changes. */
+  readonly unpublished: () => readonly UnpublishedNode[];
+  /** Selects node `nodeId` of the open system (it becomes the one "Publish" sends). */
+  readonly select: (nodeId: string) => void;
 }
 
 export interface CommunityOpenOptions {
+  /** Starts on systems (default) or shader nodes. */
+  readonly type?: PublicationKind;
+  /** Starts on the publication form of the selected node. */
+  readonly publishNode?: boolean;
   /** Starts on the publication form of the open system (or its update when published). */
   readonly publish?: boolean;
   readonly libraryPublish?: boolean;
@@ -87,10 +147,29 @@ export interface CommunityOpenOptions {
   readonly edit?: string;
 }
 
+const TYPES: readonly {
+  id: PublicationKind;
+  title: string;
+  icon: IconName;
+  tooltip: string;
+}[] = [
+  {
+    id: 'system',
+    title: 'Systems',
+    icon: 'library',
+    tooltip: 'Whole effects (node graphs) to open and adapt',
+  },
+  {
+    id: 'node',
+    title: 'Shader nodes',
+    icon: 'nodes',
+    tooltip: 'Custom GLSL nodes to install and reuse like generators',
+  },
+];
 const SCOPES: readonly { id: CommunityScope; title: string; icon: IconName }[] = [
   { id: 'all', title: 'Discover', icon: 'search' },
   { id: 'subscribed', title: 'Subscribed', icon: 'check' },
-  { id: 'mine', title: 'My systems', icon: 'account' },
+  { id: 'mine', title: 'Mine', icon: 'account' },
 ];
 const KINDS: readonly { id: CommunityKind; title: string; icon: IconName }[] = [
   { id: 'all', title: 'All', icon: 'grid' },
@@ -125,15 +204,25 @@ function isMissing(e: unknown): boolean {
   );
 }
 
+/** The GLSL of a node package (shown read-only on its page), or ''. */
+function packageCode(document: unknown): string {
+  const nodes = (document as { nodes?: unknown } | null)?.nodes;
+  const node: unknown = Array.isArray(nodes) ? nodes[0] : null;
+  const code = (node as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? code : '';
+}
+
 /**
- * Community window: browse the systems people share (animated or static; trending, most
- * subscribed, newest, by category or search; animations play on hover), subscribe to them,
- * copy them into the library; publish the open system, then publish its updates, edit or
- * delete your own publications.
+ * Community window: browse the systems and custom shader nodes people share (animated or
+ * static; trending, most subscribed, newest, by category or search; animations play on
+ * hover), subscribe to them, copy systems into the library, install nodes into the node
+ * browser; publish the open system or the selected custom node, then publish their updates,
+ * edit or delete your own publications.
  */
 export function openCommunity(actions: CommunityActions, opts: CommunityOpenOptions = {}): void {
   const { community } = actions;
   const query: { -readonly [K in keyof CommunityQuery]: CommunityQuery[K] } = {
+    type: opts.type ?? (opts.publishNode ? 'node' : 'system'),
     scope: 'all',
     kind: 'all',
     sort: 'trending',
@@ -168,8 +257,23 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
     toast(`Sign in to ${what}`, 'info', 4000, { label: 'Sign in', run: actions.signIn });
     return false;
   };
+  const nodes = () => query.type === 'node';
+  /** "system" / "node", for messages. */
+  const noun = (item?: { kind?: PublicationKind }) =>
+    (item ? item.kind === 'node' : nodes()) ? 'node' : 'system';
+  const typeTabs = segmentedTabs(TYPES, (id) => {
+    query.type = id as PublicationKind;
+    updatePlaceholder();
+    void load();
+  });
+  typeTabs.element.classList.add('community-types');
+  const updatePlaceholder = () => {
+    search.placeholder = nodes()
+      ? 'Search shader nodes, tags, authors'
+      : 'Search systems, tags, authors';
+  };
   const scopeTabs = segmentedTabs(SCOPES, (id) => {
-    if (id !== 'all' && !requireAccount('see your systems')) {
+    if (id !== 'all' && !requireAccount(`see your ${noun()}s`)) {
       scopeTabs.select(query.scope);
       return;
     }
@@ -193,12 +297,74 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
   const label = (id: string) => categories.find((c) => c.id === id)?.label ?? id;
   const message = (text: string) => h('p', { class: 'library-empty', text });
   const renderTabs = () => {
+    typeTabs.select(query.type);
     scopeTabs.select(query.scope);
     kindTabs.select(query.kind);
   };
 
+  /**
+   * "Publish selected node" (enabled on a custom shader node), "Up to date" or "Publish node
+   * update" when it is one of your published nodes.
+   */
+  const renderNodePublishButton = () => {
+    const current = actions.nodes.current();
+    const link = current.link;
+    if (link && current.state === 'published') {
+      publishArea.replaceChildren(
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'btn btn-small community-uptodate',
+            title: `The selected node is "${link.name}", published without local changes`,
+            onclick: () => void showDetail(link.id),
+          },
+          icon('check', 12),
+          'Node published · up to date',
+        ),
+      );
+      return;
+    }
+    if (link && current.state === 'modified') {
+      publishArea.replaceChildren(
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'btn btn-small btn-primary',
+            title: `The selected node ("${link.name}") has unpublished changes`,
+            onclick: () => void showUpdate(link.id, link.name, link.version ?? undefined, true),
+          },
+          icon('download', 12),
+          'Publish node update…',
+        ),
+      );
+      return;
+    }
+    publishArea.replaceChildren(
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'btn btn-small btn-primary',
+          disabled: !current.publishable,
+          title: current.publishable
+            ? `Share "${current.name}" with its code, parameters and look`
+            : 'Select a custom shader node (edited code or its own parameters) to publish it',
+          onclick: () => void showPublishNode(),
+        },
+        icon('download', 12),
+        'Publish selected node',
+      ),
+    );
+  };
+
   /** "Publish current system", "Up to date" or "Publish update", for the open system. */
   const renderPublishButton = () => {
+    if (nodes()) {
+      renderNodePublishButton();
+      return;
+    }
     const current = actions.current();
     const link = current.link;
     if (current.state === 'published' && link) {
@@ -245,14 +411,35 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
 
   const cardMenu = (e: MouseEvent, item: CommunitySummary) => {
     e.preventDefault();
+    const node = item.kind === 'node';
+    const installed = node ? actions.nodes.installedVersion(item.id) : null;
+    const nodeEntries: ContextMenuEntry[] = [
+      {
+        label:
+          installed === null
+            ? 'Install'
+            : installed < item.version
+              ? `Update to v${item.version}`
+              : 'Uninstall',
+        run: () =>
+          void (installed !== null && installed >= item.version
+            ? uninstall(item)
+            : install(item.id)),
+      },
+      { label: 'Add to the graph', run: () => void addToGraph(item.id) },
+    ];
     const entries: ContextMenuEntry[] = [
       { label: 'Details', run: () => void showDetail(item.id) },
-      { label: 'Open a copy', run: () => void copy(item.id) },
+      ...(node ? nodeEntries : [{ label: 'Open a copy', run: () => void copy(item.id) }]),
       ...(item.mine
         ? [
             null,
             { label: 'Edit details…', run: () => void showEditById(item.id) },
-            { label: 'Replace with the open system…', run: () => void replaceWithCurrent(item) },
+            {
+              label: node ? 'Replace with the selected node…' : 'Replace with the open system…',
+              disabled: node && !actions.nodes.current().publishable,
+              run: () => void replaceWithCurrent(item),
+            },
             { label: 'Delete', run: () => void remove(item) },
           ]
         : [
@@ -301,13 +488,19 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
   };
 
   const card = (item: CommunitySummary) => {
-    const copied = community.copiedVersion(item.id);
+    const node = item.kind === 'node';
+    const copied = node
+      ? actions.nodes.installedVersion(item.id)
+      : community.copiedVersion(item.id);
     const updated = copied !== null && copied < item.version;
     const thumb = h(
       'span',
       { class: 'library-thumb' },
       item.thumb ? h('img', { src: item.thumb, alt: '', draggable: false }) : null,
       updated ? h('span', { class: 'community-badge', text: 'Update' }) : null,
+      node && copied !== null && !updated && !item.mine
+        ? h('span', { class: 'community-badge installed', text: 'Installed' })
+        : null,
       item.mine ? h('span', { class: 'community-badge mine', text: 'Yours' }) : null,
       item.hidden
         ? h('span', {
@@ -418,7 +611,7 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
 
   /** Asks why `item` should be reviewed, then sends the report. */
   async function report(item: CommunitySummary): Promise<void> {
-    if (!requireAccount('report a system')) return;
+    if (!requireAccount(`report a ${noun(item)}`)) return;
     const reason = h(
       'select',
       { name: 'reason', 'aria-label': 'Reason' },
@@ -439,7 +632,7 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
       h('h2', { text: `Report "${item.name}"` }),
       h('p', {
         class: 'dialog-info',
-        text: 'Moderators review reported systems. Several reports hide it in the meantime.',
+        text: 'Moderators review reported publications. Several reports hide it in the meantime.',
       }),
       field('Reason', reason),
       field('Details', details),
@@ -510,7 +703,7 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
           h('strong', { text: item.name }),
           h('span', {
             class: 'library-date',
-            text: `${item.author} · ${item.reportCount} report${item.reportCount === 1 ? '' : 's'}${item.hidden ? ' · hidden' : ''}`,
+            text: `${item.kind === 'node' ? 'Shader node' : 'System'} · ${item.author} · ${item.reportCount} report${item.reportCount === 1 ? '' : 's'}${item.hidden ? ' · hidden' : ''}`,
           }),
           h(
             'ul',
@@ -599,16 +792,20 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
       body.replaceChildren(message(errorText(e)));
       return;
     }
+    const type = system.kind ?? 'system';
+    if (type !== query.type) {
+      query.type = type;
+      renderTabs();
+      updatePlaceholder();
+      renderPublishButton();
+    }
+    if (type === 'node') {
+      showNodeDetail(system);
+      return;
+    }
     const copied = community.copiedVersion(system.id);
     const current = actions.current();
     const linked = current.link?.id === system.id;
-    const button = (text: string, run: () => void, primary = false) =>
-      h('button', {
-        type: 'button',
-        class: `btn${primary ? ' btn-primary' : ''}`,
-        text,
-        onclick: run,
-      });
     const buttons: HTMLElement[] = [];
     if (system.mine && linked && current.state === 'modified')
       buttons.push(button('Publish update…', () => void showUpdate(), true));
@@ -651,12 +848,91 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
               : `Your open system "${current.name}" is this version.`,
         })
       : null;
+    renderDetail(system, buttons, status, copied);
+  }
+
+  const button = (text: string, run: () => void, primary = false) =>
+    h('button', {
+      type: 'button',
+      class: `btn${primary ? ' btn-primary' : ''}`,
+      text,
+      onclick: run,
+    });
+
+  /** Page of a shader node: install / update, add to the graph, its code (read-only). */
+  function showNodeDetail(system: CommunitySystem): void {
+    const installed = actions.nodes.installedVersion(system.id);
+    const current = actions.nodes.current();
+    const buttons: HTMLElement[] = [];
+    if (installed === null) buttons.push(button('Install', () => void install(system), true));
+    else if (installed < system.version)
+      buttons.push(button(`Update to v${system.version}`, () => void install(system), true));
+    buttons.push(
+      button('Add to the graph', () => {
+        if (actions.nodes.addToGraph(system)) close();
+      }),
+    );
+    if (installed !== null) buttons.push(button('Uninstall', () => void uninstall(system)));
+    if (system.mine) {
+      buttons.push(button('Edit details', () => void showEdit(system)));
+      if (current.publishable)
+        buttons.push(
+          button('Replace with the selected node…', () => void replaceWithCurrent(system)),
+        );
+      buttons.push(button('Delete', () => void remove(system)));
+    } else {
+      buttons.push(
+        button(
+          system.subscribed ? 'Unsubscribe' : 'Subscribe',
+          () =>
+            void toggleSubscription(system).then((on) => {
+              if (on !== null) void showDetail(system.id);
+            }),
+        ),
+      );
+      buttons.push(button('Report…', () => void report(system)));
+    }
+    const code = packageCode(system.document);
+    const status =
+      installed === null
+        ? null
+        : h('p', {
+            class: `community-link-state ${installed < system.version ? 'modified' : 'published'}`,
+            text:
+              installed < system.version
+                ? `You have v${installed} in your node browser.`
+                : 'Installed: in the Community section of your node browser.',
+          });
+    renderDetail(
+      system,
+      buttons,
+      status,
+      installed,
+      code
+        ? h(
+            'details',
+            { class: 'community-code' },
+            h('summary', { text: `GLSL code · ${code.split('\n').length} lines` }),
+            h('pre', { class: 'community-code-view', text: code }),
+          )
+        : null,
+    );
+  }
+
+  function renderDetail(
+    system: CommunitySystem,
+    buttons: readonly HTMLElement[],
+    status: HTMLElement | null,
+    copied: number | null,
+    extra: HTMLElement | null = null,
+  ): void {
     const thumb = h(
       'div',
       { class: 'community-detail-thumb' },
       system.thumb ? h('img', { src: system.thumb, alt: '' }) : null,
     );
     bindHoverAnimation(thumb, system);
+    const node = system.kind === 'node';
     body.replaceChildren(
       h(
         'div',
@@ -677,11 +953,15 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
             h('h3', { text: system.name }),
             h('p', {
               class: 'community-meta',
-              text: `by ${system.author} · ${system.animated ? 'Animated' : 'Static'} · ${label(system.category)}${publicationVersion(system.version) === null ? '' : ` · v${system.version}`} · updated ${when(system.updated)}`,
+              text: `${node ? 'Shader node · ' : ''}by ${system.author} · ${system.animated ? 'Animated' : 'Static'} · ${label(system.category)}${publicationVersion(system.version) === null ? '' : ` · v${system.version}`} · updated ${when(system.updated)}`,
             }),
             h('p', {
               class: 'community-meta',
-              text: `★ ${system.subscribers} subscriber${system.subscribers === 1 ? '' : 's'} · ${system.uses} cop${system.uses === 1 ? 'y' : 'ies'}${copied !== null ? ` · you have v${copied}` : ''}`,
+              text: `★ ${system.subscribers} subscriber${system.subscribers === 1 ? '' : 's'} · ${system.uses} ${node ? `install${system.uses === 1 ? '' : 's'}` : `cop${system.uses === 1 ? 'y' : 'ies'}`}${copied !== null ? ` · you have v${copied}` : ''}`,
+            }),
+            h('p', {
+              class: 'community-meta community-licence',
+              text: 'Free to reuse in any project.',
             }),
             status,
             system.tags.length
@@ -711,8 +991,48 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
             h('div', { class: 'community-actions' }, ...buttons),
           ),
         ),
+        extra,
       ),
     );
+  }
+
+  /** Installs (or updates) community node `id` / `system` into the node browser. */
+  async function install(target: string | CommunitySystem): Promise<void> {
+    try {
+      const system = typeof target === 'string' ? await community.get(target) : target;
+      if (!actions.nodes.install(system)) return;
+      community.markCopied(system.id, system.version);
+      toast(`"${system.name}" is in the Community section of the node browser`);
+      refresh(system.id);
+    } catch (e) {
+      toast(errorText(e), 'error');
+    }
+  }
+
+  async function uninstall(item: CommunitySummary): Promise<void> {
+    const ok = await confirmDialog({
+      title: `Uninstall "${item.name}"?`,
+      message: 'It leaves the node browser. Nodes already in your systems stay as they are.',
+      confirmLabel: 'Uninstall',
+    });
+    if (!ok) return;
+    actions.nodes.uninstall(item.id);
+    toast(`Uninstalled "${item.name}"`);
+    refresh(item.id);
+  }
+
+  async function addToGraph(id: string): Promise<void> {
+    try {
+      if (actions.nodes.addToGraph(await community.get(id))) close();
+    } catch (e) {
+      toast(errorText(e), 'error');
+    }
+  }
+
+  /** Redraws the list, or the page of `id` when it is open. */
+  function refresh(id: string): void {
+    if (bar.hidden) void showDetail(id);
+    else renderList();
   }
 
   async function copy(id: string): Promise<void> {
@@ -748,8 +1068,10 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
     const ok = await confirmDialog({
       title: `Delete "${item.name}" from the community?`,
       message:
-        'People who copied it keep their copy; subscriptions are removed. Your library system ' +
-        'stays, as a local system.',
+        item.kind === 'node'
+          ? 'People who installed it keep their copy; subscriptions are removed.'
+          : 'People who copied it keep their copy; subscriptions are removed. Your library ' +
+            'system stays, as a local system.',
       irreversible: true,
       confirmLabel: 'Delete',
     });
@@ -766,6 +1088,15 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
 
   /** Makes one of your publications a new version of the open system (and links them). */
   async function replaceWithCurrent(item: CommunitySummary): Promise<void> {
+    if (item.kind === 'node') {
+      const ok = await confirmDialog({
+        title: `Replace "${item.name}"?`,
+        message: `The next version of "${item.name}" will be the selected node ("${actions.nodes.current().name}"): its code, parameters and look.`,
+        confirmLabel: 'Continue',
+      });
+      if (ok) void showUpdate(item.id, item.name, item.version, true);
+      return;
+    }
     const ok = await confirmDialog({
       title: `Replace "${item.name}"?`,
       message: `The next version of "${item.name}" will be the open system ("${actions.current().name}"), which gets linked to it.`,
@@ -795,6 +1126,7 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
     state: { media: PreviewResult | null },
     framing?: PreviewFraming,
     published?: CommunitySystem,
+    render: CommunityActions['preview'] = actions.preview,
   ) {
     const img = h('img', { alt: '' });
     if (published?.thumb) img.src = published.thumb;
@@ -824,7 +1156,7 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
             const current = state.media?.framing ?? framing;
             const media = published
               ? await actions.editPublishedPreview(published, current)
-              : await actions.preview(true, current);
+              : await render(true, current);
             if (media) show(media);
           } catch (e) {
             toast(errorText(e), 'error');
@@ -837,8 +1169,7 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
       'Edit preview…',
     );
     if (!published)
-      void actions
-        .preview(false, framing)
+      void render(false, framing)
         .then((m) => {
           if (m && !state.media) show(m);
         })
@@ -846,7 +1177,7 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
     return h('div', { class: 'community-preview-picker' }, box, edit);
   }
 
-  function tagEditor(initial: readonly string[]) {
+  function tagEditor(initial: readonly string[], type: PublicationKind) {
     const limit = 8;
     let selected = [...initial];
     let request = 0;
@@ -910,7 +1241,7 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
       timer = setTimeout(() => {
         if (!input.isConnected) return;
         void community
-          .suggestTags(query, exclude)
+          .suggestTags(query, exclude, type)
           .then((matches) => {
             if (token !== request || !input.isConnected) return;
             suggestions.replaceChildren(
@@ -922,7 +1253,7 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
                     {
                       type: 'button',
                       class: 'community-tag',
-                      title: `Used by ${count} published systems`,
+                      title: `Used by ${count} publications`,
                       onclick: () => add(tag),
                     },
                     tag,
@@ -968,6 +1299,7 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
     submit: (fields: PublishFields) => Promise<void>,
     back: () => void,
     display?: HTMLElement,
+    hint: HTMLElement | null = null,
   ): void {
     bar.hidden = true;
     const name = h('input', { type: 'text', class: 'dialog-text', maxLength: 64, required: true });
@@ -978,11 +1310,13 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
       ...categories.map((c) => h('option', { value: c.id, text: c.label })),
     );
     category.value = initial.category || categories[categories.length - 1]?.id || 'other';
-    const tags = tagEditor(initial.tags);
+    const tags = tagEditor(initial.tags, query.type);
     const description = h('textarea', {
       class: 'dialog-text community-textarea',
       maxLength: 2000,
-      placeholder: 'What it is, how to use it',
+      placeholder: nodes()
+        ? 'What it does, its inputs and parameters'
+        : 'What it is, how to use it',
     });
     description.value = initial.description;
     const submitBtn = h('button', { type: 'submit', class: 'btn btn-primary', text: submitLabel });
@@ -1020,6 +1354,11 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
           display,
           tags.element,
           field('Description', description),
+          hint,
+          h('p', {
+            class: 'community-meta community-licence',
+            text: 'Everything published to the community can be reused freely by anyone, in any project.',
+          }),
         ),
       ),
       h(
@@ -1058,16 +1397,98 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
       },
       () => void load(),
       display.element,
+      unpublishedNodesHint(),
     );
   }
 
   /**
-   * Small window publishing the open system as the next version of `id` (default: the
-   * community system it is linked to), with its preview (last framing, editable).
+   * Publishing a system never publishes the shader nodes inside it: when some of your
+   * published nodes have unpublished changes, say so, with a shortcut to each node's update.
    */
-  async function showUpdate(id?: string, name?: string, version?: number): Promise<void> {
+  function unpublishedNodesHint(): HTMLElement | null {
+    const list = actions.nodes.unpublished();
+    if (!list.length) return null;
+    return h(
+      'div',
+      { class: 'community-node-hint' },
+      h('p', {
+        text:
+          list.length === 1
+            ? 'This system contains one of your shader nodes with unpublished changes. The ' +
+              'system keeps them, but people who installed the node only get them from a node update:'
+            : `This system contains ${list.length} of your shader nodes with unpublished ` +
+              'changes. The system keeps them, but people who installed those nodes only get ' +
+              'them from node updates:',
+      }),
+      h(
+        'div',
+        { class: 'community-actions' },
+        ...list.map(({ nodeId, link }) =>
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'btn btn-small',
+              title: 'Select this node and publish its update',
+              onclick: () => {
+                actions.nodes.select(nodeId);
+                void showUpdate(link.id, link.name, link.version ?? undefined, true);
+              },
+            },
+            icon('download', 12),
+            `Update "${link.name}"…`,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /** Form publishing the selected custom shader node as a new community node. */
+  async function showPublishNode(): Promise<void> {
     if (!requireAccount('publish')) return;
-    const current = actions.current();
+    const current = actions.nodes.current();
+    if (current.link) {
+      void showUpdate(current.link.id, current.link.name, current.link.version ?? undefined, true);
+      return;
+    }
+    if (!current.publishable) {
+      toast('Select a custom shader node (edited code or its own parameters) to publish it');
+      return;
+    }
+    if (!(await ensureCategories())) return;
+    const state: { media: PreviewResult | null } = { media: null };
+    const display = animationChoice(current.animated);
+    form(
+      `Publish the node "${current.name}"`,
+      { name: current.name, category: '', tags: [], description: '' },
+      previewPicker(state, undefined, undefined, actions.nodes.preview),
+      'Publish',
+      async (fields) => {
+        if (!state.media) throw new Error('The preview is still rendering');
+        const id = await actions.nodes.publish(fields, state.media, display.animated());
+        toast(`Published "${fields.name}"`);
+        query.scope = 'mine';
+        renderTabs();
+        void showDetail(id);
+      },
+      () => void load(),
+      display.element,
+    );
+  }
+
+  /**
+   * Small window publishing the open system (or, with `node`, the selected node) as the next
+   * version of `id` (default: the community system it is linked to), with its preview (last
+   * framing, editable).
+   */
+  async function showUpdate(
+    id?: string,
+    name?: string,
+    version?: number,
+    node = false,
+  ): Promise<void> {
+    if (!requireAccount('publish')) return;
+    const current = node ? { ...actions.nodes.current(), link: null } : actions.current();
     const target = id ?? current.link?.id;
     if (!target) return;
     const state: { media: PreviewResult | null } = { media: null };
@@ -1087,11 +1508,19 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
       h(
         'div',
         { class: 'community-update-body' },
-        previewPicker(state, id ? undefined : current.link?.framing),
+        previewPicker(
+          state,
+          id ? undefined : (current.link?.framing ?? undefined),
+          undefined,
+          node ? actions.nodes.preview : actions.preview,
+        ),
         h(
           'div',
           { class: 'community-update-info' },
-          h('span', { class: 'community-update-label', text: 'Community system' }),
+          h('span', {
+            class: 'community-update-label',
+            text: node ? 'Community shader node' : 'Community system',
+          }),
           h('h3', { class: 'community-update-name', text: name ?? current.name }),
           h(
             'div',
@@ -1106,9 +1535,13 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
           ),
           h('p', {
             class: 'community-meta',
-            text: 'Replaces the published version. Subscribers will see the update.',
+            text: node
+              ? 'Replaces the published version. Systems already using it keep their copy; ' +
+                'people who installed it are offered the update.'
+              : 'Replaces the published version. Subscribers will see the update.',
           }),
           display.element,
+          node ? null : unpublishedNodesHint(),
         ),
       ),
       h(
@@ -1124,8 +1557,11 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
         return;
       }
       publish.disabled = true;
-      void actions
-        .publishUpdate(state.media, target, display.animated())
+      void (node ? actions.nodes.publishUpdate : actions.publishUpdate)(
+        state.media,
+        target,
+        display.animated(),
+      )
         .then((n) => {
           popup.close();
           toast(n === null ? 'Update published' : `Published version ${n}`);
@@ -1144,7 +1580,12 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
           if (deleted) {
             actions.forget(target);
             popup.close();
-            toast('This system is not online any more: it is local again', 'error');
+            toast(
+              node
+                ? 'This node is not online any more'
+                : 'This system is not online any more: it is local again',
+              'error',
+            );
             renderPublishButton();
             return;
           }
@@ -1216,6 +1657,7 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
       'div',
       { class: 'library-head' },
       h('h2', { text: 'Community' }),
+      typeTabs.element,
       publishArea,
       h('div', { class: 'search-box' }, icon('search', 14), search),
       h(
@@ -1233,11 +1675,15 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
     bar,
     body,
   );
-  dialog.addEventListener('close', () => dialog.remove());
+  dialog.addEventListener('close', () => {
+    dialog.remove();
+    actions.closed?.();
+  });
   dialog.addEventListener('click', (e) => {
     if (e.target === dialog) close();
   });
   document.body.append(dialog);
+  updatePlaceholder();
   renderTabs();
   renderPublishButton();
   dialog.showModal();
@@ -1251,7 +1697,7 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
           {
             type: 'button',
             class: 'btn btn-small community-moderation',
-            title: 'Reported and hidden systems',
+            title: 'Reported and hidden publications',
             onclick: () => void showModeration(),
           },
           icon('details', 12),
@@ -1262,6 +1708,7 @@ export function openCommunity(actions: CommunityActions, opts: CommunityOpenOpti
   void ensureCategories();
   if (opts.edit) void showEditById(opts.edit);
   else if (opts.view) void showDetail(opts.view);
+  else if (opts.publishNode) void showPublishNode();
   else if (opts.publish) void showPublish();
   else void load();
 }
